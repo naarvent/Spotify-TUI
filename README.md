@@ -4,6 +4,10 @@
 
 ---
 
+## Important: If the app gets stuck on startup, delete the OAuth cache file Documents/naarvent's projects/Spotify_TUI/.cache_spotify_token to force re-authentication.
+
+---
+
 A terminal-based Spotify client built with Python, Spotipy and Textual. It provides a keyboard-driven TUI for searching, browsing and controlling Spotify playback, viewing synced lyrics, managing playlists and devices, and more.
 
 ---
