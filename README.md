@@ -10,15 +10,16 @@ A terminal-based Spotify client built with Python, Spotipy and Textual. It provi
 
 ## Table of Contents 📚
 
-* [Summary 📝](#summary-)
-* [Features ✨](#features-)
-* [Requirements & Installation 🛠️](#requirements--installation-️)
-* [Environment & Credentials 🔐](#environment--credentials-)
-* [How it works (high level) ⚙️](#how-it-works-high-level-️)
-* [APIs & External Services 🌐](#apis--external-services-)
-* [Keybindings / Controls ⌨️](#keybindings--controls-️)
-* [Configuration & Cache 📂](#configuration--cache-)
-* [Troubleshooting & Notes 📝](#troubleshooting--notes-)
+- [Summary 📝](#summary-)
+- [Features ✨](#features-)
+- [Requirements & Installation 🛠️](#requirements--installation-️)
+- [Environment & Credentials 🔐](#environment--credentials-)
+- [How it works (high level) ⚙️](#how-it-works-high-level-️)
+- [APIs & External Services 🌐](#apis--external-services-)
+- [Keybindings / Controls ⌨️](#keybindings--controls-️)
+- [Configuration & Cache 📂](#configuration--cache-)
+- [Troubleshooting & Notes 📝](#troubleshooting--notes-)
+- [License 📄](#license-)
 
 ---
 
@@ -26,9 +27,9 @@ A terminal-based Spotify client built with Python, Spotipy and Textual. It provi
 
 `spt` is a full-featured TUI for Spotify built using:
 
-* **Textual** for the terminal UI
-* **Spotipy** for the Spotify Web API
-* **Requests** for lyrics and metadata providers
+- **Textual** for the terminal UI
+- **Spotipy** for the Spotify Web API
+- **Requests** for lyrics and metadata providers
 
 It supports search, playback, playlists, devices, lyrics, multi-selection workflows, and rich UI panels.
 
@@ -36,15 +37,15 @@ It supports search, playback, playlists, devices, lyrics, multi-selection workfl
 
 ## Features ✨
 
-* Full Spotify search (tracks, albums, artists, playlists)
-* Playback control: play / pause / next / previous / seek / shuffle / repeat
-* Synced LRC lyrics when available; plain lyric fallback
-* Multi-review / multi-add batch playlist operations
-* Playlist creation, import, and modification
-* Device selection and playback transfer
-* Real-time playback sync with progress bar
-* Persistent cache + config + OAuth token storage
-* Expandable / collapsible Library & Playlists panels via keyboard
+- Full Spotify search (tracks, albums, artists, playlists)
+- Playback control: play / pause / next / previous / seek / shuffle / repeat
+- Synced LRC lyrics when available; plain lyric fallback
+- Multi-review / multi-add batch playlist operations
+- Playlist creation, import, and modification
+- Device selection and playback transfer
+- Real-time playback sync with progress bar
+- Persistent cache + config + OAuth token storage
+- Expandable / collapsible Library & Playlists panels via keyboard
 
 ---
 
@@ -54,112 +55,145 @@ It supports search, playback, playlists, devices, lyrics, multi-selection workfl
 
 Install dependencies:
 
-```
+```bash
 pip install spotipy textual requests rich pyfiglet
 ```
 
 Run the app:
 
-```
-python spt.py
+```bash
+python spt_tui.py
 ```
 
 ---
 
 ## Environment & Credentials 🔐
 
-`spt` requires Spotify credentials:
+`spt` requires Spotify credentials (or it will prompt you to provide them on first run):
 
-* `SPOTIPY_CLIENT_ID`
-* `SPOTIPY_CLIENT_SECRET`
-* `SPOTIPY_REDIRECT_URI`
+- `SPOTIPY_CLIENT_ID`
+- `SPOTIPY_CLIENT_SECRET`
+- `SPOTIPY_REDIRECT_URI`
 
-If not provided, the app will ask for credentials on first launch and can save them locally.
+If not provided via environment variables, the app will prompt for them and can save them locally in `spt_config.json`.
 
-Scopes include playback, playlists, library, and user data.
+Scopes include playback, playlists, library, and user data as defined in the script.
 
 ---
 
 ## How it works (high level) ⚙️
 
-* Textual builds a two-column TUI: Search/Library/Playlists (left) and Details/Results/Lyrics (right).
-* Spotipy handles authentication, tokens, and playback/playlist operations.
-* Lyrics are fetched using LRCLib and lyrics.ovh, parsed into synced or pseudo-synced lines.
-* A periodic task syncs playback state and updates the UI.
-* Keyboard shortcuts drive all navigation and actions.
+- Textual builds a two-column TUI: Search/Library/Playlists (left) and Details/Results/Lyrics (right).
+- Spotipy handles authentication, tokens, and playback/playlist operations.
+- Lyrics are fetched using LRCLib and lyrics.ovh, parsed into synced or pseudo-synced lines.
+- A periodic task syncs playback state and updates the UI.
+- Keyboard shortcuts drive all navigation and actions.
 
 ---
 
 ## APIs & External Services 🌐
 
-* **Spotify Web API** — playback, search, library, playlists, devices
-* **LRCLib** — synced LRC lyrics
-* **lyrics.ovh** — plain lyric fallback
+- **Spotify Web API** — playback, search, library, playlists, devices
+- **LRCLib** — synced LRC lyrics
+- **lyrics.ovh** — plain lyric fallback
 
 ---
 
 ## Keybindings / Controls ⌨️
 
+Below are the keybindings as defined in the application (`spt_tui.py`). Use these keys to navigate and control the TUI.
+
+### General / Navigation
+
+- `escape` — Menu
+- `ctrl+q` — Quit
+- `up` — Up
+- `down` — Down
+- `/` — Search (focus search input)
+
+- `left` — Move focus to the left column (sections, library, playlists). When a playlist/album/lyrics view is open in the right panel, pressing `Left` returns focus to the left column and effectively closes or exits the detailed right view so you can navigate other items.
+- `right` — Move focus to the right panel (details, track list, lyrics). From the left column select an item and press `Right` (or `Enter`) to open it in the right panel; the right key focuses that panel for interaction.
+
+### Main / Navigation
+
+- `Esc` — Return to main menu
+- `Ctrl+Q` — Quit
+- `↑ / ↓` — Move between sections and list items
+- `/` — Focus search input
+- `Enter` — Open / Play selected item
+
+### Open / Play / Playback
+
+- `enter` — Open/Play
+- `space` — Play/Pause
+- `n` — Next
+- `p` — Prev/Restart
+- `r` — Repeat (cycle: off → context → track)
+- `Ctrl+S` — Toggle shuffle
+- `c` — Queue (add track to queue)
+
 ### Playback Controls
 
-* **Enter** — Open / Play selected item (in Multi-Review toggles selection)
-* **Space** — Play / Pause
-* **n** — Next track
-* **p** — Previous / Restart (>3s rule)
-* **r** — Toggle repeat (off → context → track)
-* **c** — Add selected track to queue
-* **Ctrl+S** — Toggle shuffle
-* **- / +** — Volume down / up (±5%)
-* **m** — Mute / Unmute
-* **Ctrl+← / Ctrl+→** — Seek (configurable seconds)
+- `Space` — Play / Pause
+- `n` — Next track
+- `p` — Previous / Restart
+- `r` — Cycle repeat (off → context → track)
+- `c` — Add selected track to Queue
+- `Ctrl+S` — Toggle shuffle
+- `- / +` — Volume down / up (uses configured seconds using "<")
+- `Ctrl+Left / Ctrl+Right` — Seek back / Seek forward (uses configured seconds using "<")
+- `m` — Mute / Unmute
 
-### Library & Playlist Management
+### Shuffle / Volume / Seek / Mute
 
-* **f** — Like / Unlike track
-* **Ctrl+A** — Add to playlist / Select all (multi-review)
-* **Ctrl+C** — Confirm multi-review add
-* **Ctrl+T** — Import playlist (paste URI)
-* **Ctrl+D** — Delete playlist or remove item
-* **Ctrl+R** — Refresh
-* **Ctrl+Q** — Quit
+- `ctrl+s` — Toggle shuffle
+- `-` — Volume down (Vol -)
+- `+` — Volume up (Vol +)
+- `m` — Mute
+- `ctrl+left` — Seek back (uses configured seconds using "<")
+- `ctrl+right` — Seek forward (uses configured seconds using "<")
+- `<` — Prompt seek settings
 
-### Multi-Add / Multi-Review
+### Devices & Settings
 
-* **Ctrl+L** — Toggle multi-add/review
-* **Enter** — Select item and move down
-* **Ctrl+Enter** — Choose playlist for add
+- `d` — Open device manager (transfer playback)
+- `<` — Open seek/volume settings
 
-### Navigation
+### Devices, Help & Views
 
-* **↑ / ↓** — Navigate
-* **←** — Return focus to left column
-* **→** — Open item / focus first right widget
-* **/** — Focus search bar
-* **?** — Help
+- `d` — Manage devices
+- `?` — Help
+- `f1` — Help
+- `l` — Toggle lyrics
+- `ctrl+r` — Refresh
+- `ctrl+c` — Open Queue
 
-### Expand / Collapse Panels
+### Library & Playlist / Queue Management
 
-* **Ctrl+Shift+→** — Expand Library / Playlists
-* **Ctrl+Shift+←** — Collapse Library / Playlists
+- `f` — Toggle Favorite (Like / Unlike selected track)
+- `Ctrl+Shift+P` — Add selected track(s) to a playlist
+- `Ctrl+D` — Delete (playlist or remove item)
+- `Ctrl+R` — Refresh / reload content
+- `Ctrl+C` — Open Queue view
 
-### Search Prefixes
+### Multi-Add / Selection Mode
 
-* `/ART query` — artists
-* `/ALB query` — albums
-* `/TRK query` — tracks
-* `/PLY query` — playlists
+- `Ctrl+L` — Toggle Multi-Add mode
+- In Multi-Add: use movement keys and `Enter` to toggle selection
+- `Ctrl+A` — Confirm selection (when prompted / in multi-add flows)
+- `Ctrl+O` — Add all / confirm add-all action
 
-### Lyrics & Devices
+### Additional / Help / Misc
 
-* **l** — Toggle lyrics
-* **d** — Device manager
-* **<** — Seek settings
+- `?` or `F1` — Toggle Help view
+- `Left / Right` arrows — Move focus between left column and right panel
+- Log file: `Documents/naarvent's projects/Spotify_TUI/spt_py_textual_spotify.log`
 
 ---
 
 ## Configuration & Cache 📂
 
-Default location:
+Default location for cache, config and logs (created under the user's Documents folder):
 
 ```
 Documents/naarvent's projects/Spotify_TUI/
@@ -167,21 +201,48 @@ Documents/naarvent's projects/Spotify_TUI/
 
 Files:
 
-* `spt_config.json` — saved credentials
-* `.cache_spotify_token` — OAuth token
-* `spt_py_textual_spotify.log` — log file
+- `spt_config.json` — saved credentials
+- `.cache_spotify_token` — OAuth token cache
+- `spt_py_textual_spotify.log` — log file (rotating)
+
+---
+
+## Search — prefixes & smart parsing 🔎
+
+The app supports quick filters by starting the query with a prefix (case-insensitive). These are parsed by the search routine:
+
+- `/ART <query>` — search artists
+- `/ALB <query>` — search albums
+- `/TRK <query>` — search tracks
+- `/PLY <query>` — search playlists
+
+You can also write natural queries (e.g., `/ALB BALLADS1`)—the app applies smart parsing and multiple candidate queries to maximize relevant results.
+
+---
+
+## Lyrics — sources & behavior 🎵
+
+`spt` attempts to provide synced and plain lyrics using multiple external services and local caching:
+
+- LRCLib (`https://lrclib.net`) — primary source for synced LRC lyrics (fetches `.lrc` when available).
+- lyrics.ovh (`https://api.lyrics.ovh`) — fallback for plain lyrics when synced versions are not found.
+- Local lyrics cache stored under the same cache directory to avoid repeated network lookups.
+
+If synced LRC lyrics are found, the app parses timestamps into a timeline and highlights the current line in sync with playback. If only plain lyrics are available, the app will generate a pseudo-timed timeline to display lines progressively.
+
+If lyrics aren't showing, try `Ctrl+R` to refresh data or ensure the network and external services are reachable.
 
 ---
 
 ## Troubleshooting & Notes 📝
 
-* Use **Ctrl+R** to reload playlists or fix stale content.
-* Lyrics fall back gracefully if synced versions aren't found.
-* Device switching requires an active Spotify client.
-* Logs stored in `spt_py_textual_spotify.log` for debugging.
+- If playlists don't load: press `Ctrl+R` (Refresh).
+- Lyrics fall back to plain text if synced LRC is not available.
+- Device switching requires an active Spotify client/device.
+- Check `spt_py_textual_spotify.log` for detailed debug output.
 
 ---
 
 ## License 📄
 
-This project is licensed under the **MIT License**. You are free to use, modify, distribute, and contribute.
+This project is licensed under the MIT License — see the `LICENSE` file for details.
