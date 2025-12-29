@@ -4,6 +4,11 @@
 
 ---
 
+### [Demo in YouTube!](https://youtu.be/MJm7DcUdPUs)
+[![Watch the video](https://img.youtube.com/vi/MJm7DcUdPUs/maxresdefault.jpg)](https://youtu.be/MJm7DcUdPUs)
+
+---
+
 ## Important: If the app gets stuck on startup, delete the OAuth cache file Documents/naarvent's projects/Spotify_TUI/.cache_spotify_token to force re-authentication.
 
 ---
