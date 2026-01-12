@@ -224,8 +224,11 @@ The app supports quick filters by starting the query with a prefix (case-insensi
 - `/ALB <query>` — search albums
 - `/TRK <query>` — search tracks
 - `/PLY <query>` — search playlists
+- `/PDC <query>` — search podcasts
+- `/EPS <query>` — search episodes from podcasts
 
-You can also write natural queries (e.g., `/ALB BALLADS1`)—the app applies smart parsing and multiple candidate queries to maximize relevant results.
+
+You can also write natural queries (e.g., `FEEL.`)—the app applies smart parsing and multiple candidate queries to maximize relevant results.
 
 ---
 
