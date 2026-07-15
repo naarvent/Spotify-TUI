@@ -435,36 +435,59 @@ class PlaybackMixin:
     def _sync_playback(self) -> None:
         # Runs off a 1.5s timer (main thread); do the network fetch on a worker
         # so the event loop never blocks, then apply UI updates on the main thread.
+        #
+        # P4: a non-blocking guard keeps at most one sync worker in flight, so a
+        # slow (>1.5s) fetch cannot pile up workers. A sequence number lets a
+        # worker drop its result if a newer sync has meanwhile taken over, so an
+        # old, slow worker can never overwrite a newer one's published state.
+        lock = getattr(self, "_sync_worker_lock", None)
+        if lock is None:
+            self._sync_worker_lock = threading.Lock(); lock = self._sync_worker_lock
+        if not lock.acquire(blocking=False):
+            return  # a sync worker is already running; skip this tick
+
+        self._sync_seq = int(getattr(self, "_sync_seq", 0)) + 1
+        my_seq = self._sync_seq
+
         def worker():
             try:
-                item, pos_ms, dur_ms, is_playing = self._get_current_or_last_track()
-            except Exception:
-                logger.exception("_sync_playback failed")
-                return
-            new_id = (item or {}).get('id') if item else None
-            track_changed = new_id != getattr(self, "_now_internal_track_id", None)
-            self._now_internal_track_id = new_id
-            self._now_internal_pos_ms = int(pos_ms or 0)
-            self._now_internal_dur_ms = int(dur_ms or 0)
-            self._now_internal_is_playing = bool(is_playing)
-            self._now_internal_last_wall_ms = _mono() * 1000.0
-            if item:
-                self._bar_last_track = item
+                try:
+                    item, pos_ms, dur_ms, is_playing = self._get_current_or_last_track()
+                except Exception:
+                    logger.exception("_sync_playback failed")
+                    return
+                # Drop stale results: a newer sync has superseded this one.
+                if my_seq != getattr(self, "_sync_seq", my_seq):
+                    return
+                new_id = (item or {}).get('id') if item else None
+                track_changed = new_id != getattr(self, "_now_internal_track_id", None)
+                self._now_internal_track_id = new_id
+                self._now_internal_pos_ms = int(pos_ms or 0)
+                self._now_internal_dur_ms = int(dur_ms or 0)
+                self._now_internal_is_playing = bool(is_playing)
+                self._now_internal_last_wall_ms = _mono() * 1000.0
+                if item:
+                    self._bar_last_track = item
 
-            def apply():
-                if track_changed:
+                def apply():
+                    # Re-check under the same sequence before touching widgets.
+                    if my_seq != getattr(self, "_sync_seq", my_seq):
+                        return
+                    if track_changed:
+                        try:
+                            self._refresh_playing_highlight()
+                        except Exception:
+                            pass
                     try:
-                        self._refresh_playing_highlight()
+                        self._update_now_bar()
                     except Exception:
                         pass
                 try:
-                    self._update_now_bar()
+                    self.call_from_thread(apply)
                 except Exception:
                     pass
-            try:
-                self.call_from_thread(apply)
-            except Exception:
-                pass
+            finally:
+                lock.release()
         threading.Thread(target=worker, daemon=True).start()
 
     def _ellipsis_middle(self, text: str, max_len: int) -> str:
