@@ -738,14 +738,46 @@ class PlaybackMixin:
                     item_id = getattr(table, 'row_to_id', {}).get(row) or (obj.get('id') if isinstance(obj, dict) else None)
                     uri = getattr(table, 'row_to_uri', {}).get(row) or (obj.get('uri') if isinstance(obj, dict) else None)
 
-            if not item_id and not uri:
+            # Resolved straight from the focused row: dispatch (mutation already
+            # runs on its own worker).
+            if item_id or uri:
+                self._toggle_favorite_dispatch(rtype, item_id, uri, table, row)
+                return
+
+            # P5: nothing focused -> resolve the currently-playing item. Prefer
+            # the cached now-playing state (kept fresh by _sync_playback) so the
+            # UI thread never blocks; only if that is empty fall back to a
+            # get_playback() lookup, and run it on a worker so this keypress
+            # returns immediately.
+            cached = getattr(self, '_bar_last_track', None) or {}
+            c_id, c_uri = cached.get('id'), cached.get('uri')
+            if c_id or c_uri:
+                self._toggle_favorite_dispatch(cached.get('type'), c_id, c_uri, None, None)
+                return
+
+            def _resolve_worker():
                 try:
                     item = (self.spotify.get_playback() or {}).get('item') or {}
-                    rtype = rtype or item.get('type')
-                    item_id = item.get('id') or item_id
-                    uri = item.get('uri') or uri
                 except Exception:
-                    pass
+                    logger.exception('toggle favorite: get_playback failed')
+                    item = {}
+                r_type, r_id, r_uri = item.get('type'), item.get('id'), item.get('uri')
+                if not r_id and not r_uri:
+                    try:
+                        self.call_from_thread(lambda: self.right_panel.update('[b]No item selected or playing[/b]'))
+                    except Exception:
+                        pass
+                    return
+                try:
+                    self.call_from_thread(lambda: self._toggle_favorite_dispatch(r_type, r_id, r_uri, None, None))
+                except Exception:
+                    self._toggle_favorite_dispatch(r_type, r_id, r_uri, None, None)
+            threading.Thread(target=_resolve_worker, daemon=True).start()
+        except Exception:
+            logger.exception("action_toggle_favorite failed")
+
+    def _toggle_favorite_dispatch(self, rtype, item_id, uri, table, row):
+        try:
             if not item_id and uri:
                 try: item_id = self.spotify._normalize_track_id(uri)
                 except Exception: pass
@@ -799,4 +831,4 @@ class PlaybackMixin:
 
             self._revalidate_saved_if_search(table)
         except Exception:
-            logger.exception("action_toggle_favorite failed")
+            logger.exception("_toggle_favorite_dispatch failed")
