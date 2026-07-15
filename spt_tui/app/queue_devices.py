@@ -18,6 +18,8 @@ try:
 except Exception:
     pyfiglet = None
 
+from textual.css.query import NoMatches
+
 from ..config import logger
 from ..constants import GLYPHS
 from ..widgets import ResizableDataTable
@@ -304,7 +306,24 @@ class QueueDevicesMixin:
             table.add_row(active, d.get("name", "(no name)"), d.get("type", ""), key=i)
             table.row_to_device[i] = d.get("id")
 
+    def _stop_devices_interval(self):
+        """Pause and drop the devices refresh interval (idempotent). Single exit
+        point so every route that leaves the devices view stops the polling."""
+        it = getattr(self, "_devices_interval", None)
+        if it is not None:
+            it.pause()
+            self._devices_interval = None
+
     def _refresh_devices_table(self):
+        # Runs on the event-loop thread (set_interval callback). If the devices
+        # view is no longer mounted, stop the interval here so no further
+        # devices() network call is issued (P3: the interval used to keep firing
+        # after the view was left via _back_one_level).
+        try:
+            self.query_one("#devices_table", DataTable)
+        except NoMatches:
+            self._stop_devices_interval()
+            return
         # devices() is a network call; fetch off-thread then paint on the main one.
         def worker():
             try:
@@ -315,13 +334,13 @@ class QueueDevicesMixin:
             def paint():
                 try:
                     table = self.query_one("#devices_table", DataTable)
-                except Exception:
+                except NoMatches:
                     return
                 self._populate_devices_table(table, devs)
             try:
                 self.call_from_thread(paint)
             except Exception:
-                pass
+                logger.exception("devices paint scheduling failed")
         threading.Thread(target=worker, daemon=True).start()
 
     def _refresh_queue_table(self):

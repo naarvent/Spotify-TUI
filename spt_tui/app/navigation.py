@@ -1071,6 +1071,9 @@ class NavigationMixin:
             self.pl_list.focus()
 
     def _back_one_level(self):
+        # Leaving any view via "back" must stop the devices poller if it was
+        # running (e.g. the post-transfer exit path). Idempotent no-op otherwise.
+        self._stop_devices_interval()
 
         try:
             if getattr(self, "_view_stack", None):
