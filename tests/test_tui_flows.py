@@ -143,8 +143,8 @@ class FakeSpotify:
         if self.cst_gate is not None: self.cst_gate.wait(10)
         if self.cst_raise: raise RuntimeError("saved lookup boom")
         return [self.inner.contains] * len(ids)
-    def save_tracks(self, ids): self.mut = ("save_tracks", tuple(ids)); self.mut_evt.set()
-    def remove_tracks(self, ids): self.mut = ("remove_tracks", tuple(ids)); self.mut_evt.set()
+    def save_tracks(self, ids): self.mut = ("save_tracks", tuple(ids)); self.mut_evt.set(); return True
+    def remove_tracks(self, ids): self.mut = ("remove_tracks", tuple(ids)); self.mut_evt.set(); return True
 
 
 class TApp(SptPy):

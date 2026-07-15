@@ -352,19 +352,25 @@ class SpotifyClient:
                         out.append(False)
         return out
 
-    def save_tracks(self, ids: List[str]):
+    def save_tracks(self, ids: List[str]) -> bool:
+        """Return True only if the save actually went through (callers rely on
+        this to avoid showing a confirmed state on failure)."""
         try:
             for chunk in range(0, len(ids), 50):
                 self.ensure().current_user_saved_tracks_add(ids[chunk:chunk+50])
+            return True
         except Exception:
             logger.exception("Error save_tracks")
+            return False
 
-    def remove_tracks(self, ids: List[str]):
+    def remove_tracks(self, ids: List[str]) -> bool:
         try:
             for chunk in range(0, len(ids), 50):
                 self.ensure().current_user_saved_tracks_delete(ids[chunk:chunk+50])
+            return True
         except Exception:
             logger.exception("Error remove_tracks")
+            return False
 
     def devices(self):
         return self.ensure().devices().get("devices", [])

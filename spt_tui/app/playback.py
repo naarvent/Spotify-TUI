@@ -621,6 +621,21 @@ class PlaybackMixin:
                 logger.debug("method %s failed", nm)
         return None
 
+    @staticmethod
+    def _call_first_ok(sp, names, *args):
+        """Like _call_first but returns True only if a matching method existed
+        and ran without raising. Used by favourite toggles so a failed mutation
+        is not reported as success (P6)."""
+        for nm in names:
+            if hasattr(sp, nm):
+                try:
+                    getattr(sp, nm)(*args)
+                    return True
+                except Exception:
+                    logger.exception("method %s failed", nm)
+                    return False
+        return False
+
     def _revalidate_saved_if_search(self, table):
         """After a favourite toggle in search results, re-check its saved column."""
         if table is None or getattr(table, 'id', '') != 'search_table':
@@ -641,9 +656,17 @@ class PlaybackMixin:
                 except Exception:
                     was_liked = False
                 if was_liked:
-                    self.spotify.remove_tracks([tid]); new_liked = False
+                    ok = self.spotify.remove_tracks([tid]); new_liked = False
                 else:
-                    self.spotify.save_tracks([tid]); new_liked = True
+                    ok = self.spotify.save_tracks([tid]); new_liked = True
+
+                if not ok:
+                    # P6: mutation failed -> never show a confirmed state.
+                    try:
+                        self.call_from_thread(lambda: self.right_panel.update('[b]Could not update Liked Songs[/b]'))
+                    except Exception:
+                        pass
+                    return
 
                 def paint():
                     try:
@@ -660,11 +683,14 @@ class PlaybackMixin:
                         logger.exception('paint after toggle favorite failed')
                 try: self.call_from_thread(paint)
                 except Exception: paint()
+
+                # P6: revalidate the search saved-column only after success.
+                self._revalidate_saved_if_search(table)
             except Exception:
                 logger.exception('toggle track favorite failed')
         threading.Thread(target=worker, daemon=True).start()
 
-    def _toggle_saved_item(self, sp, item_id, *, contains_name, add_names, del_names, label, view_key, refresh_fn):
+    def _toggle_saved_item(self, sp, item_id, *, contains_name, add_names, del_names, label, view_key, refresh_fn, table=None):
         """Add/remove an album, show or episode from the library (shared shape)."""
         def worker():
             try:
@@ -674,9 +700,16 @@ class PlaybackMixin:
                 except Exception:
                     was = False
                 if was:
-                    self._call_first(sp, del_names, [item_id]); new = False
+                    ok = self._call_first_ok(sp, del_names, [item_id]); new = False
                 else:
-                    self._call_first(sp, add_names, [item_id]); new = True
+                    ok = self._call_first_ok(sp, add_names, [item_id]); new = True
+                if not ok:
+                    # P6: mutation failed -> never show a confirmed state.
+                    try:
+                        self.call_from_thread(lambda: self.right_panel.update(f"[b]Could not update {label}[/b]"))
+                    except Exception:
+                        pass
+                    return
                 try:
                     self.call_from_thread(lambda: self.right_panel.update(f"[b]{'Saved' if new else 'Removed from'} {label}[/b]"))
                 except Exception:
@@ -687,11 +720,13 @@ class PlaybackMixin:
                         threading.Thread(target=refresh_fn, daemon=True).start()
                 except Exception:
                     pass
+                # P6: revalidate the search saved-column only after success.
+                self._revalidate_saved_if_search(table)
             except Exception:
                 logger.exception('%s save/remove failed', label)
         threading.Thread(target=worker, daemon=True).start()
 
-    def _toggle_artist_favorite(self, sp, aid):
+    def _toggle_artist_favorite(self, sp, aid, table=None):
         def worker():
             try:
                 following = False
@@ -703,9 +738,16 @@ class PlaybackMixin:
                 except Exception:
                     following = False
                 if following:
-                    self._call_first(sp, ['current_user_unfollow_artists', 'user_unfollow_artists', 'unfollow_artists'], [aid]); new = False
+                    ok = self._call_first_ok(sp, ['current_user_unfollow_artists', 'user_unfollow_artists', 'unfollow_artists'], [aid]); new = False
                 else:
-                    self._call_first(sp, ['current_user_follow_artists', 'user_follow_artists', 'follow_artists'], [aid]); new = True
+                    ok = self._call_first_ok(sp, ['current_user_follow_artists', 'user_follow_artists', 'follow_artists'], [aid]); new = True
+                if not ok:
+                    # P6: mutation failed -> never show a confirmed state.
+                    try:
+                        self.call_from_thread(lambda: self.right_panel.update('[b]Could not update Artist follow[/b]'))
+                    except Exception:
+                        pass
+                    return
                 try:
                     self.call_from_thread(lambda: self.right_panel.update(f"[b]{'Followed' if new else 'Unfollowed'} Artist[/b]"))
                 except Exception:
@@ -716,6 +758,8 @@ class PlaybackMixin:
                         threading.Thread(target=self._open_saved_artists, daemon=True).start()
                 except Exception:
                     pass
+                # P6: revalidate the search saved-column only after success.
+                self._revalidate_saved_if_search(table)
             except Exception:
                 logger.exception('artist follow/unfollow failed')
         threading.Thread(target=worker, daemon=True).start()
@@ -803,11 +847,11 @@ class PlaybackMixin:
                     contains_name='current_user_saved_albums_contains',
                     add_names=['current_user_saved_albums_add', 'current_user_saved_albums_save'],
                     del_names=['current_user_saved_albums_delete', 'current_user_saved_albums_remove'],
-                    label='Saved Albums', view_key='albums', refresh_fn=self._open_saved_albums)
+                    label='Saved Albums', view_key='albums', refresh_fn=self._open_saved_albums, table=table)
             elif typ == 'artist':
                 if not rid:
                     self.right_panel.update('[b]Could not determine artist id[/b]'); return
-                self._toggle_artist_favorite(sp, rid)
+                self._toggle_artist_favorite(sp, rid, table=table)
             elif typ in ('podcast', 'show'):
                 if not rid:
                     self.right_panel.update('[b]Could not determine show id[/b]'); return
@@ -815,7 +859,7 @@ class PlaybackMixin:
                     contains_name='current_user_saved_shows_contains',
                     add_names=['current_user_saved_shows_add', 'current_user_saved_shows_save'],
                     del_names=['current_user_saved_shows_delete', 'current_user_saved_shows_remove'],
-                    label='Saved Podcasts', view_key='podcasts', refresh_fn=self._open_saved_podcasts)
+                    label='Saved Podcasts', view_key='podcasts', refresh_fn=self._open_saved_podcasts, table=table)
             elif typ == 'episode':
                 if not rid:
                     self.right_panel.update('[b]Could not determine episode id[/b]'); return
@@ -823,12 +867,13 @@ class PlaybackMixin:
                     contains_name='current_user_saved_episodes_contains',
                     add_names=['current_user_saved_episodes_add', 'current_user_saved_episodes_save'],
                     del_names=['current_user_saved_episodes_delete', 'current_user_saved_episodes_remove'],
-                    label='Saved Episodes', view_key='episodes', refresh_fn=self._open_saved_episodes)
+                    label='Saved Episodes', view_key='episodes', refresh_fn=self._open_saved_episodes, table=table)
             else:
                 try: self.right_panel.update('[b]Favorite action not supported for this item type[/b]')
                 except Exception: pass
                 return
-
-            self._revalidate_saved_if_search(table)
+            # P6: the search saved-column revalidation is now chained inside each
+            # toggle worker, after the mutation succeeds (no longer fired here,
+            # where it raced the mutation).
         except Exception:
             logger.exception("_toggle_favorite_dispatch failed")
