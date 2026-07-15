@@ -636,6 +636,22 @@ class PlaybackMixin:
                     return False
         return False
 
+    def _fav_lock_for(self, rid):
+        """Return a per-id lock so favourite read-modify-write on the SAME item
+        is serialized (two quick presses can't both read the pre-state and issue
+        duplicate ops), while different ids stay independent and concurrent (P7)."""
+        guard = getattr(self, '_fav_locks_guard', None)
+        if guard is None:
+            self._fav_locks_guard = threading.Lock(); guard = self._fav_locks_guard
+        with guard:
+            locks = getattr(self, '_fav_locks', None)
+            if locks is None:
+                locks = self._fav_locks = {}
+            lk = locks.get(rid)
+            if lk is None:
+                lk = locks[rid] = threading.Lock()
+            return lk
+
     def _revalidate_saved_if_search(self, table):
         """After a favourite toggle in search results, re-check its saved column."""
         if table is None or getattr(table, 'id', '') != 'search_table':
@@ -650,6 +666,9 @@ class PlaybackMixin:
 
     def _toggle_track_favorite(self, tid, table, row):
         def worker():
+            # P7: serialize read-modify-write per track id.
+            lock = self._fav_lock_for(tid)
+            lock.acquire()
             try:
                 try:
                     was_liked = bool(self.spotify.check_saved_tracks([tid])[0])
@@ -688,11 +707,16 @@ class PlaybackMixin:
                 self._revalidate_saved_if_search(table)
             except Exception:
                 logger.exception('toggle track favorite failed')
+            finally:
+                lock.release()
         threading.Thread(target=worker, daemon=True).start()
 
     def _toggle_saved_item(self, sp, item_id, *, contains_name, add_names, del_names, label, view_key, refresh_fn, table=None):
         """Add/remove an album, show or episode from the library (shared shape)."""
         def worker():
+            # P7: serialize read-modify-write per item id.
+            lock = self._fav_lock_for(item_id)
+            lock.acquire()
             try:
                 try:
                     c = self._call_first(sp, [contains_name], [item_id])
@@ -724,10 +748,15 @@ class PlaybackMixin:
                 self._revalidate_saved_if_search(table)
             except Exception:
                 logger.exception('%s save/remove failed', label)
+            finally:
+                lock.release()
         threading.Thread(target=worker, daemon=True).start()
 
     def _toggle_artist_favorite(self, sp, aid, table=None):
         def worker():
+            # P7: serialize read-modify-write per artist id.
+            lock = self._fav_lock_for(aid)
+            lock.acquire()
             try:
                 following = False
                 try:
@@ -762,6 +791,8 @@ class PlaybackMixin:
                 self._revalidate_saved_if_search(table)
             except Exception:
                 logger.exception('artist follow/unfollow failed')
+            finally:
+                lock.release()
         threading.Thread(target=worker, daemon=True).start()
 
     def action_toggle_favorite(self):
