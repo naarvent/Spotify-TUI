@@ -1,0 +1,5 @@
+spotipy
+textual
+rich
+requests
+pyfiglet
