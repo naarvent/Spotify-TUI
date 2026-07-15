@@ -56,7 +56,10 @@ class SearchMixin:
                 def _watchdog(tok, query):
                     try:
                         time.sleep(8)
-                        if getattr(self, '_last_search_worker', None) == tok:
+                        # Only nag if this token is still the newest search AND
+                        # it has not already rendered (else we'd clobber results).
+                        if (getattr(self, '_last_search_worker', None) == tok
+                                and getattr(self, '_search_rendered_token', None) != tok):
                             try:
                                 self.call_from_thread(lambda: self.right_panel.update(f"[b]Searching (worker):[/b] {rich_escape(query)} … (taking longer than expected)"))
                             except Exception:
@@ -150,6 +153,15 @@ class SearchMixin:
         self.call_from_thread(lambda: self._render_search_results(res, raw, force_type, my_search_token))
 
     def _render_search_results(self, res, raw, force_type, my_search_token):
+        # P1: drop stale renders. If a newer search has been dispatched,
+        # _last_search_worker has advanced past our token; do NOT touch any
+        # widget. This guard runs before the first widget mutation below.
+        try:
+            if (my_search_token is not None
+                    and getattr(self, '_last_search_worker', None) != my_search_token):
+                return
+        except Exception:
+            pass
         try:
             right = self._clear_right()
             try:
@@ -158,9 +170,9 @@ class SearchMixin:
                 pass
             if not res:
                 right.update(f"[b]No results:[/b] {rich_escape(raw)}")
+                # Mark rendered so the 8s watchdog won't overwrite this message.
                 try:
-                    if getattr(self, '_last_search_worker', None) == my_search_token:
-                        self._last_search_worker = None
+                    self._search_rendered_token = my_search_token
                 except Exception:
                     pass
                 return
@@ -367,23 +379,22 @@ class SearchMixin:
             except Exception:
                 logger.exception("_do_search: failed setting search view token")
             table = self._render_search_table(title, rows)
-
-            track_ids = [r["id"] for r in rows if r.get("type") == "track" and r.get("id")]
-            liked = self.spotify.check_saved_tracks(track_ids) if track_ids else []
-
-            liked_map = {}
-            li = 0
-            for i, r in enumerate(rows):
-                if r.get("type") == "track":
-                    liked_map[i] = bool(liked[li]) if li < len(liked) else False
-                    li += 1
-                else:
-                    liked_map[i] = False
-            table._liked_map = liked_map
-            self._revalidate_liked_column(table, max_rows=200)
+            # Stamp the token so late saved/liked updates (this render's own
+            # worker, and post-favourite revalidation) can verify the table is
+            # still the current search before painting.
             try:
-                if getattr(self, '_last_search_worker', None) == my_search_token:
-                    self._last_search_worker = None
+                table._search_token = my_search_token
+            except Exception:
+                pass
+
+            # P2: the saved-state lookup is a network call — never run it on the
+            # UI thread. The table is already rendered above; fetch liked flags
+            # on a worker and apply them only if this search is still current.
+            self._fetch_liked_for_search(table, rows, my_search_token)
+
+            # Mark this token as rendered (suppresses the 8s watchdog nag).
+            try:
+                self._search_rendered_token = my_search_token
             except Exception:
                 pass
         except Exception:
@@ -439,3 +450,54 @@ class SearchMixin:
         except Exception:
             pass
         return table
+
+    def _fetch_liked_for_search(self, table, rows, my_search_token):
+        """Look up liked/saved state for a rendered search table off the UI
+        thread (P2). The table is already on screen; we only fill in the liked
+        map. Results are applied via call_from_thread and only if this search is
+        still the current one and the table is still mounted, so a table that
+        was unmounted (view changed / newer search) never causes an error and a
+        failed lookup never wipes the already-rendered results."""
+        track_ids = [r["id"] for r in rows if r.get("type") == "track" and r.get("id")]
+
+        def worker():
+            try:
+                liked = self.spotify.check_saved_tracks(track_ids) if track_ids else []
+            except Exception:
+                # Leave the already-rendered results untouched on failure.
+                logger.exception("search liked lookup failed")
+                return
+
+            liked_map = {}
+            li = 0
+            for i, r in enumerate(rows):
+                if r.get("type") == "track":
+                    liked_map[i] = bool(liked[li]) if li < len(liked) else False
+                    li += 1
+                else:
+                    liked_map[i] = False
+
+            def apply():
+                # Re-check the search token and that the table is still on
+                # screen before mutating any state tied to a widget. Note: a
+                # detached DataTable keeps is_mounted == True in Textual, so we
+                # test _parent (None once the table has been removed from the
+                # tree) as the reliable "still current view" signal.
+                if getattr(self, '_last_search_worker', None) != my_search_token:
+                    return
+                if getattr(table, '_search_token', None) != my_search_token:
+                    return
+                if getattr(table, '_parent', None) is None:
+                    return
+                try:
+                    table._liked_map = liked_map
+                except Exception:
+                    logger.exception("applying liked map to search table failed")
+
+            try:
+                self.call_from_thread(apply)
+            except Exception:
+                # Loop gone (shutdown) — nothing to paint.
+                pass
+
+        threading.Thread(target=worker, daemon=True).start()
