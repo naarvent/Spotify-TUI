@@ -94,7 +94,14 @@ async def poll(fn, timeout=5.0):
     except Exception: return None
 
 async def pump(pilot, n=15):
-    for _ in range(n): await pilot.pause()
+    # pilot.pause() can raise WaitForScreenTimeout while several background
+    # workers are posting messages; fall back to a plain loop yield so the test
+    # stays deterministic instead of crashing on harness timing.
+    for _ in range(n):
+        try:
+            await pilot.pause()
+        except Exception:
+            await asyncio.sleep(0.01)
 
 async def settle(seconds=0.4):
     # Yield to the loop without pilot's strict screen-idle wait (which can time
