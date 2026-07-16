@@ -150,7 +150,15 @@ class SearchMixin:
                 show_err()
             return
 
-        self.call_from_thread(lambda: self._render_search_results(res, raw, force_type, my_search_token))
+        # Drop the render if the app is closing: scheduling a callback on a
+        # torn-down loop otherwise raises an unhandled RuntimeError out of this
+        # worker (and leaks an un-awaited coroutine). P9.
+        if getattr(self, '_closing', False):
+            return
+        try:
+            self.call_from_thread(lambda: self._render_search_results(res, raw, force_type, my_search_token))
+        except Exception:
+            logger.debug("search render dropped during teardown")
 
     def _render_search_results(self, res, raw, force_type, my_search_token):
         # P1: drop stale renders. If a newer search has been dispatched,

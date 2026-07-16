@@ -243,6 +243,9 @@ class CoreMixin:
             def _playlist_retry_worker():
                 try:
                     for _ in range(8):
+                        # Stop early if the app is shutting down.
+                        if getattr(self, '_closing', False):
+                            break
                         # Give up only if there is genuinely no token to use;
                         # an expired-but-refreshable one is fine (ensure()
                         # refreshes it). Keep retrying until playlists load.
@@ -264,6 +267,26 @@ class CoreMixin:
             threading.Thread(target=_playlist_retry_worker, daemon=True).start()
         except Exception:
             logger.exception("Could not start playlist retry worker")
+
+    def _stop_all_intervals(self) -> None:
+        """Pause and drop every periodic timer. Idempotent: safe to call more
+        than once (e.g. teardown running twice)."""
+        for attr in ("_now_sync_interval", "_now_tick_interval", "_now_interval",
+                     "_devices_interval", "_queue_interval", "_lyrics_interval"):
+            it = getattr(self, attr, None)
+            if it is not None:
+                try:
+                    it.pause()
+                except Exception:
+                    logger.debug("stopping interval %s during teardown failed", attr)
+                setattr(self, attr, None)
+
+    def on_unmount(self) -> None:
+        """Application teardown. Textual has already flagged the app as closing
+        by this point; we mirror it on `_closing` (which background workers read)
+        and stop every timer so no worker paints into a torn-down app."""
+        self._closing = True
+        self._stop_all_intervals()
 
     def _clear_right(self):
         right: Static = self.right_panel
