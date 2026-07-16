@@ -452,20 +452,40 @@ class TablesMixin:
         try: table.refresh()
         except Exception: pass
 
+    def _restore_table_view(self, table: DataTable, cur_coord, saved_y: int, n_rows: int):
+        """Restore the cursor row + vertical scroll after a full repaint. Textual
+        resets both to the top on ``clear()``; without this the user is yanked
+        back to the start whenever likes load, a like is toggled, or the playing
+        row highlight moves. ``cursor_row`` has no setter (assigning it silently
+        fails) and ``scroll_to_row`` does not exist in this Textual, so we use
+        ``move_cursor(scroll=False)`` + ``scroll_to(animate=False)``."""
+        if n_rows <= 0:
+            return
+        try:
+            if cur_coord is not None:
+                row = max(0, min(int(getattr(cur_coord, "row", 0) or 0), n_rows - 1))
+                col = int(getattr(cur_coord, "column", 0) or 0)
+                table.move_cursor(row=row, column=col, animate=False, scroll=False)
+        except Exception:
+            logger.debug("restore cursor failed")
+        try:
+            table.scroll_to(y=saved_y, animate=False)
+        except Exception:
+            logger.debug("restore scroll failed")
+
     def _repaint_rows_from_model(self, table: DataTable):
         if not hasattr(table, "_model_rows"):
             return
+        cur_coord = None
         try:
-            cur = self._get_cursor_row(table)
+            cur_coord = getattr(table, "cursor_coordinate", None)
         except Exception:
-            cur = None
-
-        scroll_pos = None
+            cur_coord = None
+        saved_y = 0
         try:
-            if hasattr(table, "scroll_offset"):
-                scroll_pos = table.scroll_offset
+            saved_y = int(getattr(getattr(table, "scroll_offset", None), "y", 0) or 0)
         except Exception:
-            pass
+            saved_y = 0
 
         table.clear()
         rows = getattr(table, "_model_rows", [])
@@ -514,13 +534,7 @@ class TablesMixin:
                 table.row_to_obj[i] = r.get("raw")
             try: table.refresh()
             except Exception: pass
-            try:
-                if cur is not None and 0 <= cur < len(rows):
-                    table.cursor_row = cur
-                    if hasattr(table, "scroll_to_row"):
-                        table.scroll_to_row(cur)
-            except Exception:
-                pass
+            self._restore_table_view(table, cur_coord, saved_y, len(rows))
             return
 
         playing_id = getattr(self, "_now_internal_track_id", None)
@@ -540,15 +554,7 @@ class TablesMixin:
             if r.get("id"):
                 table.row_to_id[i] = r.get("id")
 
-        try:
-            if cur is not None and 0 <= cur < len(rows):
-                table.cursor_row = cur
-                if hasattr(table, "scroll_to_row"):
-                    table.scroll_to_row(cur)
-            if scroll_pos and hasattr(table, "scroll_to"):
-                table.scroll_to(y=getattr(scroll_pos, "y", scroll_pos))
-        except Exception:
-            pass
+        self._restore_table_view(table, cur_coord, saved_y, len(rows))
 
         try: table.refresh()
         except Exception: pass
