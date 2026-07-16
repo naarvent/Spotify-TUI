@@ -47,6 +47,8 @@ class SptPy(
         "#right { border: round #27e1c1; padding: 1 2; overflow: auto; background: #0d252c; min-width: 60; margin: 0; height: 1fr; content-align: center middle; text-align: center; }\n"
         "#right.lyrics-mode { content-align: center middle; }\n"
         "#lyrics_box { width: 1fr; height: 1fr; text-align: center; padding: 1 2; }\n"
+        "#help_scroll { width: 1fr; height: 1fr; }\n"
+        "#help_text { width: 1fr; text-align: left; }\n"
         "ListView { height: auto; }\n"
         "#pl_list { height: 1fr; overflow: auto; }\n"
         "#lib_list { height: auto; }\n"

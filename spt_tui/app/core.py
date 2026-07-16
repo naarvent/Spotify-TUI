@@ -26,6 +26,7 @@ from .. import config
 from ..config import logger, LOG_PATH
 from ..constants import WELCOME, LIBRARY_ITEMS
 from ..spotify_client import SpotifyClient
+from ..widgets import HelpScroll
 
 class CoreMixin:
     def __init__(self):
@@ -902,15 +903,12 @@ class CoreMixin:
 
         right = self._clear_right()
         try:
-            lines = [ln for ln in help_text.splitlines()]
-            items = []
-            for ln in lines:
-                li = ListItem(Static(ln, markup=True))
-                items.append(li)
-            self.help_list = ListView(*items, id="help_list")
-            right.mount(self.help_list)
+            # A focusable scroll container so Up/Down/PageUp/PageDown/Home/End
+            # scroll the (long) help text with the keyboard, not just the mouse.
+            self.help_scroll = HelpScroll(Static(help_text, markup=True, id="help_text"), id="help_scroll")
+            right.mount(self.help_scroll)
             try:
-                self.help_list.focus()
+                self.help_scroll.focus()
             except Exception:
                 pass
         except Exception:
