@@ -1,176 +1,238 @@
-# spt_tui — Spotify TUI (refactorizado)
+# Spotify-TUI
 
-El monolito `spt_tui.py` (6689 líneas, una sola clase de ~5600) se dividió en un
-paquete por temas. Comportamiento idéntico; solo estructura + limpieza.
+A Spotify client for your terminal, built with [Textual](https://github.com/Textualize/textual).
+Search, browse your library and playlists, control playback, follow along with
+synced lyrics, manage your queue and devices — all from the keyboard.
 
-## Cómo ejecutar
+**Status:** `v0.1.0` — early release (alpha). It works and is covered by a
+regression test suite, but APIs and behaviour may still change before `1.0`.
+
+![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)
+![Python](https://img.shields.io/badge/python-3.9%2B-blue.svg)
+
+---
+
+## Features
+
+- **Search** across tracks, artists, albums, playlists, podcasts and episodes.
+- **Playlists** — your own and followed ones, with a disk cache so the list
+  paints instantly on startup and refreshes in the background.
+- **Library** — liked songs, saved albums, followed artists, saved podcasts and
+  episodes.
+- **Favorites** — like/unlike tracks and follow/save items directly from the UI.
+- **Playback control** — play/pause, next/previous, seek, volume, mute, repeat
+  and shuffle.
+- **Synced lyrics** with a highlighted current line, plus ASCII-art headers via
+  `pyfiglet` (with a plain-text fallback on small terminals).
+- **Queue** — view and add to the playback queue.
+- **Devices** — list and transfer playback between your active Spotify devices.
+- **Keyboard-driven** navigation throughout, with a built-in help view.
+
+## Requirements
+
+- **Python 3.9+** (developed and tested on Python 3.14).
+- A **Spotify account.** A **Spotify Premium** account is required for playback
+  control (play/pause, skip, seek, volume, shuffle, device transfer) — this is a
+  restriction of the Spotify Web API, not of this app. Browsing and search work
+  on free accounts.
+- A **Spotify Developer application** (for the Client ID / Secret — see below).
+- An **active Spotify device** (the desktop app, a phone, a speaker, etc.) to
+  send playback to.
+
+## Installation
 
 ```bash
-pip install -r requirements.txt
+# 1. Clone
+git clone https://github.com/naarvent/Spotify-TUI.git
+cd Spotify-TUI
+
+# 2. Create and activate a virtual environment
+python -m venv .venv
+# Linux/macOS:
+source .venv/bin/activate
+# Windows (PowerShell):
+.venv\Scripts\Activate.ps1
+
+# 3. Install
+pip install -e .
+```
+
+`pip install -e .` installs the package and its dependencies from
+`pyproject.toml`. Alternatively, `pip install -r requirements.txt` installs just
+the runtime dependencies without the package/entry point.
+
+## Spotify setup
+
+1. Go to the [Spotify Developer Dashboard](https://developer.spotify.com/dashboard)
+   and **create an app**.
+2. Copy the app's **Client ID** and **Client Secret**.
+3. Add a **Redirect URI** to the app settings and use the *same* value in your
+   environment. A loopback address such as `http://127.0.0.1:8888/callback`
+   works well.
+4. Provide the credentials to the app in either of two ways:
+
+   **Environment variables** (they take precedence):
+
+   ```bash
+   # Linux/macOS
+   export SPOTIPY_CLIENT_ID="your_client_id"
+   export SPOTIPY_CLIENT_SECRET="your_client_secret"
+   export SPOTIPY_REDIRECT_URI="http://127.0.0.1:8888/callback"
+   ```
+
+   ```powershell
+   # Windows (PowerShell)
+   $env:SPOTIPY_CLIENT_ID = "your_client_id"
+   $env:SPOTIPY_CLIENT_SECRET = "your_client_secret"
+   $env:SPOTIPY_REDIRECT_URI = "http://127.0.0.1:8888/callback"
+   ```
+
+   **Or** enter them inside the app on first run; they are saved to a local
+   config file (see [Security](#security) for the location).
+
+On first launch you complete the standard Spotify OAuth flow in your browser;
+the resulting token is cached locally and refreshed automatically.
+
+## Running
+
+```bash
 python -m spt_tui
 ```
 
-Credenciales: variables de entorno `SPOTIPY_CLIENT_ID` / `SPOTIPY_CLIENT_SECRET` /
-`SPOTIPY_REDIRECT_URI`, o se introducen dentro de la propia app.
+or, after `pip install -e .`, the console script:
 
-## Estructura
+```bash
+spt-tui
+```
+
+## Keyboard shortcuts
+
+These are the application's real key bindings.
+
+### Navigation
+
+| Key | Action |
+| --- | --- |
+| `↑` / `↓` | Move cursor up / down |
+| `←` / `→` | Move focus between the left panel and the open view |
+| `Enter` | Open / play the selected item |
+| `/` | Focus the search box |
+| `Escape` | Back to the menu |
+| `?` / `F1` | Help |
+| `Ctrl+Q` | Quit |
+
+### Playback
+
+| Key | Action |
+| --- | --- |
+| `Space` | Play / pause |
+| `n` | Next track |
+| `p` | Previous / restart |
+| `r` | Toggle repeat |
+| `Ctrl+S` | Toggle shuffle |
+| `-` / `+` | Volume down / up |
+| `m` | Mute |
+| `Ctrl+←` / `Ctrl+→` | Seek backward / forward |
+| `<` | Seek settings |
+
+### Library, queue & tools
+
+| Key | Action |
+| --- | --- |
+| `f` | Toggle favorite (like / follow / save) |
+| `l` | Toggle lyrics view |
+| `c` | Add selected track to the queue |
+| `Ctrl+C` | Open the queue |
+| `d` | Manage devices |
+| `Ctrl+L` | Toggle multi-add selection |
+| `Ctrl+Shift+P` | Add to a playlist |
+| `Ctrl+T` | Import a playlist |
+| `Ctrl+D` | Delete |
+| `Ctrl+R` | Refresh |
+
+### Help view
+
+While the help view is open: `↑`/`↓` scroll, `PgUp`/`PgDn` page, `Home`/`End`
+jump to top/bottom, `Escape` closes it.
+
+## Tests
+
+The suites are standalone scripts — no test framework is required. Each one
+exits `0` only if every check passes. From the project root:
+
+```bash
+# Run a single suite
+python tests/test_spotify_client.py
+
+# Run all suites (Linux/macOS)
+for f in tests/test_*.py; do python "$f" || echo "FAILED: $f"; done
+```
+
+```powershell
+# Run all suites (Windows PowerShell)
+Get-ChildItem tests/test_*.py | ForEach-Object { python $_.FullName }
+```
+
+The tests are deterministic and offline: the Spotify client and network calls
+are faked, and the Textual UI is exercised through its test pilot. A few of the
+concurrency tests are timing-sensitive and may occasionally need a re-run under
+heavy CPU load.
+
+## Architecture
+
+This project started life as a single ~5,000-line file (one large class) and was
+later refactored — with behaviour preserved — into a small package organised by
+topic:
 
 ```
 spt_tui/
-├── __main__.py         Entry point (python -m spt_tui)
-├── config.py           Paths, logging y credenciales (estado mutable centralizado)
-├── constants.py        WELCOME, GLYPHS, LIBRARY_ITEMS
-├── widgets.py          ResizableDataTable
-├── spotify_client.py   RateLimiter, _SpotifyProxy, SpotifyClient (API de Spotify)
-└── app/
-    ├── __init__.py     Clase SptPy(App), ensamblada desde los mixins
-    ├── core.py         Layout, montaje y enrutado de eventos
-    ├── search.py       Búsqueda y render de resultados
-    ├── navigation.py   Teclado, foco y navegación de secciones
-    ├── tables.py       Construcción/render de DataTables y columnas liked/saved
-    ├── library.py      Playlists y biblioteca guardada
-    ├── lyrics_view.py  Letras sincronizadas (fetch/parse/render)
-    ├── playback.py     Reproducción y barra "now playing"
-    └── queue_devices.py Cola y selección de dispositivos
+├── __main__.py         Entry point (python -m spt_tui / spt-tui)
+├── config.py           Paths, logging and credentials (single source of truth)
+├── constants.py        Welcome screen, glyphs, library items
+├── widgets.py          Resizable data table and help scroll
+├── spotify_client.py   Rate limiter and Spotify API wrapper
+└── app/                The SptPy application, split into mixins:
+    ├── core.py         Layout, mounting and event routing
+    ├── search.py       Search and result rendering
+    ├── navigation.py   Keyboard, focus and section navigation
+    ├── tables.py       Data-table construction and liked/saved columns
+    ├── library.py      Playlists and saved library
+    ├── lyrics_view.py  Synced lyrics (fetch / parse / render)
+    ├── playback.py     Playback and the "now playing" bar
+    └── queue_devices.py Queue and device selection
 ```
 
-`SptPy` se compone por herencia múltiple de mixins; en tiempo de ejecución sigue
-siendo una única clase, así que el reparto entre archivos no cambia la lógica.
+`SptPy` is assembled from these mixins by multiple inheritance; at runtime it is
+still a single class, so the split across files does not change any logic. A set
+of regression suites (see [Tests](#tests)) guards the refactored behaviour.
 
-## Auditoría — correcciones aplicadas
+## Limitations
 
-- **Bug: Enter no abría media biblioteca.** El despacho de items (Liked/Saved
-  Artists/Albums/Podcasts/Episodes…) estaba duplicado y desincronizado entre
-  teclado (`action_open`) y ratón (`on_list_view_selected`). Unificado en
-  `LibraryMixin._open_library_item()` — un único mapeo para ambos.
-- **Reproducir ya no congela la UI** (`_play_row`): la red va a un hilo, usa el
-  shuffle cacheado (sin `get_playback()` de más) y se unificaron dos closures
-  de resolución de índice duplicadas.
-- **Now-bar sin hitch periódico:** `_sync_playback` (1.5s) hacía red en el hilo
-  principal → movido a hilo. El tick de 0.5s (`_update_now_bar`) ahora pinta
-  **solo desde caché** (antes hacía `get_playback()` cada tick → tráfico
-  redundante).
-- **Red en hilo, no en la UI:** vista de dispositivos (`_refresh_devices_table`)
-  y `transfer()` al elegir dispositivo.
-- **Menos llamadas a Spotify:** `_active_device_id()` cachea el dispositivo
-  activo 5s (invalidado en `transfer`), evitando un `devices()` por cada
-  volumen/seek.
-- **Robustez:** `_fetch_synced_lyrics` ya no actualiza un widget desde un hilo
-  (usa `call_from_thread`); `SpotifyClient.ensure()` es thread-safe (lock).
-- **Limpieza:** eliminado `_focus_search_and_highlight` (muerto); deduplicadas
-  las 4 ramas idénticas de seek-settings (helper `_save_seek_setting`); markup
-  `</b]` corregido en la ayuda.
+- Requires the Spotify Web API and a working Spotify Developer app; playback
+  control needs Spotify Premium and an active device.
+- Lyrics depend on a third-party lyrics service and are not always available.
+- Behaviour is subject to upstream changes in Spotify's API and in the
+  `spotipy` / `textual` libraries.
+- This is a `0.x` release — interfaces and key bindings may change before `1.0`.
 
-- **Métodos gigantes partidos:**
-  - `action_toggle_favorite` 322 → 80 líneas: dispatcher fino + helpers
-    (`_toggle_track_favorite`, `_toggle_saved_item` para álbum/podcast/episodio,
-    `_toggle_artist_favorite`, `_call_first`, `_revalidate_saved_if_search`). De
-    paso, los checks `contains`/`followed` ya no bloquean el hilo de UI.
-  - `_do_search` 353 → 109 líneas: el render de resultados se extrajo a
-    `_render_search_results()`.
+## Security
 
-> `on_key` (547 líneas) se deja intacto **a propósito**: es un router de teclado
-> con lógica de fall-through entrelazada (handlers de →/← solapados, dependencia
-> de que Textual consuma la tecla primero). Partirlo sin poder ejercitar cada
-> combinación en la app real arriesga romper el teclado en silencio. No es un bug.
+- **Never commit your Client Secret, tokens or the OAuth cache.** The repository
+  `.gitignore` already excludes common secret/token/cache patterns.
+- Credentials, the token cache and logs are stored **outside** the repository,
+  under `~/Documents/naarvent's projects/Spotify_TUI/`:
+  - `spt_config.json` — Client ID/Secret/Redirect URI, if entered in-app.
+  - `.cache_spotify_token` — the cached OAuth token.
+  - `spt_py_textual_spotify.log` — the rotating log file.
+- Prefer environment variables over the on-disk config file when you can, and
+  keep the config directory private.
 
-## Funcionalidades añadidas
+## Contributing
 
-- **Canción en reproducción resaltada** en morado (`#b388ff`) en la tabla de
-  pistas; el resaltado se mueve solo al cambiar de canción.
-- **Caché de playlists en disco** (`playlists_cache.json`): al arrancar se pinta
-  la lista al instante y la red la refresca en segundo plano.
-- **Contador de carga** en playlists grandes: se muestra la primera página al
-  momento y el título indica `(loading 200/850)` mientras baja el resto.
-- **Arte ASCII del título y del artista** en la vista de letras (`pyfiglet`),
-  con degradado a texto plano en terminales pequeñas.
+Issues and pull requests are welcome. Please keep changes focused, preserve the
+existing behaviour covered by the test suites, and run all suites before opening
+a PR.
 
-## Qué "basura" se quitó
+## License
 
-- **Bloque de constantes duplicado** (`USER_HOME`/`CACHE_DIR`/… definidos dos veces).
-- **~115 líneas de código muerto de letras**: helpers a nivel de módulo
-  (`_lrclib_find`, `_lyrics_ovh_get`, `_parse_lrc_to_timeline`, `_LYR_CACHE`,
-  `_save_cache`, `_http_json/_http_text`, `_safe_ms`, `_distribute_unsynced`…)
-  que ningún método usaba — la app reimplementa las letras en
-  `lyrics_view._fetch_synced_lyrics`.
-- **`try/except` muerto** para redefinir `CACHE_DIR` (siempre estaba definido).
-- Líneas-comentario de solo espacios entre métodos.
-- **Estado global disperso** (`CLIENT_ID`, `CONFIG_LOADED`, `_LOCAL_CFG` mutados con
-  `global`/`globals()`) centralizado en `config` → una única fuente de verdad
-  (antes, al separar en módulos, se habría desincronizado y roto el login).
-- Setup de logging **reordenado antes** de cargar la config (el original usaba
-  `logger` en un `except` antes de que existiera).
-
-## Mejoras de rendimiento
-
-- **Letras sin congelar la UI**: al abrir letras (`l`) ahora aparece
-  `Lyrics loading…` al instante y el fetch (red) corre en un hilo de fondo.
-  El tick de resaltado usa el estado de reproducción ya cacheado por la barra
-  "now playing" en vez de llamar a la red cada 0.4s (antes bloqueaba el hilo
-  de UI en cada tick). Los resultados obsoletos se descartan con un token de
-  generación al cambiar de canción o cerrar la vista.
-- **Playlists grandes mucho más rápidas** (`_open_playlist_table`):
-  - Se piden solo los campos usados (`fields=`) → respuestas mucho menores.
-  - Las páginas (>100 canciones) se descargan **en paralelo** usando el `total`.
-  - El check de "liked" se hace en **lotes concurrentes**.
-  - Se eliminó el `_revalidate_liked_column` redundante (el worker ya calcula
-    los likes) y un `_load_playlists` parásito que recargaba toda la lista al
-    abrir cada playlist.
-  - **Render en dos fases**: la tabla de canciones se muestra en cuanto se bajan
-    las filas; el check de "liked" (la parte lenta) se hace después y rellena los
-    corazones, así no esperas a que termine para ver la playlist.
-
-## Vista de letras con arte ASCII
-
-- La cabecera muestra el **artista** en arte ASCII (pyfiglet), centrado y
-  limitado al ancho del panel; debajo, el nombre de la canción en gris.
-- **Fallback automático**: si la terminal es pequeña (ancho < 72 o alto < 26),
-  si el nombre del artista es muy largo, o si `pyfiglet` no está instalado, se
-  usa la cabecera de una línea de antes. Requiere `pip install pyfiglet` para
-  ver el arte.
-- El bloque de arte se paga a ancho completo por línea para que el centrado del
-  panel no lo distorsione.
-
-## Navegación con flechas
-
-- **←** dentro de una vista abierta → mueve el foco al panel izquierdo **sin
-  cerrar** la vista, para navegar Library/Playlists.
-- **→** en **Library/Playlists** → vuelve el foco a la vista abierta a la derecha
-  (tabla de canciones, álbum, cola, dispositivos…) para navegar sus filas.
-- **→** dentro de una vista (LVL_VIEW) → **no hace nada**: nunca te saca de ahí.
-- **→** en **Search** → siempre al recuadro **Help**; **Enter** abre la ayuda y
-  **←** vuelve a Search.
-
-## Fix: corazones (likes) que no aparecían
-
-El check de "liked" se había paralelizado (varios hilos), pero spotipy comparte
-una sola `requests.Session` y un solo auth manager, que **no son thread-safe**:
-las llamadas concurrentes se corrompían y devolvían **todo False** (una canción
-ya likeada salía sin corazón hasta re-likearla con `F`). Se volvió al check
-**secuencial** original (que sí funcionaba), manteniendo `fields=` (el ahorro de
-tiempo real) y la alineación **por id de pista**. Las páginas también se piden de
-forma secuencial por el mismo motivo.
-
-## Fix: playlists que "a veces no cargaban"
-
-Causa raíz: los cargadores exigían un token **actualmente válido**
-(`has_valid_user_token`, que solo mira `expires_at > ahora`). Como el token de
-Spotify caduca a la hora, si abrías la app pasado ese rato el cargador pintaba
-vacío y **no dejaba que spotipy refrescara el token**; el retry worker además
-hacía `break` permanente. De ahí el truco de "pulsa Ctrl+R".
-
-Arreglos:
-- `_load_playlists` y los disparadores ahora exigen solo un token **cacheado**
-  (`has_cached_token`); uno caducado pero refrescable se renueva solo en la
-  llamada a la API.
-- El retry worker ya no se rinde con un token caducado: reintenta hasta cargar.
-- Tras autenticar (`finish_authorization`) ahora **sí** se dispara la carga de
-  playlists (antes no ocurría en el primer login).
-- Volver al menú (Escape) o abrir la ayuda reintentan la carga → retry
-  implícito, con lo que Ctrl+R deja de hacer falta en la práctica.
-
-## Nota pendiente
-
-`app/navigation.py` (`on_key`) tiene un `return` dentro de un bloque `finally`
-(heredado del original) que silencia excepciones. Se dejó tal cual para no
-cambiar comportamiento; conviene revisarlo aparte.
+Released under the [MIT License](LICENSE). Copyright (c) 2026 naarvent_.
