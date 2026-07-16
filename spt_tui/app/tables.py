@@ -390,12 +390,12 @@ class TablesMixin:
                     # the update when a newer search has superseded it or the
                     # table was removed from the tree. Tables without a search
                     # token (e.g. artist-profile view) are unaffected. A detached
-                    # DataTable keeps is_mounted == True, so we test _parent.
+                    # DataTable keeps is_mounted == True, so we test .parent.
                     tok = getattr(table, '_search_token', None)
                     if tok is not None:
                         if tok != getattr(self, '_last_search_worker', None):
                             return
-                        if getattr(table, '_parent', None) is None:
+                        if getattr(table, 'parent', None) is None:
                             return
                     col = getattr(table, '_col_saved', 0)
                     try:

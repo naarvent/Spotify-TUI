@@ -492,13 +492,13 @@ class SearchMixin:
                 # Re-check the search token and that the table is still on
                 # screen before mutating any state tied to a widget. Note: a
                 # detached DataTable keeps is_mounted == True in Textual, so we
-                # test _parent (None once the table has been removed from the
+                # test .parent (None once the table has been removed from the
                 # tree) as the reliable "still current view" signal.
                 if getattr(self, '_last_search_worker', None) != my_search_token:
                     return
                 if getattr(table, '_search_token', None) != my_search_token:
                     return
-                if getattr(table, '_parent', None) is None:
+                if getattr(table, 'parent', None) is None:
                     return
                 try:
                     table._liked_map = liked_map
