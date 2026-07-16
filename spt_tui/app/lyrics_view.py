@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+import re
 import threading
-from typing import List, Optional, Tuple
+from typing import List, Tuple
 
 from textual.widgets import Static
 from rich.markup import escape as rich_escape
@@ -88,14 +89,15 @@ class LyricsMixin:
                 pb = self.spotify.get_playback() or {}
                 item = pb.get("item") or getattr(self, "_bar_last_track", None) or {}
                 name = item.get("name") or "(no title)"
-                artists = ", ".join(a.get("name", "") for a in item.get("artists", []) if a)
-                isrc = self._get_isrc_for_item(item)
+                all_artists = [a.get("name", "") for a in (item.get("artists") or []) if a and a.get("name")]
+                artists = ", ".join(all_artists)
+                primary_artist = all_artists[0] if all_artists else artists
+                album = (item.get("album") or {}).get("name", "") if isinstance(item.get("album"), dict) else ""
                 duration_ms = int(item.get("duration_ms") or 0)
                 track_id = item.get("id") or None
-                title = f"{name} — {artists}"
+                title = f"{name} — {artists}" if artists else name
                 lines = self._fetch_synced_lyrics(
-                    title=name, artist=artists, duration_ms=duration_ms,
-                    track_id=track_id, isrc=isrc,
+                    title=name, artist=primary_artist, album=album, duration_ms=duration_ms,
                 )
             except Exception:
                 logger.exception("Lyrics background load failed")
@@ -126,29 +128,50 @@ class LyricsMixin:
         else:
             self.lyrics_box.update(header + "\n" + self._render_lyrics_at(self._cached_pos_ms()))
 
-    def _get_isrc_for_item(self, item: dict) -> Optional[str]:
-        isrc = (item.get("external_ids", {}) or {}).get("isrc")
-        if isrc:
-            return isrc
-        try:
-            spid = item.get("id")
-            if spid:
-                full = self.spotify.ensure().track(spid) or {}
-                isrc2 = (full.get("external_ids", {}) or {}).get("isrc")
-                if isrc2:
-                    return isrc2
-        except Exception:
-            logger.exception("Could not obtain ISRC via sp.track()")
-        return None
+    # lrclib asks clients to identify themselves; a missing UA can get throttled.
+    _LYRICS_UA = "spt-tui (terminal Spotify client)"
+
+    def _clean_track_title(self, title: str) -> str:
+        """Drop 'feat.'/‘with’ credits and remaster/live suffixes that otherwise
+        make lrclib miss a track whose lyrics do exist."""
+        t = title or ""
+        t = re.sub(r"\s*[\(\[]\s*(feat|ft|featuring|with)\.?\s[^)\]]*[\)\]]", "", t, flags=re.IGNORECASE)
+        t = re.sub(
+            r"\s*-\s*(\d{0,4}\s*)?(re-?master(ed)?|remaster|live|mono|stereo|"
+            r"radio edit|single version|album version|deluxe|bonus track)\b.*$",
+            "", t, flags=re.IGNORECASE,
+        )
+        return t.strip() or (title or "").strip()
+
+    def _pick_best_lyrics(self, arr, dur_s: int):
+        """From an lrclib /search array, prefer a result that has synced lyrics
+        and whose duration is closest to ours — avoids grabbing a wrong-length
+        (e.g. remix/live) version that happens to rank first."""
+        if not isinstance(arr, list):
+            return None
+        cand = [it for it in arr if it and (it.get("syncedLyrics") or it.get("plainLyrics"))]
+        if not cand:
+            return None
+
+        def score(it):
+            has_sync = 0 if (it.get("syncedLyrics") or "").strip() else 1
+            try:
+                dd = abs(int(it.get("duration") or 0) - dur_s) if dur_s else 0
+            except (TypeError, ValueError):
+                dd = 0
+            return (has_sync, dd)
+
+        cand.sort(key=score)
+        return cand[0]
 
     def _fetch_synced_lyrics(
         self,
         *,
         title: str,
         artist: str,
-        duration_ms: int,
-        track_id: str | None = None,
-        isrc: str | None = None,
+        duration_ms: int = 0,
+        album: str | None = None,
+        **_ignored,
     ) -> list[tuple[int, str]]:
         try:
             if requests is None:
@@ -162,47 +185,58 @@ class LyricsMixin:
                 return []
 
             base = "https://lrclib.net/api"
-            timeout = 6
+            headers = {"User-Agent": self._LYRICS_UA}
+            timeout = 8
+            dur_s = max(0, int(round((duration_ms or 0) / 1000)))
+            clean = self._clean_track_title(title)
 
-            if isrc:
+            def _from(data):
+                if not isinstance(data, dict):
+                    return None
+                synced = (data.get("syncedLyrics") or "").strip()
+                if synced:
+                    return self._parse_lrc(synced)
+                plain = (data.get("plainLyrics") or "").strip()
+                if plain:
+                    return self._plain_to_pseudo_lrc(plain, duration_ms)
+                return None
+
+            # 1) Exact-match endpoint (lrclib's best): needs track + artist;
+            #    album + duration sharpen it and return duration-matched synced
+            #    lyrics. (The old code queried /get?isrc=… which lrclib rejects
+            #    with 400, so lyrics only ever came from the fragile search.)
+            if clean and artist:
                 try:
-                    r = requests.get(f"{base}/get", params={"isrc": isrc}, timeout=timeout)
+                    params = {"track_name": clean, "artist_name": artist}
+                    if album:
+                        params["album_name"] = album
+                    if dur_s:
+                        params["duration"] = dur_s
+                    r = requests.get(f"{base}/get", params=params, timeout=timeout, headers=headers)
                     if r.status_code == 200:
-                        data = r.json() or {}
-                        synced = (data.get("syncedLyrics") or "").strip()
-                        plain = (data.get("plainLyrics") or "").strip()
-                        if synced:
-                            return self._parse_lrc(synced)
-                        if plain:
-                            return self._plain_to_pseudo_lrc(plain, duration_ms)
+                        res = _from(r.json() or {})
+                        if res:
+                            return res
                 except Exception:
-                    pass
+                    logger.debug("lyrics: /get exact failed", exc_info=True)
 
-            try:
-                q = {
-                    "track_name": title or "",
-                    "artist_name": artist or "",
-
-                    "duration": max(0, int(round((duration_ms or 0) / 1000))),
-                }
-                r = requests.get(f"{base}/search", params=q, timeout=timeout)
-                if r.status_code == 200:
-                    arr = r.json() or []
-
-                    best = None
-                    for it in arr:
-                        if (it.get("syncedLyrics") or it.get("plainLyrics")):
-                            best = it
-                            break
-                    if best:
-                        synced = (best.get("syncedLyrics") or "").strip()
-                        plain = (best.get("plainLyrics") or "").strip()
-                        if synced:
-                            return self._parse_lrc(synced)
-                        if plain:
-                            return self._plain_to_pseudo_lrc(plain, best.get("duration") and int(best["duration"]*1000) or duration_ms)
-            except Exception:
-                pass
+            # 2) Search fallbacks: track+artist, then free-text q. Pick the best
+            #    candidate client-side (synced first, closest duration).
+            queries = []
+            if clean and artist:
+                queries.append({"track_name": clean, "artist_name": artist})
+            if clean:
+                queries.append({"q": f"{clean} {artist}".strip()})
+            for q in queries:
+                try:
+                    r = requests.get(f"{base}/search", params=q, timeout=timeout, headers=headers)
+                    if r.status_code == 200:
+                        best = self._pick_best_lyrics(r.json() or [], dur_s)
+                        res = _from(best) if best else None
+                        if res:
+                            return res
+                except Exception:
+                    logger.debug("lyrics: /search failed", exc_info=True)
 
             return []
         except Exception:
