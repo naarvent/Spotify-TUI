@@ -1,0 +1,57 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "Spotify-TUI"
+version = "0.1.0"
+description = "A Spotify client for your terminal, built with Textual."
+readme = "README.md"
+requires-python = ">=3.9"
+license = { file = "LICENSE" }
+authors = [
+    { name = "naarvent_", email = "144608717+naarvent@users.noreply.github.com" },
+]
+keywords = ["spotify", "tui", "terminal", "textual", "music", "console"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Intended Audience :: End Users/Desktop",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Topic :: Multimedia :: Sound/Audio :: Players",
+    "Topic :: Terminals",
+]
+
+# Lower bounds are the versions this release was actually tested against
+# (Python 3.14). Major-version caps are applied only to Textual and Spotipy,
+# whose public APIs change across major releases and which this project calls
+# into directly.
+dependencies = [
+    "textual>=8.2,<9",
+    "spotipy>=2.26,<3",
+    "rich>=15.0",
+    "requests>=2.31",
+    "pyfiglet>=1.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/naarvent/Spotify-TUI"
+Repository = "https://github.com/naarvent/Spotify-TUI"
+Issues = "https://github.com/naarvent/Spotify-TUI/issues"
+
+[project.scripts]
+spt-tui = "spt_tui.__main__:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["spt_tui"]
+
+[tool.hatch.build.targets.sdist]
+include = [
+    "/spt_tui",
+    "/tests",
+    "/README.md",
+    "/LICENSE",
+    "/requirements.txt",
+]
