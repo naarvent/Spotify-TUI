@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import os
 import re
+import json
+import time
 import threading
 from typing import List, Tuple
 
@@ -18,6 +21,7 @@ try:
 except Exception:
     pyfiglet = None
 
+from .. import config
 from ..config import logger
 from ..constants import WELCOME
 
@@ -69,7 +73,7 @@ class LyricsMixin:
         artists = ", ".join(a.get("name", "") for a in item.get("artists", []) if a)
         self._lyrics_title = f"{name} — {artists}" if name else ""
         self._lyrics_lines = []
-        self.lyrics_box.update(self._render_header(big=True) + "\n[b]Lyrics loading…[/b]")
+        self.lyrics_box.update(self._render_header(big=True) + self._lyrics_gap() + "[b]Lyrics loading…[/b]")
 
         try:
             self._lyrics_interval = self.set_interval(0.4, self._update_lyrics_highlight, pause=False)
@@ -78,32 +82,72 @@ class LyricsMixin:
 
         self._start_lyrics_load()
 
-    def _start_lyrics_load(self):
-        """Fetch lyrics for the current track off the UI thread."""
+    def _lyrics_gap(self) -> str:
+        """Vertical separation between the header, the status line and the lyric
+        body. Shrinks on short terminals so nothing overflows."""
+        try:
+            h = int(getattr(self.size, "height", 0) or 0)
+        except Exception:
+            h = 0
+        if h and h < 18:
+            return "\n"
+        if h and h < 26:
+            return "\n\n"
+        return "\n\n\n"
+
+    def _start_lyrics_load(self, force: bool = False):
+        """Switch the lyrics view to the current track. Metadata (title/artist)
+        comes from the cached now-playing state so the header updates instantly;
+        the LRCLIB request (or cache hit) fills the lyric body afterwards. A gen
+        counter invalidates in-flight loads so a late A never paints over B."""
         self._lyrics_gen = getattr(self, "_lyrics_gen", 0) + 1
         gen = self._lyrics_gen
         self._lyrics_loading = True
 
+        # --- immediate metadata, no network ---
+        item = getattr(self, "_bar_last_track", None) or {}
+        now_id = getattr(self, "_now_internal_track_id", None)
+        name = item.get("name") or "(no title)"
+        all_artists = [a.get("name", "") for a in (item.get("artists") or []) if a and a.get("name")]
+        artists = ", ".join(all_artists)
+        primary_artist = all_artists[0] if all_artists else artists
+        album = (item.get("album") or {}).get("name", "") if isinstance(item.get("album"), dict) else ""
+        duration_ms = int(item.get("duration_ms") or 0)
+        track_id = item.get("id") or now_id
+
+        # Track by the now-playing id so the 0.4s tick sees the change is handled
+        # (prevents a re-trigger loop when the cached item lags the id).
+        self._lyrics_track_id = now_id or track_id
+        self._lyrics_title = f"{name} — {artists}" if artists else name
+        self._lyrics_lines = []
+        if self.lyrics_box is not None:
+            self.lyrics_box.update(self._render_header(big=True) + self._lyrics_gap() + "[b]Lyrics loading…[/b]")
+
+        # --- cache first (a Ctrl+R forces a fresh fetch, ignoring negatives) ---
+        if not force:
+            cached = self._lyrics_cache_get(track_id, name, primary_artist, duration_ms, album)
+            if cached is not None:
+                self._apply_lyrics_result(gen, track_id, self._lyrics_title, cached,
+                                          "found" if cached else "notfound")
+                return
+
+        key = self._lyrics_cache_key(track_id, name, primary_artist, duration_ms, album)
+        title = self._lyrics_title
+
         def _worker():
             try:
-                pb = self.spotify.get_playback() or {}
-                item = pb.get("item") or getattr(self, "_bar_last_track", None) or {}
-                name = item.get("name") or "(no title)"
-                all_artists = [a.get("name", "") for a in (item.get("artists") or []) if a and a.get("name")]
-                artists = ", ".join(all_artists)
-                primary_artist = all_artists[0] if all_artists else artists
-                album = (item.get("album") or {}).get("name", "") if isinstance(item.get("album"), dict) else ""
-                duration_ms = int(item.get("duration_ms") or 0)
-                track_id = item.get("id") or None
-                title = f"{name} — {artists}" if artists else name
-                lines = self._fetch_synced_lyrics(
+                lines, status = self._fetch_synced_lyrics(
                     title=name, artist=primary_artist, album=album, duration_ms=duration_ms,
                 )
             except Exception:
                 logger.exception("Lyrics background load failed")
-                title, track_id, lines = self._lyrics_title, self._lyrics_track_id, []
+                lines, status = [], "error"
+            # Persist real results only; a timeout/connection error is never
+            # cached as a permanent absence.
+            if status in ("found", "notfound"):
+                self._lyrics_cache_put(key, lines if status == "found" else [], status)
             try:
-                self.call_from_thread(self._apply_lyrics_result, gen, track_id, title, lines)
+                self.call_from_thread(self._apply_lyrics_result, gen, track_id, title, lines, status)
             except Exception:
                 if getattr(self, '_closing', False):
                     logger.debug("lyrics result dropped during teardown")
@@ -112,8 +156,9 @@ class LyricsMixin:
 
         threading.Thread(target=_worker, daemon=True).start()
 
-    def _apply_lyrics_result(self, gen, track_id, title, lines):
-        # Drop results from a stale request or after the view was closed.
+    def _apply_lyrics_result(self, gen, track_id, title, lines, status="found"):
+        # Drop results from a stale request (A→B→C keeps only the newest) or
+        # after the view was closed.
         if not self._lyrics_on or gen != getattr(self, "_lyrics_gen", 0):
             return
         self._lyrics_loading = False
@@ -123,10 +168,97 @@ class LyricsMixin:
         if self.lyrics_box is None:
             return
         header = self._render_header(big=True)
-        if not self._lyrics_lines:
-            self.lyrics_box.update(header + "\n[b]Lyrics not found[/b]")
+        gap = self._lyrics_gap()
+        if self._lyrics_lines:
+            self.lyrics_box.update(header + gap + self._render_lyrics_at(self._cached_pos_ms()))
+        elif status == "error":
+            # Keep the (correct) song header; a transient failure is retryable.
+            self.lyrics_box.update(header + gap + "[b]Lyrics unavailable.[/b] Press Ctrl+R to retry.")
         else:
-            self.lyrics_box.update(header + "\n" + self._render_lyrics_at(self._cached_pos_ms()))
+            self.lyrics_box.update(header + gap + "[b]Lyrics not found[/b]")
+
+    # ------------------------------------------------------------------ #
+    # Lyrics cache (in-memory + best-effort JSON persistence)
+    # ------------------------------------------------------------------ #
+    _LYRICS_CACHE_MAX = 500
+    _LYRICS_NEG_TTL = 24 * 3600      # re-try a 'not found' after a day
+
+    def _lyrics_cache_path(self) -> str:
+        return os.path.join(config.CACHE_DIR, "lyrics_cache.json")
+
+    def _lyrics_cache(self) -> dict:
+        c = getattr(self, "_lyrics_cache_data", None)
+        if c is None:
+            c = self._lyrics_cache_load()
+            self._lyrics_cache_data = c
+        return c
+
+    def _lyrics_cache_load(self) -> dict:
+        try:
+            p = self._lyrics_cache_path()
+            if os.path.exists(p):
+                with open(p, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                if isinstance(data, dict):
+                    return data
+        except (OSError, ValueError):
+            # Corrupt or unreadable cache must never block startup.
+            logger.exception("lyrics cache load failed (ignoring)")
+        return {}
+
+    def _lyrics_cache_save(self):
+        try:
+            c = getattr(self, "_lyrics_cache_data", None) or {}
+            if len(c) > self._LYRICS_CACHE_MAX:
+                oldest = sorted(c.items(), key=lambda kv: (kv[1] or {}).get("ts", 0))
+                for k, _ in oldest[: len(c) - self._LYRICS_CACHE_MAX]:
+                    c.pop(k, None)
+            p = self._lyrics_cache_path()
+            tmp = f"{p}.{os.getpid()}.tmp"
+            with open(tmp, "w", encoding="utf-8") as f:
+                json.dump(c, f, ensure_ascii=False)
+            os.replace(tmp, p)       # atomic swap; no half-written file
+        except OSError:
+            logger.exception("lyrics cache save failed")
+
+    def _lyrics_cache_key(self, track_id, title, artist, duration_ms, album) -> str:
+        if track_id:
+            return f"id:{track_id}"
+        dur = int(round((duration_ms or 0) / 1000))
+        bucket = dur // 5            # tolerate tiny duration differences
+        ct = self._clean_track_title(title).lower().strip()
+        return f"q:{ct}|{(artist or '').lower().strip()}|{bucket}"
+
+    def _lyrics_cache_get(self, track_id, title, artist, duration_ms, album):
+        """Return parsed lines (a positive hit), [] (a cached 'not found' still
+        within its TTL) or None (miss / expired negative -> fetch)."""
+        try:
+            key = self._lyrics_cache_key(track_id, title, artist, duration_ms, album)
+            e = self._lyrics_cache().get(key)
+            if not isinstance(e, dict):
+                return None
+            if e.get("status") == "found":
+                lines = e.get("lines") or []
+                return [tuple(x) for x in lines] if lines else None
+            if e.get("status") == "notfound":
+                if (int(time.time()) - int(e.get("ts", 0))) < self._LYRICS_NEG_TTL:
+                    return []
+        except Exception:
+            logger.exception("lyrics cache get failed")
+        return None
+
+    def _lyrics_cache_put(self, key, lines, status):
+        try:
+            c = self._lyrics_cache()
+            if status == "found":
+                c[key] = {"status": "found", "lines": [list(x) for x in (lines or [])], "ts": int(time.time())}
+            elif status == "notfound":
+                c[key] = {"status": "notfound", "lines": [], "ts": int(time.time())}
+            else:
+                return               # never cache transient errors
+            self._lyrics_cache_save()
+        except Exception:
+            logger.exception("lyrics cache put failed")
 
     # lrclib asks clients to identify themselves; a missing UA can get throttled.
     _LYRICS_UA = "spt-tui (terminal Spotify client)"
@@ -172,23 +304,26 @@ class LyricsMixin:
         duration_ms: int = 0,
         album: str | None = None,
         **_ignored,
-    ) -> list[tuple[int, str]]:
+    ) -> tuple[list, str]:
+        """Return ``(lines, status)`` where status is 'found', 'notfound' (LRCLIB
+        answered with no lyrics) or 'error' (timeout / connection / rate-limit /
+        invalid response). Only 'found'/'notfound' are safe to cache."""
         try:
             if requests is None:
-                # This runs on a background thread — never touch widgets directly.
                 try:
                     self.call_from_thread(
                         lambda: self.right_panel.update("[i]Lyrics: install 'requests' to enable them (pip install requests)[/i]")
                     )
                 except Exception:
                     pass
-                return []
+                return [], "error"
 
             base = "https://lrclib.net/api"
             headers = {"User-Agent": self._LYRICS_UA}
             timeout = 8
             dur_s = max(0, int(round((duration_ms or 0) / 1000)))
             clean = self._clean_track_title(title)
+            errored = False
 
             def _from(data):
                 if not isinstance(data, dict):
@@ -203,8 +338,7 @@ class LyricsMixin:
 
             # 1) Exact-match endpoint (lrclib's best): needs track + artist;
             #    album + duration sharpen it and return duration-matched synced
-            #    lyrics. (The old code queried /get?isrc=… which lrclib rejects
-            #    with 400, so lyrics only ever came from the fragile search.)
+            #    lyrics. A 404 just means "not in the DB" (not an error).
             if clean and artist:
                 try:
                     params = {"track_name": clean, "artist_name": artist}
@@ -216,8 +350,13 @@ class LyricsMixin:
                     if r.status_code == 200:
                         res = _from(r.json() or {})
                         if res:
-                            return res
+                            return res, "found"
+                    elif r.status_code == 429:
+                        errored = True
+                except requests.exceptions.RequestException:
+                    errored = True
                 except Exception:
+                    errored = True
                     logger.debug("lyrics: /get exact failed", exc_info=True)
 
             # 2) Search fallbacks: track+artist, then free-text q. Pick the best
@@ -234,14 +373,19 @@ class LyricsMixin:
                         best = self._pick_best_lyrics(r.json() or [], dur_s)
                         res = _from(best) if best else None
                         if res:
-                            return res
+                            return res, "found"
+                    elif r.status_code == 429:
+                        errored = True
+                except requests.exceptions.RequestException:
+                    errored = True
                 except Exception:
+                    errored = True
                     logger.debug("lyrics: /search failed", exc_info=True)
 
-            return []
+            return [], ("error" if errored else "notfound")
         except Exception:
             logger.exception("Lyrics: general failure in _fetch_synced_lyrics")
-            return []
+            return [], "error"
 
     def _plain_to_pseudo_lrc(self, plain: str, duration_ms: int) -> list[tuple[int, str]]:
         lines = [ln.strip() for ln in (plain or "").splitlines() if ln.strip()]
@@ -330,17 +474,20 @@ class LyricsMixin:
             # Read the cached now-playing state (refreshed by the now-bar sync)
             # instead of hitting the network on every 0.4s tick.
             cur_id = getattr(self, "_now_internal_track_id", None)
-            if cur_id and cur_id != self._lyrics_track_id and not getattr(self, "_lyrics_loading", False):
-                self._lyrics_lines = []
+            if cur_id and cur_id != self._lyrics_track_id:
+                # Song changed: switch the header to the new song immediately (from
+                # cached metadata, no network on this tick). A previous in-flight
+                # load is invalidated by the gen counter, so A→B→C only shows C.
                 self._start_lyrics_load()
                 return
             if self.lyrics_box is None:
                 return
             header = self._render_header(big=True)
+            gap = self._lyrics_gap()
             if getattr(self, "_lyrics_loading", False) and not self._lyrics_lines:
-                self.lyrics_box.update(header + "\n[b]Lyrics loading…[/b]")
+                self.lyrics_box.update(header + gap + "[b]Lyrics loading…[/b]")
                 return
             block = self._render_lyrics_at(self._cached_pos_ms())
-            self.lyrics_box.update(header + "\n" + block)
+            self.lyrics_box.update(header + gap + block)
         except Exception:
             logger.exception("Error updating lyrics")

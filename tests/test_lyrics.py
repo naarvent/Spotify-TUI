@@ -26,7 +26,10 @@ class FakeResp:
     def __init__(self, status, payload): self.status_code = status; self._p = payload
     def json(self): return self._p
 
+import requests as _real_requests
+
 class FakeRequests:
+    exceptions = _real_requests.exceptions   # code catches requests.exceptions.*
     def __init__(self, handler): self.calls = []; self.handler = handler
     def get(self, url, params=None, timeout=None, headers=None):
         self.calls.append((url, dict(params or {}), dict(headers or {})))
@@ -65,8 +68,8 @@ def test_exact_get_first_with_primary_artist():
             return FakeResp(200, {"syncedLyrics": "[00:01.00]hello", "plainLyrics": "hello"})
         return FakeResp(200, [])
     fake = with_requests(handler)
-    lines = app._fetch_synced_lyrics(title="Save Your Tears (feat. Ariana Grande)",
-                                     artist="The Weeknd", album="After Hours", duration_ms=215000)
+    lines, status = app._fetch_synced_lyrics(title="Save Your Tears (feat. Ariana Grande)",
+                                             artist="The Weeknd", album="After Hours", duration_ms=215000)
     get_calls = [c for c in fake.calls if c[0].endswith("/get")]
     p = get_calls[0][1] if get_calls else {}
     check("exact /get tried first", len(get_calls) >= 1)
@@ -74,7 +77,7 @@ def test_exact_get_first_with_primary_artist():
     check("query uses primary artist + album + duration",
           p.get("artist_name") == "The Weeknd" and p.get("album_name") == "After Hours" and p.get("duration") == 215,
           f"p={p}")
-    check("exact /get synced lyrics parsed", lines == [(1000, "hello")], f"lines={lines}")
+    check("exact /get synced lyrics parsed", lines == [(1000, "hello")] and status == "found", f"lines={lines} status={status}")
     check("User-Agent header sent", "User-Agent" in (get_calls[0][2] if get_calls else {}))
 
 
@@ -89,22 +92,34 @@ def test_search_fallback_picks_closest_duration():
             {"duration": 191, "syncedLyrics": "[00:02.00]right"},
         ])
     fake = with_requests(handler)
-    lines = app._fetch_synced_lyrics(title="Save Your Tears", artist="The Weeknd", duration_ms=191000)
+    lines, status = app._fetch_synced_lyrics(title="Save Your Tears", artist="The Weeknd", duration_ms=191000)
     search_calls = [c for c in fake.calls if c[0].endswith("/search")]
     check("falls back to /search after /get miss", len(search_calls) >= 1)
     check("picks closest-duration synced result (not the first)",
-          lines == [(2000, "right")], f"lines={lines}")
+          lines == [(2000, "right")] and status == "found", f"lines={lines} status={status}")
 
 
-def test_returns_empty_when_nothing_found():
+def test_notfound_status_when_lrclib_answers_empty():
     app = make_app()
     fake = with_requests(lambda url, params: FakeResp(404, {}) if url.endswith("/get") else FakeResp(200, []))
-    lines = app._fetch_synced_lyrics(title="Nonexistent", artist="Nobody", duration_ms=100000)
-    check("no results -> empty list (no crash)", lines == [], f"lines={lines}")
+    lines, status = app._fetch_synced_lyrics(title="Nonexistent", artist="Nobody", duration_ms=100000)
+    check("LRCLIB answered but empty -> status 'notfound'", lines == [] and status == "notfound",
+          f"lines={lines} status={status}")
+
+
+def test_error_status_on_network_failure():
+    app = make_app()
+    def boom(url, params):
+        raise _real_requests.exceptions.Timeout("slow")
+    fake = with_requests(boom)
+    lines, status = app._fetch_synced_lyrics(title="Song", artist="Artist", duration_ms=100000)
+    check("timeout/connection failure -> status 'error' (never cached as absence)",
+          lines == [] and status == "error", f"lines={lines} status={status}")
 
 
 ALL = [test_clean_title, test_exact_get_first_with_primary_artist,
-       test_search_fallback_picks_closest_duration, test_returns_empty_when_nothing_found]
+       test_search_fallback_picks_closest_duration, test_notfound_status_when_lrclib_answers_empty,
+       test_error_status_on_network_failure]
 
 def main():
     orig = lv.requests

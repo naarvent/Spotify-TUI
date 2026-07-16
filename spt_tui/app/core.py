@@ -774,6 +774,15 @@ class CoreMixin:
 
     def action_refresh(self) -> None:
         try:
+            # In the lyrics view, Ctrl+R forces a fresh LRCLIB fetch and ignores
+            # any cached negative ('not found') entry for this song.
+            if getattr(self, '_lyrics_on', False):
+                try:
+                    self._start_lyrics_load(force=True)
+                except Exception:
+                    logger.exception("action_refresh: lyrics reload failed")
+                return
+
             rv = getattr(self, "_right_view", None)
 
             try:
