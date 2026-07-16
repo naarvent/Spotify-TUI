@@ -24,7 +24,7 @@ except Exception:
 
 from .. import config
 from ..config import logger, LOG_PATH
-from ..constants import WELCOME, LIBRARY_ITEMS
+from ..constants import WELCOME, WELCOME_SPOTIFY_ART, WELCOME_AUTHOR, LIBRARY_ITEMS
 from ..spotify_client import SpotifyClient
 from ..widgets import HelpScroll
 
@@ -87,6 +87,9 @@ class CoreMixin:
         self._multi_add_selected_rows: set = set()
         self._pending_multi_add_uris: Optional[List[str]] = None
         self._help_on: bool = False
+        # Welcome is what compose() shows first; on_resize keeps it responsive.
+        self._welcome_on: bool = True
+        self._welcome_variant: str = "large"
 
     def compose(self) -> ComposeResult:
         self.right_panel = Static(Text(WELCOME), id="right")
@@ -291,10 +294,94 @@ class CoreMixin:
 
     def _clear_right(self):
         right: Static = self.right_panel
+        # Any view taking over the right panel is no longer the welcome screen,
+        # so on_resize must stop re-rendering the welcome into it.
+        self._welcome_on = False
         right.update("")
         for w in list(right.children):
             w.remove()
         return right
+
+    # ------------------------------------------------------------------ #
+    # Responsive welcome screen
+    # ------------------------------------------------------------------ #
+    def _welcome_dims(self, tw: int, th: int):
+        """Approximate the right panel's content area from a terminal size.
+
+        Layout chrome: the 38-col left column + ~6 cols of grid gutter/borders,
+        and ~15 rows for the search bar + now-playing bar. When the left column
+        is collapsed only the borders are subtracted."""
+        collapsed = False
+        try:
+            collapsed = self.query_one("#grid").has_class("left-collapsed")
+        except Exception:
+            collapsed = False
+        return max(0, int(tw or 0) - (6 if collapsed else 44)), max(0, int(th or 0) - 15)
+
+    def _welcome_panel_size(self):
+        # self.size is correct on a stable layout (used by _paint_welcome); on a
+        # resize event self.size lags, so on_resize passes event.size instead.
+        try:
+            return self._welcome_dims(int(self.size.width or 0), int(self.size.height or 0))
+        except Exception:
+            return 80, 24
+
+    def _welcome_variant_for(self, w: int, h: int) -> str:
+        """Choose a welcome layout by available panel size. Thresholds are the
+        content width × height; each level drops the piece that no longer fits:
+          large   (w>=90, h>=20): Spotify figlet + portrait art + author
+          medium  (w>=46, h>=12): Spotify figlet + author (portrait dropped)
+          small   (w>=22, h>=5) : 3-line text header + author
+          minimal (otherwise)   : title + author only
+        """
+        w, h = int(w or 0), int(h or 0)
+        if w >= 90 and h >= 20:
+            return "large"
+        if w >= 46 and h >= 12:
+            return "medium"
+        if w >= 22 and h >= 5:
+            return "small"
+        return "minimal"
+
+    def _render_welcome(self, width: int, height: int) -> str:
+        v = self._welcome_variant_for(width, height)
+        if v == "large":
+            return WELCOME
+        if v == "medium":
+            return "\n\n" + WELCOME_SPOTIFY_ART + "\n\n\n" + WELCOME_AUTHOR + "\n"
+        if v == "small":
+            return "\n\nSPT-TUI\nSpotify in your terminal\n\n" + WELCOME_AUTHOR + "\n"
+        return "SPT-TUI\n" + WELCOME_AUTHOR
+
+    def _paint_welcome(self):
+        """Render the size-appropriate welcome into the (already-clear) panel."""
+        w, h = self._welcome_panel_size()
+        self._welcome_variant = self._welcome_variant_for(w, h)
+        try:
+            self.right_panel.update(self._render_welcome(w, h))
+        except Exception:
+            logger.exception("could not paint welcome")
+        self._welcome_on = True
+
+    def on_resize(self, event) -> None:
+        # Only re-render while the welcome is actually showing, and only when the
+        # chosen variant changes — so resizing never flickers the welcome and
+        # never touches another open view (search/playlist/lyrics/help/…). Use
+        # event.size: self.size still holds the pre-resize value at this point.
+        if not getattr(self, "_welcome_on", False):
+            return
+        try:
+            tw, th = int(event.size.width), int(event.size.height)
+        except Exception:
+            tw, th = int(self.size.width or 0), int(self.size.height or 0)
+        w, h = self._welcome_dims(tw, th)
+        variant = self._welcome_variant_for(w, h)
+        if variant != getattr(self, "_welcome_variant", None):
+            self._welcome_variant = variant
+            try:
+                self.right_panel.update(self._render_welcome(w, h))
+            except Exception:
+                logger.exception("welcome resize repaint failed")
 
     def on_input_submitted(self, event: Input.Submitted) -> None:
 

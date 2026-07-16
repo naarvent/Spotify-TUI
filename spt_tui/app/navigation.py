@@ -695,8 +695,8 @@ class NavigationMixin:
         try:
             self.right_panel.remove_class("lyrics-mode")
         except Exception: pass
-        right = self._clear_right()
-        right.update(WELCOME)
+        self._clear_right()
+        self._paint_welcome()   # size-appropriate welcome (responsive)
         # Back at the menu there is no active right-hand view: invalidate the
         # view token so any in-flight loader (library, playlist, search) sees it
         # is no longer current and does not paint its table over the menu.
