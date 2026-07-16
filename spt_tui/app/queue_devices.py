@@ -162,6 +162,7 @@ class QueueDevicesMixin:
             logger.exception('action_add_to_playlist failed')
 
     def action_open_queue(self):
+        self._leave_lyrics_mode()
         self._new_view_token("queue", "")
 
         try:
@@ -260,6 +261,7 @@ class QueueDevicesMixin:
             logger.exception('_show_playlists_for_adding failed')
 
     def action_manage_devices(self):
+        self._leave_lyrics_mode()
         try:
             if getattr(self, 'level', None) == self.LVL_VIEW:
                 try:

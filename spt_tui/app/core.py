@@ -717,6 +717,7 @@ class CoreMixin:
             raw = event.value.strip()
             if not raw: return
 
+            self._leave_lyrics_mode()   # running a search exits lyrics
             try:
                 self.right_panel.update(f"[b]Searching:[/b] {rich_escape(raw)} …")
             except Exception:
@@ -839,6 +840,7 @@ class CoreMixin:
                 return
         except Exception:
             pass
+        self._leave_lyrics_mode()   # opening Help exits lyrics
         help_text = f"""[b]Help & Keybindings[/b]
 
     [b]Main / Navigation[/b]
@@ -933,15 +935,7 @@ class CoreMixin:
             return
         if self._suppress_first_selection:
             self._suppress_first_selection = False; return
-        if getattr(self, '_lyrics_on', False):
-            try:
-                self._lyrics_on = False
-                try: self.right_panel.remove_class('lyrics-mode')
-                except Exception: pass
-                try: self.lyrics_box = None
-                except Exception: pass
-            except Exception:
-                pass
+        self._leave_lyrics_mode()
         if sender.id == "pl_list" and event.index is not None:
             li: ListItem = sender.children[event.index]
             pdata = getattr(li, "data", {})

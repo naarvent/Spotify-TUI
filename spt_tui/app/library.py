@@ -140,6 +140,7 @@ class LibraryMixin:
         fn = handlers.get(name)
         if fn is None:
             return False
+        self._leave_lyrics_mode()   # opening any library view exits lyrics
         try:
             fn()
         except Exception:
@@ -232,6 +233,7 @@ class LibraryMixin:
             self.call_from_thread(show_err)
 
     def _open_playlist_table(self, pdata: Dict):
+        self._leave_lyrics_mode()
         pl_id = pdata.get("id",""); pl_name = pdata.get("name","")
 
         token = self._new_view_token("playlist", pl_id)

@@ -718,13 +718,9 @@ class NavigationMixin:
         except Exception:
             pass
 
-        if self._lyrics_timer:
-            try: self._lyrics_timer.pause()
-            except Exception: pass
-            self._lyrics_timer = None
-        self._lyrics_on = False
-        self._lyrics_track_id = None
-        self.lyrics_box = None
+        # Full, idempotent lyrics teardown (also stops the 0.4s tick, which the
+        # old ad-hoc cleanup here missed — it paused a never-set _lyrics_timer).
+        self._leave_lyrics_mode()
 
         try:
             if hasattr(self, "lib_list") and self.lib_list is not None:

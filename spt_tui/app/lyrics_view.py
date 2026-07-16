@@ -26,26 +26,35 @@ from ..config import logger
 from ..constants import WELCOME
 
 class LyricsMixin:
+    def _leave_lyrics_mode(self):
+        """Idempotent teardown of the lyrics view: stop the 0.4s tick, invalidate
+        any in-flight load (so a late worker can't paint), and drop the lyrics
+        widget/CSS state. Does NOT navigate anywhere — callers decide the next
+        view. Safe to call twice and safe to call when lyrics were never open."""
+        if (not getattr(self, "_lyrics_on", False)
+                and getattr(self, "_lyrics_interval", None) is None
+                and getattr(self, "lyrics_box", None) is None):
+            return  # already clean
+        self._lyrics_on = False
+        self._lyrics_loading = False
+        self._lyrics_gen = getattr(self, "_lyrics_gen", 0) + 1   # invalidate in-flight loads
+        it = getattr(self, "_lyrics_interval", None)
+        if it is not None:
+            try:
+                it.pause()
+            except Exception:
+                pass
+            self._lyrics_interval = None
+        try:
+            self.right_panel.remove_class("lyrics-mode")
+        except Exception:
+            pass
+        self._lyrics_track_id = None
+        self.lyrics_box = None
+
     def action_toggle_lyrics(self):
         if self._lyrics_on:
-            self._lyrics_on = False
-            self._lyrics_loading = False
-            self._lyrics_gen = getattr(self, "_lyrics_gen", 0) + 1  # invalidate in-flight loads
-            if self._lyrics_interval:
-                try:
-                    self._lyrics_interval.pause()
-                except Exception:
-                    pass
-                self._lyrics_interval = None
-            try:
-                self.right_panel.remove_class("lyrics-mode")
-            except Exception:
-                pass
-            try:
-                self._lyrics_track_id = None
-                self.lyrics_box = None
-            except Exception:
-                pass
+            self._leave_lyrics_mode()
             try:
                 self.action_escape_to_menu()
             except Exception:
