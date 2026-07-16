@@ -7,6 +7,7 @@ import threading
 from typing import Dict, List, Optional
 
 from textual.widgets import Static, DataTable
+from textual.css.query import NoMatches
 from rich.markup import escape as rich_escape
 from rich.text import Text
 
@@ -43,7 +44,7 @@ class TablesMixin:
         """Re-paint the visible tracks table so the playing row is marked purple."""
         try:
             table = self.query_one("#tracks_table", DataTable)
-        except Exception:
+        except NoMatches:
             return
         try:
             if getattr(table, "_model_rows", None):

@@ -9,6 +9,7 @@ import webbrowser
 from typing import Dict, List
 
 from textual.widgets import Input, Static, ListItem, Label, DataTable
+from textual.css.query import NoMatches
 from rich.markup import escape as rich_escape
 
 try:
@@ -286,7 +287,7 @@ class LibraryMixin:
                     return
                 try:
                     table = self.query_one("#tracks_table", DataTable)
-                except Exception:
+                except NoMatches:
                     table = None
                 if table is None:
                     # No preview was shown (single-page playlist): fresh render.

@@ -746,7 +746,7 @@ class CoreMixin:
         """Parse and persist one seek/volume numeric setting. False on bad input."""
         try:
             v = max(0, int(str(value).strip()))
-        except Exception:
+        except (TypeError, ValueError):
             try:
                 self.right_panel.update(f'[b]Invalid number for {label}.[/b]')
             except Exception:

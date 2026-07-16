@@ -264,7 +264,7 @@ class QueueDevicesMixin:
             if getattr(self, 'level', None) == self.LVL_VIEW:
                 try:
                     tbl = self.query_one('#devices_table', DataTable)
-                except Exception:
+                except NoMatches:
                     tbl = None
                 if tbl is not None:
                     try:
@@ -288,7 +288,7 @@ class QueueDevicesMixin:
         right = self._clear_right()
         try:
             table = self.query_one("#devices_table", DataTable)
-        except Exception:
+        except NoMatches:
             table = None
         if table is None:
             table = ResizableDataTable(id="devices_table")
@@ -457,7 +457,7 @@ class QueueDevicesMixin:
                     try:
                         table = None
                         try: table = self.query_one("#queue_table", DataTable)
-                        except Exception: table = None
+                        except NoMatches: table = None
                         if table is None:
                             return
                         table.clear()

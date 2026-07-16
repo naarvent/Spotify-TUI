@@ -542,11 +542,11 @@ class PlaybackMixin:
     def _seek_step_ms(self, typ: Optional[str]) -> int:
         try:
             track_s = int((config.LOCAL_CFG.get('seek_seconds_track') if isinstance(config.LOCAL_CFG, dict) else None) or 5)
-        except Exception:
+        except (TypeError, ValueError):
             track_s = 5
         try:
             episode_s = int((config.LOCAL_CFG.get('seek_seconds_episode') if isinstance(config.LOCAL_CFG, dict) else None) or 15)
-        except Exception:
+        except (TypeError, ValueError):
             episode_s = 15
         return (episode_s * 1000) if typ == "episode" else (track_s * 1000)
 
