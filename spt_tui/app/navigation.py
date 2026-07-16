@@ -694,6 +694,10 @@ class NavigationMixin:
         except Exception: pass
         right = self._clear_right()
         right.update(WELCOME)
+        # Back at the menu there is no active right-hand view: invalidate the
+        # view token so any in-flight loader (library, playlist, search) sees it
+        # is no longer current and does not paint its table over the menu.
+        self._right_view = None
         try:
             if self.spotify.has_cached_token():
                 threading.Thread(target=self._load_playlists, args=(True,), daemon=True).start()

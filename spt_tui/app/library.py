@@ -403,144 +403,227 @@ class LibraryMixin:
 
         threading.Thread(target=worker, daemon=True).start()
 
-    def _open_saved_podcasts(self):
-        token = self._new_view_token("podcasts", "")
+    def _stream_library_view(self, *, key, title, loading_msg, empty_msg, fetch_page, tracks_mode):
+        """Responsive, deduplicated loader shared by the saved-library views.
+
+        - Immediate uniform feedback (Loading…) and, when a same-session cache
+          exists, an instant paint of the cached rows before the network runs.
+        - Progressive per-page paint on a cold load; the table widget is reused
+          so the cursor/scroll are preserved (see _repaint_rows_from_model).
+        - A single source of truth per view via the view token: a newer open (or
+          leaving the view, or teardown) stops this worker fetching and painting,
+          so a double Enter / Ctrl+R never accumulates workers and a stale load
+          never overwrites a newer view.
+        - Errors are kept distinct from an empty collection; partial data is
+          preserved and never blanked.
+
+        ``fetch_page(offset) -> (rows, has_next)`` runs in the worker and may
+        raise; ``tracks_mode`` picks the tracks vs search render path.
+        """
+        token = self._new_view_token(key, "")
         rv = getattr(self, "_right_view", None)
         if rv and len(rv) >= 3:
             try:
                 self._right_view = (rv[0], rv[1], rv[2], None)
             except Exception:
                 pass
-        self._safe_update_right("podcasts", "", token, "[b]Loading Saved Podcasts[/b]")
+
+        if getattr(self, "_lib_cache", None) is None:
+            self._lib_cache = {}
+        cache = self._lib_cache
+        # Newest-load-per-key marker: lets a worker fill the cache even after the
+        # user leaves the view, while a superseding load still wins the cache.
+        if getattr(self, "_lib_gen", None) is None:
+            self._lib_gen = {}
+        self._lib_gen[key] = token
+        cached = cache.get(key)
+        progressive = cached is None
+        state = {"table": None}
+
+        def current():
+            return (not getattr(self, "_closing", False)) and self._is_current_view(key, "", token)
+
+        def render_first(rows):
+            if tracks_mode:
+                return self._render_tracks_table(
+                    title, rows, [True] * len(rows),
+                    context_uris=[r["uri"] for r in rows],
+                )
+            # Saved-library items are saved by definition — skip the redundant
+            # saved-state revalidation the search view would otherwise fire.
+            return self._render_search_table(title, rows, check_saved=False)
+
+        def refresh_model(tbl, rows):
+            if tbl is None:
+                return render_first(rows)
+            tbl._model_rows = list(rows)
+            if tracks_mode:
+                tbl._liked_map = {i: True for i in range(len(rows))}
+                tbl._context_uris = [r["uri"] for r in rows]
+            self._repaint_rows_from_model(tbl)
+            return tbl
+
+        def set_status(msg):
+            # Only the tracks view has an id'd title Static; a no-op elsewhere.
+            try:
+                self.query_one("#tracks_title", Static).update(msg)
+            except NoMatches:
+                pass
+
+        def setup():
+            if not current():
+                return
+            right = self._clear_right()
+            right.update(loading_msg)
+            if cached:
+                state["table"] = render_first(list(cached))
+                set_status(f"{title}  [dim](refreshing…)[/dim]")
 
         def worker():
+            try:
+                self.call_from_thread(setup)
+            except Exception:
+                if getattr(self, "_closing", False):
+                    logger.debug("library %s setup dropped during teardown", key)
+                    return
+                logger.exception("library %s setup failed", key)
+
             rows = []
+            errored = False
             offset = 0
             try:
-                sp = self.spotify.ensure()
                 while True:
-                    page = None
-                    try:
-                        page = sp.current_user_saved_shows(limit=50, offset=offset) or {}
-                    except Exception:
+                    if not current():
+                        return  # superseded / left / closing: stop fetching
+                    page_rows, has_next = fetch_page(offset)
+                    rows += page_rows
+                    if progressive:
+                        snap, hn = list(rows), has_next
+                        def emit(snap=snap, hn=hn):
+                            if not current():
+                                return
+                            state["table"] = refresh_model(state["table"], snap)
+                            set_status(f"{title}  [dim](loading {len(snap)}…)[/dim]" if hn else title)
                         try:
-                            page = sp.current_user_saved_shows(limit=50) or {}
+                            self.call_from_thread(emit)
                         except Exception:
-                            page = {}
-                    for it in page.get('items', []):
-                        show = (it.get('show') or {})
-                        if not show: continue
-                        rows.append({
-                            "type": "podcast",
-                            "id": show.get("id"),
-                            "uri": show.get("uri") or show.get("external_urls", {}).get("spotify", ""),
-                            "title": show.get("name", "(no title)"),
-                            "artist": show.get('publisher',''),
-                            "album": "",
-                            "dur": "",
-                            "raw": show,
-                            "saved": True,
-                        })
-                    if page.get('next'):
-                        offset += 50
-                    else:
+                            if getattr(self, "_closing", False):
+                                return
+                            logger.exception("library %s progressive paint failed", key)
+                    if not has_next:
                         break
+                    offset += 50
             except Exception:
-                logger.exception("_open_saved_podcasts: error fetching saved shows/podcasts")
+                logger.exception("library %s page fetch failed", key)
+                errored = True
 
-            def paint():
-                if not self._is_current_view("podcasts", "", token): return
-                title = "[b]Saved Podcasts[/b]"
-                self._render_search_table(title, rows)
-            self.call_from_thread(paint)
+            # Cache a clean full load independently of painting: a worker may
+            # finish after the user left the view (it fills the cache) but only
+            # the newest load for this key is allowed to write it.
+            if not errored and rows and self._lib_gen.get(key) == token:
+                cache[key] = list(rows)
+
+            def finalize():
+                if not current():
+                    return
+                if errored:
+                    if state["table"] is not None or cached:
+                        # Keep whatever we already have; never blank on a
+                        # transient failure.
+                        set_status(f"{title}  [dim](partial — Ctrl+R to retry)[/dim]")
+                    else:
+                        self._clear_right().update("[b]Could not load. Press Ctrl+R to retry.[/b]")
+                    return
+                if not rows:
+                    self._clear_right().update(empty_msg)
+                    return
+                state["table"] = refresh_model(state["table"], rows)
+                set_status(title)
+            try:
+                self.call_from_thread(finalize)
+            except Exception:
+                if getattr(self, "_closing", False):
+                    logger.debug("library %s finalize dropped during teardown", key)
+                else:
+                    logger.exception("library %s finalize failed", key)
 
         threading.Thread(target=worker, daemon=True).start()
+
+    def _open_saved_podcasts(self):
+        def fetch_page(offset):
+            sp = self.spotify.ensure()
+            try:
+                page = sp.current_user_saved_shows(limit=50, offset=offset) or {}
+            except TypeError:
+                page = sp.current_user_saved_shows(limit=50) or {}
+            rows = []
+            for it in page.get('items', []):
+                show = (it.get('show') or {})
+                if not show:
+                    continue
+                rows.append({
+                    "type": "podcast", "id": show.get("id"),
+                    "uri": show.get("uri") or show.get("external_urls", {}).get("spotify", ""),
+                    "title": show.get("name", "(no title)"), "artist": show.get('publisher', ''),
+                    "album": "", "dur": "", "raw": show, "saved": True,
+                })
+            return rows, bool(page.get('next'))
+        self._stream_library_view(
+            key="podcasts", title="[b]Saved Podcasts[/b]",
+            loading_msg="[b]Loading Saved Podcasts…[/b]",
+            empty_msg="[b]No saved podcasts yet.[/b]",
+            fetch_page=fetch_page, tracks_mode=False)
 
     def _open_saved_episodes(self):
-        token = self._new_view_token("episodes", "")
-        rv = getattr(self, "_right_view", None)
-        if rv and len(rv) >= 3:
+        def fetch_page(offset):
+            sp = self.spotify.ensure()
             try:
-                self._right_view = (rv[0], rv[1], rv[2], None)
-            except Exception:
-                pass
-        self._safe_update_right("episodes", "", token, "[b]Loading Saved Episodes[/b]")
-
-        def worker():
+                page = sp.current_user_saved_episodes(limit=50, offset=offset) or {}
+            except TypeError:
+                page = sp.current_user_saved_episodes(limit=50) or {}
             rows = []
-            offset = 0
-            try:
-                sp = self.spotify.ensure()
-                while True:
-                    page = None
-                    try:
-                        page = sp.current_user_saved_episodes(limit=50, offset=offset) or {}
-                    except Exception:
-                        try:
-                            page = sp.current_user_saved_episodes(limit=50) or {}
-                        except Exception:
-                            page = {}
-                    for it in page.get('items', []):
-                        ep = (it.get('episode') or {})
-                        if not ep: continue
-                        rows.append({
-                            "type": "episode",
-                            "id": ep.get("id"),
-                            "uri": ep.get("uri") or ep.get("external_urls", {}).get("spotify", ""),
-                            "title": ep.get("name", "(no title)"),
-                            "artist": ep.get('show', {}).get('name',''),
-                            "album": "",
-                            "dur": self.spotify.fmt_duration(ep.get('duration_ms') or 0),
-                            "raw": ep,
-                            "saved": True,
-                        })
-                    if page.get('next'):
-                        offset += 50
-                    else:
-                        break
-            except Exception:
-                logger.exception("_open_saved_episodes: error fetching saved episodes")
-
-            def paint():
-                if not self._is_current_view("episodes", "", token): return
-                title = "[b]Saved Episodes[/b]"
-                self._render_search_table(title, rows)
-            self.call_from_thread(paint)
-
-        threading.Thread(target=worker, daemon=True).start()
+            for it in page.get('items', []):
+                ep = (it.get('episode') or {})
+                if not ep:
+                    continue
+                rows.append({
+                    "type": "episode", "id": ep.get("id"),
+                    "uri": ep.get("uri") or ep.get("external_urls", {}).get("spotify", ""),
+                    "title": ep.get("name", "(no title)"),
+                    "artist": ep.get('show', {}).get('name', ''),
+                    "album": "", "dur": self.spotify.fmt_duration(ep.get('duration_ms') or 0),
+                    "raw": ep, "saved": True,
+                })
+            return rows, bool(page.get('next'))
+        self._stream_library_view(
+            key="episodes", title="[b]Saved Episodes[/b]",
+            loading_msg="[b]Loading Saved Episodes…[/b]",
+            empty_msg="[b]No saved episodes yet.[/b]",
+            fetch_page=fetch_page, tracks_mode=False)
 
     def _open_liked_table(self):
-        token = self._new_view_token("liked", "")
-        rv = getattr(self, "_right_view", None)
-        if rv and len(rv) >= 3:
-            self._right_view = (rv[0], rv[1], rv[2], None)
-        self._safe_update_right("liked", "", token, "[b]Loading Liked Songs…[/b]")
-        def worker():
-            rows, offset = [], 0
-            while True:
-                page = self.spotify.saved_tracks(limit=50, offset=offset)
-                for it in page.get("items", []):
-                    track = (it.get("track") or {})
-                    if not track: continue
-                    rows.append({
-                        "id": track.get("id"),
-                        "uri": track.get("uri"),
-                        "title": track.get("name", ""),
-                        "artist": ", ".join(a.get("name", "") for a in track.get("artists", [])),
-                        "album": (track.get("album", {}) or {}).get("name", ""),
-                        "dur": self.spotify.fmt_duration(track.get("duration_ms") or 0),
-                        "added": SpotifyClient.fmt_date(it.get("added_at")),
-                    })
-                if page.get("next"): offset += 50
-                else: break
-            def paint():
-                if not self._is_current_view("liked", "", token): return
-                liked = [True] * len(rows)
-                table = self._render_tracks_table("[b]Liked Songs[/b]", rows, liked, context_uris=[r["uri"] for r in rows])
-                if table is not None:
-                    self._revalidate_liked_column(table, max_rows=100)
-            self.call_from_thread(paint)
-        threading.Thread(target=worker, daemon=True).start()
+        def fetch_page(offset):
+            page = self.spotify.saved_tracks(limit=50, offset=offset) or {}
+            rows = []
+            for it in page.get("items", []):
+                track = (it.get("track") or {})
+                if not track:
+                    continue
+                rows.append({
+                    "id": track.get("id"), "uri": track.get("uri"),
+                    "title": track.get("name", ""),
+                    "artist": ", ".join(a.get("name", "") for a in track.get("artists", [])),
+                    "album": (track.get("album", {}) or {}).get("name", ""),
+                    "dur": self.spotify.fmt_duration(track.get("duration_ms") or 0),
+                    "added": SpotifyClient.fmt_date(it.get("added_at")),
+                })
+            return rows, bool(page.get("next"))
+        # A Liked Songs view implies every track is saved — no check_saved_tracks.
+        self._stream_library_view(
+            key="liked", title="[b]Liked Songs[/b]",
+            loading_msg="[b]Loading Liked Songs…[/b]",
+            empty_msg="[b]No Liked Songs yet.[/b]",
+            fetch_page=fetch_page, tracks_mode=True)
 
     def _open_recently_table(self):
         token = self._new_view_token("recent", "")
@@ -574,49 +657,26 @@ class LibraryMixin:
         threading.Thread(target=worker, daemon=True).start()
 
     def _open_saved_albums(self):
-        token = self._new_view_token("albums", "")
-        rv = getattr(self, "_right_view", None)
-        if rv and len(rv) >= 3:
-            try:
-                self._right_view = (rv[0], rv[1], rv[2], None)
-            except Exception:
-                pass
-        self._safe_update_right("albums", "", token, "[b]Loading Saved Albums[/b]")
-
-        def worker():
+        def fetch_page(offset):
+            page = self.spotify.ensure().current_user_saved_albums(limit=50, offset=offset) or {}
             rows = []
-            offset = 0
-            try:
-                while True:
-                    page = self.spotify.ensure().current_user_saved_albums(limit=50, offset=offset) or {}
-                    for it in page.get("items", []):
-                        album = (it.get("album") or {})
-                        if not album: continue
-                        rows.append({
-                            "type": "album",
-                            "id": album.get("id"),
-                            "uri": album.get("uri") or album.get("external_urls", {}).get("spotify", ""),
-                            "title": album.get("name", "(no title)"),
-                            "artist": ", ".join([a.get("name", "") for a in (album.get("artists") or [])]),
-                            "album": "",
-                            "dur": "",
-                            "raw": album,
-                            "saved": True,
-                        })
-                    if page.get("next"):
-                        offset += 50
-                    else:
-                        break
-            except Exception:
-                logger.exception("_open_saved_albums: error fetching saved albums")
-
-            def paint():
-                if not self._is_current_view("albums", "", token): return
-                title = "[b]Saved Albums[/b]"
-                self._render_search_table(title, rows)
-            self.call_from_thread(paint)
-
-        threading.Thread(target=worker, daemon=True).start()
+            for it in page.get("items", []):
+                album = (it.get("album") or {})
+                if not album:
+                    continue
+                rows.append({
+                    "type": "album", "id": album.get("id"),
+                    "uri": album.get("uri") or album.get("external_urls", {}).get("spotify", ""),
+                    "title": album.get("name", "(no title)"),
+                    "artist": ", ".join([a.get("name", "") for a in (album.get("artists") or [])]),
+                    "album": "", "dur": "", "raw": album, "saved": True,
+                })
+            return rows, bool(page.get("next"))
+        self._stream_library_view(
+            key="albums", title="[b]Saved Albums[/b]",
+            loading_msg="[b]Loading Saved Albums…[/b]",
+            empty_msg="[b]No saved albums yet.[/b]",
+            fetch_page=fetch_page, tracks_mode=False)
 
     def _open_import_playlists(self):
         try:

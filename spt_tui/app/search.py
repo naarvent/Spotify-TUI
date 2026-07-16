@@ -416,7 +416,7 @@ class SearchMixin:
             except Exception:
                 pass
 
-    def _render_search_table(self, title: str, rows: List[Dict]):
+    def _render_search_table(self, title: str, rows: List[Dict], check_saved: bool = True):
         right = self._clear_right()
         table = self._create_table_with_full_width(
             ["S", "Type", "Title", "Artist/Owner", "Album", "Duration", "Source"],
@@ -448,7 +448,7 @@ class SearchMixin:
         table.focus()
         self.level = self.LVL_VIEW
         try:
-            if not getattr(table, '_saved_check_done', False):
+            if check_saved and not getattr(table, '_saved_check_done', False):
                 table._saved_check_done = True
                 def _one_shot():
                     try:

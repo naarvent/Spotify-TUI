@@ -797,10 +797,20 @@ class CoreMixin:
                     threading.Thread(target=lambda: self._open_playlist_table(pdata), daemon=True).start(); return
 
             if rv and rv[0] == 'liked':
-                self._force_revalidate_likes_once = True
-                threading.Thread(target=self._open_liked_table, daemon=True).start(); return
+                self._open_liked_table(); return
             if rv and rv[0] == 'recent':
                 threading.Thread(target=self._open_recently_table, daemon=True).start(); return
+            # Ctrl+R must retry the *current* saved-library view (previously these
+            # fell through and reloaded playlists). The loaders are token-guarded,
+            # so a repeated Ctrl+R supersedes the old load instead of stacking.
+            if rv and rv[0] == 'albums':
+                self._open_saved_albums(); return
+            if rv and rv[0] == 'podcasts':
+                self._open_saved_podcasts(); return
+            if rv and rv[0] == 'episodes':
+                self._open_saved_episodes(); return
+            if rv and rv[0] == 'artists':
+                self._open_saved_artists(); return
 
             self._force_revalidate_likes_once = True
             threading.Thread(target=lambda: self._load_playlists(force=True), daemon=True).start()
