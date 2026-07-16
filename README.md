@@ -1,14 +1,16 @@
 # Spotify-TUI
 
-A Spotify client for your terminal, built with [Textual](https://github.com/Textualize/textual).
+A fast keyboard-driven Spotify client for the terminal, built with [Textual](https://github.com/Textualize/textual).
 Search, browse your library and playlists, control playback, follow along with
 synced lyrics, manage your queue and devices — all from the keyboard.
 
-**Status:** `v0.1.0` — early release (alpha). It works and is covered by a
-regression test suite, but APIs and behaviour may still change before `1.0`.
+**Status:** v0.1.0 (early release). It works and is covered by a regression test
+suite, but APIs and behaviour may still change before `1.0`.
 
-![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)
+![Version](https://img.shields.io/badge/version-0.1.0-blue.svg)
 ![Python](https://img.shields.io/badge/python-3.9%2B-blue.svg)
+![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)
+![Textual](https://img.shields.io/badge/Textual-8.x-5a4fcf.svg)
 
 ---
 
