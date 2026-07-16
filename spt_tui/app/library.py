@@ -200,7 +200,10 @@ class LibraryMixin:
                 try:
                     self.call_from_thread(_paint_empty)
                 except Exception:
-                    _paint_empty()
+                    if getattr(self, '_closing', False):
+                        logger.debug("playlists empty paint dropped during teardown")
+                    else:
+                        logger.exception("playlists empty paint: call_from_thread failed")
                 return
 
             items: List[Dict] = []; offset = 0

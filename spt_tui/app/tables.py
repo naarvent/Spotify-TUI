@@ -432,7 +432,10 @@ class TablesMixin:
             try:
                 self.call_from_thread(paint)
             except Exception:
-                paint()
+                if getattr(self, '_closing', False):
+                    logger.debug("saved-column repaint dropped during teardown")
+                else:
+                    logger.exception("saved-column repaint: call_from_thread failed")
         except Exception:
             logger.exception('_revalidate_saved_column failed')
 

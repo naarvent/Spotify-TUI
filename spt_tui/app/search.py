@@ -147,7 +147,10 @@ class SearchMixin:
             try:
                 self.call_from_thread(show_err)
             except Exception:
-                show_err()
+                if getattr(self, '_closing', False):
+                    logger.debug("search error paint dropped during teardown")
+                else:
+                    logger.exception("search error paint: call_from_thread failed")
             return
 
         # Drop the render if the app is closing: scheduling a callback on a

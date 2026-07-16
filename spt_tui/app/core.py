@@ -457,7 +457,10 @@ class CoreMixin:
                         try:
                             self.call_from_thread(_paint_result)
                         except Exception:
-                            _paint_result()
+                            if getattr(self, '_closing', False):
+                                logger.debug("create-playlist result paint dropped during teardown")
+                            else:
+                                logger.exception("create-playlist result: call_from_thread failed")
 
                     except Exception:
                         logger.exception('Create playlist worker failed')
@@ -472,7 +475,10 @@ class CoreMixin:
                         try:
                             self.call_from_thread(_paint_err)
                         except Exception:
-                            _paint_err()
+                            if getattr(self, '_closing', False):
+                                logger.debug("create-playlist error paint dropped during teardown")
+                            else:
+                                logger.exception("create-playlist error: call_from_thread failed")
 
                 threading.Thread(target=_worker_create, args=(name, public, collaborative, desc), daemon=True).start()
                 try:

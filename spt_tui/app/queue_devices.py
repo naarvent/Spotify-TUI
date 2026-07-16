@@ -483,7 +483,10 @@ class QueueDevicesMixin:
                 try:
                     self.call_from_thread(_update)
                 except Exception:
-                    _update()
+                    if getattr(self, '_closing', False):
+                        logger.debug("queue refresh paint dropped during teardown")
+                    else:
+                        logger.exception("queue refresh paint: call_from_thread failed")
 
             except Exception:
                 logger.exception('Error in _refresh_queue_table worker')

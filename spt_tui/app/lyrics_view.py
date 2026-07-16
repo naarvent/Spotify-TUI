@@ -103,7 +103,10 @@ class LyricsMixin:
             try:
                 self.call_from_thread(self._apply_lyrics_result, gen, track_id, title, lines)
             except Exception:
-                self._apply_lyrics_result(gen, track_id, title, lines)
+                if getattr(self, '_closing', False):
+                    logger.debug("lyrics result dropped during teardown")
+                else:
+                    logger.exception("lyrics result: call_from_thread failed")
 
         threading.Thread(target=_worker, daemon=True).start()
 

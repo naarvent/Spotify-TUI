@@ -303,7 +303,10 @@ class PlaybackMixin:
                 try:
                     self.call_from_thread(paint)
                 except Exception:
-                    paint()
+                    if getattr(self, '_closing', False):
+                        logger.debug("now-bar paint dropped during teardown")
+                    else:
+                        logger.exception("now-bar paint: call_from_thread failed")
             finally:
                 try:
                     lock.release()
@@ -700,8 +703,13 @@ class PlaybackMixin:
                         self.right_panel.update(f"[b]{'Added to' if new_liked else 'Removed from'} Liked Songs[/b]")
                     except Exception:
                         logger.exception('paint after toggle favorite failed')
-                try: self.call_from_thread(paint)
-                except Exception: paint()
+                try:
+                    self.call_from_thread(paint)
+                except Exception:
+                    if getattr(self, '_closing', False):
+                        logger.debug("toggle favorite paint dropped during teardown")
+                    else:
+                        logger.exception("toggle favorite paint: call_from_thread failed")
 
                 # P6: revalidate the search saved-column only after success.
                 self._revalidate_saved_if_search(table)

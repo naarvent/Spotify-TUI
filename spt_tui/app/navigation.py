@@ -875,7 +875,10 @@ class NavigationMixin:
                     try:
                         self.call_from_thread(_paint_likes)
                     except Exception:
-                        _paint_likes()
+                        if getattr(self, '_closing', False):
+                            logger.debug("multi-review likes paint dropped during teardown")
+                        else:
+                            logger.exception("multi-review likes paint: call_from_thread failed")
                 except Exception:
                     logger.exception('multi-review likes worker failed')
             threading.Thread(target=_worker_likes, args=(rows,), daemon=True).start()
