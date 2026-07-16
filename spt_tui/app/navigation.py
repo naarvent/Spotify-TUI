@@ -48,6 +48,9 @@ class NavigationMixin:
             self.right_panel.update(content)
 
     def _focus_section_by_idx(self, idx: int):
+        # Leaving/returning to the sections cancels any running search pulse so
+        # it never lingers or stacks (a fresh focus restarts it).
+        self._stop_search_pulse()
 
         self.level = self.LVL_SECTIONS
         self.section_idx = idx % len(self.section_order)
@@ -721,6 +724,7 @@ class NavigationMixin:
         # Full, idempotent lyrics teardown (also stops the 0.4s tick, which the
         # old ad-hoc cleanup here missed — it paused a never-set _lyrics_timer).
         self._leave_lyrics_mode()
+        self._stop_search_pulse()
 
         try:
             if hasattr(self, "lib_list") and self.lib_list is not None:
@@ -781,9 +785,63 @@ class NavigationMixin:
                 except Exception: pass
 
             self._search_capture_next = True
+            self._start_search_pulse()
             return
         except Exception:
             logger.exception("action_focus_search failed")
+
+    # ------------------------------------------------------------------ #
+    # Search focus feedback: a short outline pulse + text hint. Uses Textual
+    # timers only (no threads); restarts cleanly and never stacks timers.
+    # ------------------------------------------------------------------ #
+    _SEARCH_PULSE_STEPS = 6        # 6 * 0.22s ~= 1.3s, within the 0.8–1.5s window
+
+    def _apply_search_pulse(self, on: bool):
+        try:
+            w = self.query_one("#search_wrap")
+            if on:
+                w.add_class("-search-pulse")
+            else:
+                w.remove_class("-search-pulse")
+        except Exception:
+            pass
+
+    def _start_search_pulse(self):
+        # Restart from scratch so repeated activations don't accumulate timers.
+        self._stop_search_pulse(restore_title=False)
+        self._search_pulse_count = 0
+        self._apply_search_pulse(True)
+        try:
+            self.search_title.update("Search •")     # "Search •" — colour-independent hint
+        except Exception:
+            pass
+        try:
+            self._search_pulse_timer = self.set_interval(0.22, self._search_pulse_tick, pause=False)
+        except Exception:
+            logger.exception("could not start search pulse")
+            self._search_pulse_timer = None
+
+    def _search_pulse_tick(self):
+        self._search_pulse_count = getattr(self, "_search_pulse_count", 0) + 1
+        self._apply_search_pulse(self._search_pulse_count % 2 == 0)
+        if self._search_pulse_count >= self._SEARCH_PULSE_STEPS:
+            self._stop_search_pulse()
+
+    def _stop_search_pulse(self, restore_title: bool = True):
+        t = getattr(self, "_search_pulse_timer", None)
+        if t is not None:
+            try:
+                t.pause()
+            except Exception:
+                pass
+            self._search_pulse_timer = None
+        self._apply_search_pulse(False)
+        if restore_title:
+            try:
+                txt = (self.search_input.value or "") if getattr(self, "search_input", None) else ""
+                self.search_title.update(f"Search: {rich_escape(txt)}" if txt else "Search")
+            except Exception:
+                pass
 
     def action_toggle_multi_add(self) -> None:
         try:

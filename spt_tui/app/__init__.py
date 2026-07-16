@@ -33,6 +33,7 @@ class SptPy(
         "grid-columns: 38 1fr; grid-rows: auto 1fr auto auto; height: 1fr; margin: 0; padding: 0; }\n"
         "#top_bar { column-span: 2; layout: horizontal; margin: 0; padding: 0; align-vertical: middle; }\n"
         "#search_wrap { layout: vertical; padding: 0 1; width: 1fr; margin: 0; height: 3; }\n"
+        "#search_wrap.-search-pulse { border: round #6ef7d6; }\n"
         "#search_title { margin: 0; padding: 0; }\n"
         "#search_input { height: 1; }\n"
         "#help_wrap { padding: 0 1; min-width: 24; max-width: 24; height: 3; align-horizontal: center; align-vertical: middle; margin-left: 1; }\n"
