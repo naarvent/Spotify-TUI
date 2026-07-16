@@ -1,5 +1,8 @@
-spotipy
-textual
-rich
-requests
-pyfiglet
+# Runtime dependencies. These mirror the constraints in pyproject.toml.
+# For development, prefer `pip install -e .` (installs these plus the package
+# and the `spt-tui` entry point).
+textual>=8.2,<9
+spotipy>=2.26,<3
+rich>=15.0
+requests>=2.31
+pyfiglet>=1.0
