@@ -31,10 +31,13 @@ class ResizableDataTable(DataTable):
         self._orig_width = 0
 
     def _get_columns_list(self):
+        # Public DataTable.columns only (the private `_columns` fallback was dead
+        # code: it does not exist in Textual 8.x and `columns` is truthy first).
+        # Note: `columns` is a dict keyed by ColumnKey; the public list of Column
+        # objects is `ordered_columns`. Switching to it would actually repair the
+        # mouse column-resize (currently degraded) — that is a behaviour change
+        # intentionally left out of this private-API-removal task.
         cols = getattr(self, "columns", None)
-        if cols:
-            return cols
-        cols = getattr(self, "_columns", None)
         if cols:
             return cols
         return []
