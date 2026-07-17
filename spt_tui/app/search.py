@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import time
 import threading
-import traceback
 from typing import Dict, List, Optional
 
 from textual.widgets import Static, DataTable
@@ -40,37 +39,80 @@ class SearchMixin:
                 tokens.append(p)
         return " ".join(tokens)
 
-    def _do_search(self, q: str, raw: str, force_type: Optional[str] = None):
-        my_search_token = None
+    def _parse_forced_type(self, raw: str):
+        """Pull a leading /TRK, /ART, ... type filter off the query. Returns
+        (forced_type or None, cleaned_query)."""
+        mapping = {'TRK': 'track', 'ART': 'artist', 'ALB': 'album', 'PLY': 'playlist',
+                   'SNG': 'single', 'EPS': 'episode', 'PDC': 'podcast'}
         try:
+            parts = raw.split(None, 1)
+            if parts and parts[0].startswith('/') and len(parts[0]) > 1:
+                code = parts[0][1:].upper()
+                if code in mapping:
+                    return mapping[code], (parts[1] if len(parts) > 1 else '')
+        except Exception:
+            pass
+        return None, raw
+
+    def _begin_search_feedback(self, raw: str, token: int):
+        """Immediate on-submit feedback (UI thread): drop the previous view so no
+        stale table hides the state, show a clear 'Searching for: <query>', and
+        schedule a one-shot 'taking longer' update tied to this token via a
+        Textual timer (no extra thread; stops on teardown)."""
+        try:
+            # _clear_right() resets _searching_token; mark this search active
+            # right after so the watchdog can tell it is still the current state.
+            self._clear_right().update(f"[b]Searching for:[/b] {rich_escape(raw)}")
+            self._searching_token = token
+        except Exception:
+            logger.exception("_begin_search_feedback failed")
+
+        def _slow():
+            if (getattr(self, "_closing", False)
+                    or getattr(self, "_searching_token", None) != token
+                    or getattr(self, "_last_search_worker", None) != token
+                    or getattr(self, "_search_rendered_token", None) == token):
+                return
             try:
-                self.call_from_thread(lambda: self.right_panel.update(f"[b]Searching (worker):[/b] {rich_escape(raw)} …"))
+                self.right_panel.update(
+                    f"[b]Searching for:[/b] {rich_escape(raw)}\n"
+                    f"[dim]This is taking longer than expected…[/dim]")
             except Exception:
                 pass
-            try:
-                if not hasattr(self, '_search_worker_counter'):
-                    self._search_worker_counter = 0
-                self._search_worker_counter += 1
-                my_search_token = self._search_worker_counter
+        try:
+            self.set_timer(6.0, _slow)
+        except Exception:
+            pass
+
+    def _dispatch_search(self, raw: str, forced_type: Optional[str] = None):
+        """Start a search from the UI thread (submit or Ctrl+R): assign the token
+        synchronously so submit order wins, show immediate feedback, then run the
+        query on a worker with that token."""
+        raw = (raw or "").strip()
+        if not raw:
+            return
+        self._leave_lyrics_mode()   # running a search exits lyrics
+        cleaned = raw
+        if forced_type is None:
+            forced_type, cleaned = self._parse_forced_type(raw)
+        self._search_seq = int(getattr(self, "_search_seq", 0)) + 1
+        token = self._search_seq
+        self._last_search_worker = token
+        self._search_rendered_token = None
+        self._begin_search_feedback(raw, token)
+        q = self._build_search_query(cleaned)
+        threading.Thread(target=self._do_search, args=(q, raw, forced_type, token), daemon=True).start()
+
+    def _do_search(self, q: str, raw: str, force_type: Optional[str] = None, my_search_token: Optional[int] = None):
+        try:
+            # The token is normally assigned on the UI thread at submit (so submit
+            # order == token order); _dispatch_search also sets _searching_token.
+            # Assign both here for any direct caller that bypasses that path.
+            if my_search_token is None:
+                self._search_seq = int(getattr(self, "_search_seq", 0)) + 1
+                my_search_token = self._search_seq
                 self._last_search_worker = my_search_token
-
-                def _watchdog(tok, query):
-                    try:
-                        time.sleep(8)
-                        # Only nag if this token is still the newest search AND
-                        # it has not already rendered (else we'd clobber results).
-                        if (getattr(self, '_last_search_worker', None) == tok
-                                and getattr(self, '_search_rendered_token', None) != tok):
-                            try:
-                                self.call_from_thread(lambda: self.right_panel.update(f"[b]Searching (worker):[/b] {rich_escape(query)} … (taking longer than expected)"))
-                            except Exception:
-                                pass
-                    except Exception:
-                        pass
-
-                threading.Thread(target=_watchdog, args=(my_search_token, raw), daemon=True).start()
-            except Exception:
-                pass
+                self._searching_token = my_search_token
             if force_type == 'track':
                 res = self.spotify.ensure().search(q, type='track', limit=25) or {}
                 res = {'tracks': res.get('tracks') or {}}
@@ -107,30 +149,35 @@ class SearchMixin:
                         'shows': sh.get('shows') or {'items': []},
                     }
                 except Exception:
+                    fail = 0
                     try:
                         tr = self.spotify.ensure().search(q, type='track', limit=10) or {}
                     except Exception:
-                        tr = {'tracks': {'items': []}}
+                        tr = {'tracks': {'items': []}}; fail += 1
                     try:
                         al = self.spotify.ensure().search(q, type='album', limit=5) or {}
                     except Exception:
-                        al = {'albums': {'items': []}}
+                        al = {'albums': {'items': []}}; fail += 1
                     try:
                         ar = self.spotify.ensure().search(q, type='artist', limit=3) or {}
                     except Exception:
-                        ar = {'artists': {'items': []}}
+                        ar = {'artists': {'items': []}}; fail += 1
                     try:
                         pl = self.spotify.ensure().search(q, type='playlist', limit=5) or {}
                     except Exception:
-                        pl = {'playlists': {'items': []}}
+                        pl = {'playlists': {'items': []}}; fail += 1
                     try:
                         eps = self.spotify.ensure().search(q, type='episode', limit=5) or {}
                     except Exception:
-                        eps = {'episodes': {'items': []}}
+                        eps = {'episodes': {'items': []}}; fail += 1
                     try:
                         sh = self.spotify.ensure().search(q, type='show', limit=3) or {}
                     except Exception:
-                        sh = {'shows': {'items': []}}
+                        sh = {'shows': {'items': []}}; fail += 1
+
+                    # Every request failed -> this is an error, not zero results.
+                    if fail >= 6:
+                        raise RuntimeError("all search requests failed")
 
                     res = {
                         'tracks': tr.get('tracks') or {'items': []},
@@ -140,11 +187,17 @@ class SearchMixin:
                         'episodes': eps.get('episodes') or {'items': []},
                         'shows': sh.get('shows') or {'items': []},
                     }
-        except Exception as e:
-            err_msg = rich_escape(str(e))
+        except Exception:
+            logger.exception("search failed")
             def show_err():
-                right = self._clear_right()
-                right.update(f"[b]Error searching:[/b] {err_msg}")
+                # Superseded by a newer search, or the user left Search: don't paint.
+                if (getattr(self, '_last_search_worker', None) != my_search_token
+                        or getattr(self, '_searching_token', None) != my_search_token):
+                    return
+                self._search_rendered_token = my_search_token
+                self._clear_right().update(
+                    f"[b]Search failed for:[/b] {rich_escape(raw)}\n"
+                    f"[dim]Press Enter to try again.[/dim]")
             try:
                 self.call_from_thread(show_err)
             except Exception:
@@ -165,12 +218,14 @@ class SearchMixin:
             logger.debug("search render dropped during teardown")
 
     def _render_search_results(self, res, raw, force_type, my_search_token):
-        # P1: drop stale renders. If a newer search has been dispatched,
-        # _last_search_worker has advanced past our token; do NOT touch any
-        # widget. This guard runs before the first widget mutation below.
+        # Drop stale renders before touching any widget. A newer search advances
+        # _last_search_worker; leaving Search (escape / opening another view)
+        # clears _searching_token via _clear_right. Either means this render must
+        # not paint (never over a newer search or over the menu).
         try:
-            if (my_search_token is not None
-                    and getattr(self, '_last_search_worker', None) != my_search_token):
+            if my_search_token is not None and (
+                    getattr(self, '_last_search_worker', None) != my_search_token
+                    or getattr(self, '_searching_token', None) != my_search_token):
                 return
         except Exception:
             pass
@@ -379,6 +434,13 @@ class SearchMixin:
                             pass
                     rows = single_rows
 
+            if not rows:
+                # Zero results is a distinct, clear state (not an error, not an
+                # empty table).
+                self._clear_right().update(f"[b]No results for:[/b] {rich_escape(raw)}")
+                self._search_rendered_token = my_search_token
+                return
+
             title = f"[b]Results for:[/b] {rich_escape(raw)}"
 
             try:
@@ -410,10 +472,13 @@ class SearchMixin:
             except Exception:
                 pass
         except Exception:
-            tb = traceback.format_exc()
-            logger.exception("paint search failed: %s", tb)
+            # Log the traceback; never show internals to the user. We are already
+            # on the UI thread here (called via call_from_thread), so update directly.
+            logger.exception("paint search failed")
             try:
-                self.call_from_thread(lambda: self.right_panel.update(f"[b]Error rendering search:[/b]\n{rich_escape(tb)}"))
+                self._clear_right().update(
+                    f"[b]Could not display results for:[/b] {rich_escape(raw)}\n"
+                    f"[dim]Press Enter to try again.[/dim]")
             except Exception:
                 pass
 

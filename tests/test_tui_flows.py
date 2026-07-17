@@ -286,24 +286,24 @@ async def test_search_types_and_edges():
         types = set(r.get("type") for r in (getattr(tbl, "_model_rows", []) or [])) if tbl else set()
         check("combined search renders >=4 distinct types", len(types) >= 4, f"types={sorted(types)}")
 
-        # empty
+        # empty -> a distinct 'No results' state (not an empty table, not an error)
         await clear_and_settle(app, pilot)
         orig = fake.inner._results_for
         fake.inner._results_for = lambda q, type: {"tracks": {"items": []}} if type == "track" else {}
         dispatch_search(app, "none", "none", "track")
-        tbl = await poll(lambda: find_search_table(app), timeout=4.0)
+        shown = await poll(lambda: "No results" in static_text(app.right_panel), timeout=4.0)
         fake.inner._results_for = orig
-        rows = getattr(tbl, "_model_rows", None) if tbl else None
-        check("empty search renders 0-row table (no crash)", tbl is not None and rows == [], f"rows={rows}")
+        check("empty search shows a clear 'No results' state (no crash)", bool(shown),
+              f"panel={static_text(app.right_panel)!r}")
 
-        # error
+        # error -> a clear failure message with a retry hint (no crash, no traceback)
         await clear_and_settle(app, pilot)
         good = fake.inner.search
         fake.inner.search = lambda q, type=None, limit=None: (_ for _ in ()).throw(RuntimeError("network down"))
         dispatch_search(app, "err", "err", "track")
-        shown = await poll(lambda: "Error searching" in static_text(app.right_panel), timeout=4.0)
+        shown = await poll(lambda: "Search failed" in static_text(app.right_panel), timeout=4.0)
         fake.inner.search = good
-        check("search error surfaces 'Error searching' (no crash)", bool(shown),
+        check("search error surfaces a clear failure message (no crash)", bool(shown),
               f"panel={static_text(app.right_panel)!r}")
 
 

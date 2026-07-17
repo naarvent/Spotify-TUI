@@ -297,6 +297,9 @@ class CoreMixin:
         # Any view taking over the right panel is no longer the welcome screen,
         # so on_resize must stop re-rendering the welcome into it.
         self._welcome_on = False
+        # Any right-panel takeover (results, menu, a new search) ends the
+        # "searching" state, so the taking-longer watchdog must not repaint.
+        self._searching_token = None
         right.update("")
         for w in list(right.children):
             w.remove()
@@ -804,36 +807,9 @@ class CoreMixin:
                 return
             raw = event.value.strip()
             if not raw: return
-
-            self._leave_lyrics_mode()   # running a search exits lyrics
-            try:
-                self.right_panel.update(f"[b]Searching:[/b] {rich_escape(raw)} …")
-            except Exception:
-                pass
-
-            forced_type = None
-            cleaned_raw = raw
-            try:
-                parts = raw.split(None, 1)
-                if parts and parts[0].startswith('/') and len(parts[0]) > 1:
-                    code = parts[0][1:].upper()
-                    mapping = {
-                        'TRK': 'track',
-                        'ART': 'artist',
-                        'ALB': 'album',
-                        'PLY': 'playlist',
-                        'SNG': 'single',
-                        'EPS': 'episode',
-                        'PDC': 'podcast',
-                    }
-                    if code in mapping:
-                        forced_type = mapping[code]
-                        cleaned_raw = parts[1] if len(parts) > 1 else ''
-            except Exception:
-                forced_type = None
-
-            q = self._build_search_query(cleaned_raw)
-            threading.Thread(target=self._do_search, args=(q, raw, forced_type), daemon=True).start()
+            # Immediate on-submit feedback + synchronous token happen inside
+            # _dispatch_search (UI thread); it then starts the search worker.
+            self._dispatch_search(raw)
         except Exception:
             logger.exception("on_input_submitted error")
 
@@ -881,8 +857,7 @@ class CoreMixin:
             if (focused is getattr(self, 'search_input', None)) or (getattr(self, 'search_input', None) and (getattr(self, 'search_input').value or '').strip()):
                 raw = (getattr(self, 'search_input').value or "").strip()
                 if raw:
-                    q = self._build_search_query(raw)
-                    threading.Thread(target=self._do_search, args=(q, raw), daemon=True).start()
+                    self._dispatch_search(raw)   # same immediate-feedback path as submit
                     return
 
             if rv and rv[0] == 'playlist':
