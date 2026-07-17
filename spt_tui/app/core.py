@@ -850,41 +850,63 @@ class CoreMixin:
 
             rv = getattr(self, "_right_view", None)
 
+            # The devices view carries no view token (it leaves _right_view stale),
+            # so detect it by its mounted table before the rv-based routing.
+            try:
+                if len(self.query("#devices_table")) > 0:
+                    self._refresh_devices_table(); return
+            except Exception:
+                pass
+
+            # CONTEXTUAL priority: refresh the active right-hand view first. Leftover
+            # text in the search box must never turn Ctrl+R into a search.
+            if rv:
+                kind = rv[0]
+                if kind == 'playlist':
+                    pdata = rv[3] if len(rv) > 3 and rv[3] else None
+                    if pdata is None:
+                        pdata = next((p for p in (self.playlists_cache or []) if p.get('id') == rv[1]), None)
+                    if pdata:
+                        threading.Thread(target=lambda: self._open_playlist_table(pdata), daemon=True).start()
+                    return
+                if kind == 'liked':
+                    self._open_liked_table(); return
+                if kind == 'recent':
+                    threading.Thread(target=self._open_recently_table, daemon=True).start(); return
+                if kind == 'albums':
+                    self._open_saved_albums(); return
+                if kind == 'podcasts':
+                    self._open_saved_podcasts(); return
+                if kind == 'episodes':
+                    self._open_saved_episodes(); return
+                if kind == 'artists':
+                    self._open_saved_artists(); return
+                if kind == 'album' and len(rv) > 3 and rv[3]:
+                    self._open_album_table(rv[3], push_stack=False); return
+                if kind == 'artist' and len(rv) > 3 and rv[3]:
+                    self._open_artist_table(rv[3], push_stack=False); return
+                if kind == 'podcast' and len(rv) > 3 and rv[3]:
+                    self._open_podcast_table(rv[3], push_stack=False); return
+                if kind == 'queue':
+                    self._refresh_queue_table(); return
+                if kind == 'search':
+                    q = rv[1]
+                    if q:
+                        self._dispatch_search(q); return
+
+            # Search only repeats when the user is genuinely in Search context (the
+            # input is focused). Text alone in the box does NOT trigger a search.
             try:
                 focused = getattr(self, 'focused', None)
             except Exception:
                 focused = None
-            if (focused is getattr(self, 'search_input', None)) or (getattr(self, 'search_input', None) and (getattr(self, 'search_input').value or '').strip()):
-                raw = (getattr(self, 'search_input').value or "").strip()
+            si = getattr(self, 'search_input', None)
+            if si is not None and focused is si:
+                raw = (si.value or "").strip()
                 if raw:
-                    self._dispatch_search(raw)   # same immediate-feedback path as submit
-                    return
+                    self._dispatch_search(raw); return
 
-            if rv and rv[0] == 'playlist':
-                pid = rv[1]
-                pdata = None
-                for p in (self.playlists_cache or []):
-                    if p.get('id') == pid:
-                        pdata = p; break
-                if pdata:
-                    threading.Thread(target=lambda: self._open_playlist_table(pdata), daemon=True).start(); return
-
-            if rv and rv[0] == 'liked':
-                self._open_liked_table(); return
-            if rv and rv[0] == 'recent':
-                threading.Thread(target=self._open_recently_table, daemon=True).start(); return
-            # Ctrl+R must retry the *current* saved-library view (previously these
-            # fell through and reloaded playlists). The loaders are token-guarded,
-            # so a repeated Ctrl+R supersedes the old load instead of stacking.
-            if rv and rv[0] == 'albums':
-                self._open_saved_albums(); return
-            if rv and rv[0] == 'podcasts':
-                self._open_saved_podcasts(); return
-            if rv and rv[0] == 'episodes':
-                self._open_saved_episodes(); return
-            if rv and rv[0] == 'artists':
-                self._open_saved_artists(); return
-
+            # Welcome / no applicable view: refresh only the playlists menu list.
             self._force_revalidate_likes_once = True
             threading.Thread(target=lambda: self._load_playlists(force=True), daemon=True).start()
         except Exception:
