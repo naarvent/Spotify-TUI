@@ -132,21 +132,23 @@ class SearchMixin:
                 res = self.spotify.ensure().search(q, type='show', limit=25) or {}
                 res = {'shows': res.get('shows') or {}}
             else:
+                # Combined (no-prefix) search: request only what the 4-panel view
+                # shows, at its exact caps — 10 tracks, 5 albums, 3 artists,
+                # 2 playlists (20 max). Podcasts/episodes are intentionally not
+                # requested here; they remain reachable via /PDC and /EPS. The
+                # calls stay sequential on the shared spotipy session (no parallel
+                # calls on one session).
                 try:
                     tr = self.spotify.ensure().search(q, type='track', limit=10) or {}
                     al = self.spotify.ensure().search(q, type='album', limit=5) or {}
                     ar = self.spotify.ensure().search(q, type='artist', limit=3) or {}
-                    pl = self.spotify.ensure().search(q, type='playlist', limit=5) or {}
-                    eps = self.spotify.ensure().search(q, type='episode', limit=5) or {}
-                    sh = self.spotify.ensure().search(q, type='show', limit=3) or {}
+                    pl = self.spotify.ensure().search(q, type='playlist', limit=2) or {}
 
                     res = {
                         'tracks': tr.get('tracks') or {'items': []},
                         'albums': al.get('albums') or {'items': []},
                         'artists': ar.get('artists') or {'items': []},
                         'playlists': pl.get('playlists') or {'items': []},
-                        'episodes': eps.get('episodes') or {'items': []},
-                        'shows': sh.get('shows') or {'items': []},
                     }
                 except Exception:
                     fail = 0
@@ -163,20 +165,12 @@ class SearchMixin:
                     except Exception:
                         ar = {'artists': {'items': []}}; fail += 1
                     try:
-                        pl = self.spotify.ensure().search(q, type='playlist', limit=5) or {}
+                        pl = self.spotify.ensure().search(q, type='playlist', limit=2) or {}
                     except Exception:
                         pl = {'playlists': {'items': []}}; fail += 1
-                    try:
-                        eps = self.spotify.ensure().search(q, type='episode', limit=5) or {}
-                    except Exception:
-                        eps = {'episodes': {'items': []}}; fail += 1
-                    try:
-                        sh = self.spotify.ensure().search(q, type='show', limit=3) or {}
-                    except Exception:
-                        sh = {'shows': {'items': []}}; fail += 1
 
                     # Every request failed -> this is an error, not zero results.
-                    if fail >= 6:
+                    if fail >= 4:
                         raise RuntimeError("all search requests failed")
 
                     res = {
@@ -184,8 +178,6 @@ class SearchMixin:
                         'albums': al.get('albums') or {'items': []},
                         'artists': ar.get('artists') or {'items': []},
                         'playlists': pl.get('playlists') or {'items': []},
-                        'episodes': eps.get('episodes') or {'items': []},
-                        'shows': sh.get('shows') or {'items': []},
                     }
         except Exception:
             logger.exception("search failed")
@@ -353,12 +345,19 @@ class SearchMixin:
                 }
                 show_rows.append(item)
 
-            artist_rows = artist_rows[:3]
-            show_rows = show_rows[:3]
-            album_rows = album_rows[:5]
-            episode_rows = episode_rows[:5]
-            track_rows = track_rows[:10]
-            playlist_rows = playlist_rows[:5]
+            if force_type:
+                # A prefix search shows one specialized type and keeps the larger
+                # fetched limit (25); the tight combined caps must not apply here.
+                pass
+            else:
+                # Combined (no-prefix) view: exact 10/3/5/2 caps, and no
+                # podcasts/episodes (they are reachable only via /PDC and /EPS).
+                artist_rows = artist_rows[:3]
+                album_rows = album_rows[:5]
+                track_rows = track_rows[:10]
+                playlist_rows = playlist_rows[:2]
+                show_rows = []
+                episode_rows = []
 
             exact_artist_ids = [ar['raw'].get('id') for ar in artist_rows if (ar.get('title','').strip().lower() == (raw or '').strip().lower()) and ar.get('raw')]
             if exact_artist_ids:
