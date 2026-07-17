@@ -130,11 +130,44 @@ class TablesMixin:
                         "dur": self.spotify.fmt_duration(tr.get("duration_ms") or 0),
                         "raw": tr,
                     })
+                # Stage 1: show the album immediately (hearts blank), guarded by the
+                # view token so a slow album cannot paint over a newer view.
                 def paint():
+                    if not self._is_current_view("album", album_id, token):
+                        return
                     title = f"[b]Album:[/b] {rich_escape(album_name)}"
-                    table = self._render_tracks_table(title, rows, None, context_uris=[r["uri"] for r in rows], profile="album")
-                    self._revalidate_liked_column(table, max_rows=200)
+                    self._render_tracks_table(title, rows, None, context_uris=[r["uri"] for r in rows], profile="album")
                 self.call_from_thread(paint)
+
+                # Stage 2: resolve liked state off the UI thread. album_tracks never
+                # carries saved-state, so check_saved_tracks (id-aligned, never
+                # raises) is the only source. Map liked by id — not row index — so
+                # tracks without an id (local/unavailable) stay blank and a partial
+                # failure only blanks its own id, never the whole album.
+                ids = [r["id"] for r in rows if r.get("id")]
+                liked_list = self.spotify.check_saved_tracks(ids) if ids else []
+                id_to_liked = dict(zip(ids, liked_list))
+
+                def apply_likes():
+                    if not self._is_current_view("album", album_id, token):
+                        return
+                    try:
+                        table = self.query_one("#tracks_table", DataTable)
+                    except NoMatches:
+                        return
+                    # Only touch the table that still belongs to THIS album render.
+                    if getattr(table, "_model_rows", None) is not rows:
+                        return
+                    table._liked_map = {i: bool(id_to_liked.get(r.get("id"), False))
+                                        for i, r in enumerate(rows)}
+                    self._repaint_rows_from_model(table)
+                try:
+                    self.call_from_thread(apply_likes)
+                except Exception:
+                    if getattr(self, "_closing", False):
+                        logger.debug("album liked repaint dropped during teardown")
+                    else:
+                        logger.exception("album liked repaint: call_from_thread failed")
             threading.Thread(target=worker, daemon=True).start()
         except Exception:
             logger.exception("_open_album_table failed")
