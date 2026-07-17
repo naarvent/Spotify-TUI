@@ -57,7 +57,7 @@ class TablesMixin:
         except Exception:
             logger.exception("_refresh_playing_highlight failed")
 
-    def _render_tracks_table(self, title: str, rows: List[Dict], liked_bools: Optional[List[bool]] = None, *, context_uri: Optional[str] = None, context_uris: Optional[List[str]] = None, show_source: bool = True):
+    def _render_tracks_table(self, title: str, rows: List[Dict], liked_bools: Optional[List[bool]] = None, *, context_uri: Optional[str] = None, context_uris: Optional[List[str]] = None, show_source: bool = False):
         right = self._clear_right()
         if show_source:
             col_labels = ["♥", "Title", "Artist", "Album", "Duration", "Source", "Added"]

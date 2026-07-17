@@ -119,7 +119,7 @@ def test_playlist_columns_drop_source():
             app._repaint_rows_from_model(pt)
             await pilot.pause()
             rep_labels = _col_labels(pt)
-            # a non-playlist view keeps Source (not removed globally)
+            # every tracks table drops Source by default now (only Queue keeps it)
             app.action_escape_to_menu(); await pilot.pause()
             gt = app._render_tracks_table("[b]G[/b]", rows, [False] * 5,
                                           context_uris=[r["uri"] for r in rows])
@@ -130,7 +130,7 @@ def test_playlist_columns_drop_source():
     check("playlist table drops the Source column",
           pl == ["♥", "Title", "Artist", "Album", "Duration", "Added"], f"cols={pl}")
     check("playlist layout survives a repaint (still no Source)", rep == pl, f"cols={rep}")
-    check("other views keep Source (not removed globally)", "Source" in gen, f"cols={gen}")
+    check("tracks tables drop Source by default (only Queue keeps it)", "Source" not in gen, f"cols={gen}")
     # heart/Duration/Added compact & fixed; Title/Artist/Album flexible (share space)
     if len(pw) == 6:
         heart, title, artist, album, dur, added = pw
@@ -164,8 +164,41 @@ def body_run(body):
     return asyncio.run(body())
 
 
+def test_search_full_layout_drops_source():
+    async def body():
+        app = TApp(Fake())
+        async with app.run_test(size=(120, 20)) as pilot:
+            await pilot.pause(); pause_intervals(app)
+            rows = [{"type": "track", "id": "t", "uri": "u", "title": "T", "artist": "a",
+                     "album": "al", "dur": "0:00", "source": "s", "raw": {}}]
+            t = app._render_search_table("[b]R[/b]", rows, check_saved=False, layout="full")
+            await pilot.pause()
+            return _col_labels(t)
+    labels = asyncio.run(body())
+    check("full search/album/episode layout drops Source",
+          labels == ["S", "Type", "Title", "Artist/Owner", "Album", "Duration"], f"cols={labels}")
+
+
+def test_queue_keeps_source():
+    async def body():
+        from textual.widgets import DataTable
+        app = TApp(Fake())
+        async with app.run_test(size=(120, 20)) as pilot:
+            await pilot.pause(); pause_intervals(app)
+            app.action_open_queue()
+            await pilot.pause()
+            qt = None
+            for w in app.query(DataTable):
+                if getattr(w, "id", "") == "queue_table":
+                    qt = w; break
+            return [str(getattr(c, "label", "")) for c in qt.ordered_columns] if qt else []
+    labels = asyncio.run(body())
+    check("Queue keeps the Source column", "Source" in labels, f"cols={labels}")
+
+
 ALL = [test_repaint_preserves_cursor_and_scroll, test_toggle_like_keeps_position,
-       test_playlist_columns_drop_source, test_playlist_long_values_do_not_break]
+       test_playlist_columns_drop_source, test_playlist_long_values_do_not_break,
+       test_search_full_layout_drops_source, test_queue_keeps_source]
 
 def main():
     for fn in ALL:

@@ -489,9 +489,11 @@ class SearchMixin:
     # (labels, fixed_widths, fields). `fields` maps 1:1 to the cells built by
     # _search_cells; flexible columns (not in fixed_widths) share the rest.
     _SEARCH_LAYOUTS = {
-        "full": (["S", "Type", "Title", "Artist/Owner", "Album", "Duration", "Source"],
-                 {0: 3, 1: 7, 5: 9, 6: 10},
-                 ["saved", "type", "title", "artist", "album", "dur", "source"]),
+        # Source is dropped from every content table (it is only meaningful in the
+        # Queue, which has its own render path).
+        "full": (["S", "Type", "Title", "Artist/Owner", "Album", "Duration"],
+                 {0: 3, 1: 7, 5: 9},
+                 ["saved", "type", "title", "artist", "album", "dur"]),
         "artists": (["S", "Type", "Name"], {0: 3, 1: 7}, ["saved", "type", "title"]),
         "podcasts": (["S", "Type", "Name", "Owner"], {0: 3, 1: 7}, ["saved", "type", "title", "artist"]),
     }
