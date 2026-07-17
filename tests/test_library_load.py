@@ -114,11 +114,27 @@ def tombstone_episode():
     }}
 
 
+def real_artist(i):
+    """A followed-artist object (items live under artists.items)."""
+    return {"id": f"art{i}", "uri": f"spotify:artist:art{i}", "name": f"Real Artist {i}",
+            "external_urls": {"spotify": f"https://open.spotify.com/artist/{i}"},
+            "genres": ["pop"], "followers": {"total": 1000}, "images": []}
+
+def real_show(i):
+    """A saved-show item: items[].show with a real publisher."""
+    return {"added_at": "2024-05-01T00:00:00Z", "show": {
+        "id": f"sh{i}", "uri": f"spotify:show:sh{i}", "name": f"Real Show {i}",
+        "publisher": f"Publisher {i}", "description": "d", "images": [],
+        "external_urls": {"spotify": f"https://open.spotify.com/show/{i}"}}}
+
+
 class LibFake:
-    """Minimal Spotify fake driven by explicit realistic pages (albums/episodes)."""
-    def __init__(self, albums=None, episodes=None):
+    """Minimal Spotify fake driven by explicit realistic pages."""
+    def __init__(self, albums=None, episodes=None, artists=None, shows=None):
         self._albums = albums if albums is not None else []
         self._episodes = episodes if episodes is not None else []
+        self._artists = artists if artists is not None else []
+        self._shows = shows if shows is not None else []
     def has_cached_token(self): return True
     def user_playlists(self, limit=50, offset=0): return {"items": [], "next": None}
     def devices(self): return []
@@ -135,6 +151,10 @@ class LibFake:
         return self._slice(self._albums, limit, offset)
     def current_user_saved_episodes(self, limit=50, offset=0):
         return self._slice(self._episodes, limit, offset)
+    def current_user_saved_shows(self, limit=50, offset=0):
+        return self._slice(self._shows, limit, offset)
+    def current_user_followed_artists(self, limit=50, after=None):
+        return {"artists": {"items": list(self._artists), "next": None}}
 
 def pause_intervals(app):
     for a in ("_now_sync_interval","_now_tick_interval","_now_interval","_devices_interval","_queue_interval"):
@@ -416,13 +436,68 @@ async def test_search_table_reuse_no_duplicate_ids():
         check("reused table shows the newest rows", nrows(t2) == 2, f"n={nrows(t2)}")
 
 
+def _search_col_labels(app):
+    t = table_by_id(app, "search_table")
+    return [str(getattr(c, "label", "")) for c in t.ordered_columns] if t is not None else []
+
+
+async def test_saved_artists_columns():
+    fake = LibFake(artists=[real_artist(0), real_artist(1)]); app = TApp(fake)
+    async with app.run_test(size=(120, 20)) as pilot:
+        await pilot.pause(); pause_intervals(app)
+        app._open_saved_artists()
+        await poll(lambda: table_by_id(app, "search_table"), timeout=5.0)
+        await poll(lambda: nrows(table_by_id(app, "search_table")) == 2, timeout=5.0)
+        labels = _search_col_labels(app)
+        rows = table_by_id(app, "search_table")._model_rows
+        check("saved artists columns are exactly S / Type / Name", labels == ["S", "Type", "Name"],
+              f"cols={labels}")
+        check("artist Name = full artist name", rows[0]["title"] == "Real Artist 0", f"r={rows[0]}")
+        check("artist row type stays 'artist' (ART)", rows[0]["type"] == "artist")
+
+
+async def test_saved_podcasts_columns():
+    fake = LibFake(shows=[real_show(0), real_show(1)]); app = TApp(fake)
+    async with app.run_test(size=(120, 20)) as pilot:
+        await pilot.pause(); pause_intervals(app)
+        app._open_saved_podcasts()
+        await poll(lambda: table_by_id(app, "search_table"), timeout=5.0)
+        await poll(lambda: nrows(table_by_id(app, "search_table")) == 2, timeout=5.0)
+        labels = _search_col_labels(app)
+        rows = table_by_id(app, "search_table")._model_rows
+        check("saved podcasts columns are exactly S / Type / Name / Owner",
+              labels == ["S", "Type", "Name", "Owner"], f"cols={labels}")
+        check("podcast Name = show name", rows[0]["title"] == "Real Show 0", f"r={rows[0]}")
+        check("podcast Owner = publisher", rows[0]["artist"] == "Publisher 0", f"r={rows[0]}")
+        check("podcast row type stays 'podcast' (PDC)", rows[0]["type"] == "podcast")
+
+
+async def test_search_table_layout_switch_no_duplicate_ids():
+    from textual.widgets import DataTable
+    fake = LibFake(); app = TApp(fake)
+    async with app.run_test(size=(120, 20)) as pilot:
+        await pilot.pause(); pause_intervals(app)
+        full_rows = [{"type": "track", "id": "t1", "uri": "u1", "title": "T", "artist": "a",
+                      "album": "al", "dur": "0:00", "source": "s", "raw": {}}]
+        art_rows = [{"type": "artist", "id": "ar1", "uri": "u2", "title": "Artist", "artist": "",
+                     "album": "", "dur": "", "raw": {}, "saved": True}]
+        t1 = app._render_search_table("[b]Full[/b]", full_rows, check_saved=False, layout="full")
+        t2 = app._render_search_table("[b]Artists[/b]", art_rows, check_saved=False, layout="artists")
+        count = sum(1 for w in app.query(DataTable) if getattr(w, "id", "") == "search_table")
+        labels = [str(getattr(c, "label", "")) for c in t2.ordered_columns]
+        check("layout switch reuses one widget (no DuplicateIds)", t1 is t2 and count == 1,
+              f"same={t1 is t2} count={count}")
+        check("columns switched to the artists layout", labels == ["S", "Type", "Name"], f"cols={labels}")
+
+
 ALL = [test_immediate_feedback_non_blocking, test_progressive_paint,
        test_superseded_worker_stops_and_does_not_paint, test_leaving_view_prevents_paint,
        test_partial_on_error_keeps_rows, test_empty_vs_error,
        test_cache_shows_before_network_and_ctrlr_reloads,
        test_ctrlr_routes_albums_and_no_accumulation, test_cursor_preserved_during_progressive,
        test_saved_albums_skips_null_item, test_saved_episodes_tombstone_degrades,
-       test_search_table_reuse_no_duplicate_ids]
+       test_search_table_reuse_no_duplicate_ids, test_saved_artists_columns,
+       test_saved_podcasts_columns, test_search_table_layout_switch_no_duplicate_ids]
 
 async def main():
     for fn in ALL:

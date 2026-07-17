@@ -516,30 +516,17 @@ class TablesMixin:
             table.row_to_obj = {}
 
         if getattr(table, "id", "") == "search_table":
+            fields = getattr(table, "_search_fields",
+                             ["saved", "type", "title", "artist", "album", "dur", "source"])
             for i, r in enumerate(rows):
                 try:
-                    typ_label = {
-                        "track": "TRK",
-                        "album": "ALB",
-                        "artist": "ART",
-                        "playlist": "PLY",
-                        "single": "SNG",
-                        "episode": "EPS",
-                        "podcast": "PDC",
-                    }.get((r.get("type") or "").lower(), (r.get("type") or "").upper())
+                    table.add_row(*self._search_cells(r, fields), key=i)
                 except Exception:
-                    typ_label = (r.get("type") or "").upper()
-                saved_cell = Text(GLYPHS['disk']) if r.get('saved', False) else Text("")
-                try:
-                    table.add_row(saved_cell, typ_label, r.get("title", ""), r.get("artist", ""), r.get("album", ""), r.get("dur", ""), r.get("source", ""), key=i)
-                except Exception:
+                    saved_cell = Text(GLYPHS['disk']) if r.get('saved', False) else Text("")
                     try:
-                        table.add_row(saved_cell, typ_label, r.get("title", ""), r.get("artist", ""), r.get("album", ""), r.get("dur", ""), key=i)
+                        table.add_row(saved_cell, (r.get("type") or "").upper(), r.get("title", ""), key=i)
                     except Exception:
-                        try:
-                            table.add_row(saved_cell, typ_label, r.get("title", ""), key=i)
-                        except Exception:
-                            pass
+                        pass
                 table.row_to_uri[i] = r.get("uri")
                 table.row_to_title[i] = f"{r.get('title','')} {GLYPHS['sep']} {r.get('artist','')}"
                 if r.get("id"):
@@ -574,43 +561,43 @@ class TablesMixin:
         try: table.refresh()
         except Exception: pass
 
+    def _column_widths(self, col_labels: list, fixed_widths: dict | None = None) -> list:
+        """Distribute the right panel's width across columns: fixed columns take
+        their set width, the rest share the remainder (leftover goes to the first
+        flexible column)."""
+        right = getattr(self, 'right_panel', None)
+        avail_w = 0
+        if right is not None:
+            cs = getattr(right, 'content_size', None)
+            if cs is not None:
+                avail_w = int(getattr(cs, 'width', 0) or 0)
+            if not avail_w:
+                sz = getattr(right, 'size', None)
+                if sz is not None:
+                    avail_w = int(getattr(sz, 'width', 0) or 0)
+        if not avail_w:
+            try:
+                avail_w = int(getattr(self, 'size').width or 80)
+            except Exception:
+                avail_w = 80
+        avail = max(20, avail_w - 4)
+
+        n = len(col_labels)
+        fixed = fixed_widths or {}
+        fixed_total = sum(int(v) for v in fixed.values() if isinstance(v, int))
+        flexible_idxs = [i for i in range(n) if i not in fixed]
+        flex_count = max(1, len(flexible_idxs))
+        rem = max(0, avail - fixed_total)
+        base = max(6, rem // flex_count) if flex_count else max(6, rem)
+        widths = [int(fixed[i]) if i in fixed else base for i in range(n)]
+        leftover = avail - sum(widths)
+        if leftover > 0 and flexible_idxs:
+            widths[flexible_idxs[0]] += leftover
+        return widths
+
     def _create_table_with_full_width(self, col_labels: list, fixed_widths: dict | None = None, widget_id: Optional[str] = None) -> ResizableDataTable:
         try:
-            right = getattr(self, 'right_panel', None)
-            avail_w = 0
-            if right is not None:
-                cs = getattr(right, 'content_size', None)
-                if cs is not None:
-                    avail_w = int(getattr(cs, 'width', 0) or 0)
-                if not avail_w:
-                    sz = getattr(right, 'size', None)
-                    if sz is not None:
-                        avail_w = int(getattr(sz, 'width', 0) or 0)
-            if not avail_w:
-                try:
-                    avail_w = int(getattr(self, 'size').width or 80)
-                except Exception:
-                    avail_w = 80
-            avail = max(20, avail_w - 4)
-
-            n = len(col_labels)
-            fixed = fixed_widths or {}
-            fixed_total = sum(int(v) for v in fixed.values() if isinstance(v, int))
-            flexible_idxs = [i for i in range(n) if i not in fixed]
-            flex_count = max(1, len(flexible_idxs))
-            rem = max(0, avail - fixed_total)
-            base = max(6, rem // flex_count) if flex_count else max(6, rem)
-            widths = [0] * n
-            for i in range(n):
-                if i in fixed:
-                    widths[i] = int(fixed[i])
-                else:
-                    widths[i] = base
-            assigned = sum(widths)
-            leftover = avail - assigned
-            if leftover > 0 and flexible_idxs:
-                widths[flexible_idxs[0]] += leftover
-
+            widths = self._column_widths(col_labels, fixed_widths)
             table = ResizableDataTable(zebra_stripes=True, id=(widget_id or "table"))
             table.show_cursor = True; table.cursor_type = "row"
             for lbl, w in zip(col_labels, widths):

@@ -400,12 +400,13 @@ class LibraryMixin:
             def paint():
                 if not self._is_current_view("artists", "", token): return
                 title = "[b]Saved Artists[/b]"
-                self._render_search_table(title, rows)
+                # Artists are followed (saved) by definition — no saved-state check.
+                self._render_search_table(title, rows, check_saved=False, layout="artists")
             self.call_from_thread(paint)
 
         threading.Thread(target=worker, daemon=True).start()
 
-    def _stream_library_view(self, *, key, title, loading_msg, empty_msg, fetch_page, tracks_mode):
+    def _stream_library_view(self, *, key, title, loading_msg, empty_msg, fetch_page, tracks_mode, layout="full"):
         """Responsive, deduplicated loader shared by the saved-library views.
 
         - Immediate uniform feedback (Loading…) and, when a same-session cache
@@ -453,7 +454,7 @@ class LibraryMixin:
                 )
             # Saved-library items are saved by definition — skip the redundant
             # saved-state revalidation the search view would otherwise fire.
-            return self._render_search_table(title, rows, check_saved=False)
+            return self._render_search_table(title, rows, check_saved=False, layout=layout)
 
         def refresh_model(tbl, rows):
             if tbl is None:
@@ -574,7 +575,7 @@ class LibraryMixin:
             key="podcasts", title="[b]Saved Podcasts[/b]",
             loading_msg="[b]Loading Saved Podcasts…[/b]",
             empty_msg="[b]No saved podcasts yet.[/b]",
-            fetch_page=fetch_page, tracks_mode=False)
+            fetch_page=fetch_page, tracks_mode=False, layout="podcasts")
 
     def _open_saved_episodes(self):
         def fetch_page(offset):

@@ -417,12 +417,41 @@ class SearchMixin:
             except Exception:
                 pass
 
-    def _render_search_table(self, title: str, rows: List[Dict], check_saved: bool = True):
+    _TYPE_LABELS = {"track": "TRK", "album": "ALB", "artist": "ART", "playlist": "PLY",
+                    "single": "SNG", "episode": "EPS", "podcast": "PDC"}
+
+    # Column layouts for the shared search_table. Each entry is
+    # (labels, fixed_widths, fields). `fields` maps 1:1 to the cells built by
+    # _search_cells; flexible columns (not in fixed_widths) share the rest.
+    _SEARCH_LAYOUTS = {
+        "full": (["S", "Type", "Title", "Artist/Owner", "Album", "Duration", "Source"],
+                 {0: 3, 1: 7, 5: 9, 6: 10},
+                 ["saved", "type", "title", "artist", "album", "dur", "source"]),
+        "artists": (["S", "Type", "Name"], {0: 3, 1: 7}, ["saved", "type", "title"]),
+        "podcasts": (["S", "Type", "Name", "Owner"], {0: 3, 1: 7}, ["saved", "type", "title", "artist"]),
+    }
+
+    def _search_cells(self, r: Dict, fields: List[str]):
+        """Build search_table cells for the given field list (see _SEARCH_LAYOUTS)."""
+        t = (r.get("type") or "")
+        cell_map = {
+            "saved": Text(GLYPHS['disk']) if r.get('saved', False) else Text(""),
+            "type": self._TYPE_LABELS.get(t, t.upper()),
+            "title": r.get("title", ""),
+            "artist": r.get("artist", ""),
+            "album": r.get("album", ""),
+            "dur": r.get("dur", ""),
+            "source": r.get("source", ""),
+        }
+        return [cell_map[f] for f in fields]
+
+    def _render_search_table(self, title: str, rows: List[Dict], check_saved: bool = True, layout: str = "full"):
         # Reuse an already-mounted search_table in place. Textual's remove() is
         # async, so calling _clear_right() and immediately mounting a second
         # widget with the same id in the same callback raises DuplicateIds (seen
         # in the log on saved-view reopen and back-to-back searches). The id is
         # also a behaviour discriminator elsewhere, so it must stay stable.
+        col_labels, fixed_widths, fields = self._SEARCH_LAYOUTS.get(layout, self._SEARCH_LAYOUTS["full"])
         try:
             table = self.query_one("#search_table", DataTable)
         except NoMatches:
@@ -430,33 +459,29 @@ class SearchMixin:
         reused = table is not None
         if reused:
             try:
-                table.clear()  # drop rows, keep columns
+                # Reset columns to this layout (also refreshes widths for the
+                # current size); clear(columns=True) drops both rows and columns,
+                # so a layout change reuses the widget without a remount.
+                table.clear(columns=True)
+                for lbl, w in zip(col_labels, self._column_widths(col_labels, fixed_widths)):
+                    try: table.add_column(lbl, width=int(w))
+                    except Exception:
+                        try: table.add_column(lbl)
+                        except Exception: pass
             except Exception:
                 reused = False
                 table = None
         if not reused:
             right = self._clear_right()
             table = self._create_table_with_full_width(
-                ["S", "Type", "Title", "Artist/Owner", "Album", "Duration", "Source"],
-                fixed_widths={0: 3, 1: 7, 5: 9, 6: 10},
-                widget_id="search_table",
+                col_labels, fixed_widths=fixed_widths, widget_id="search_table",
             )
         table.row_to_uri = {}; table.row_to_title = {}; table.row_to_id = {}; table.row_to_type = {}; table.row_to_obj = {}
         table._col_saved = 0
         table._saved_check_done = False
+        table._search_fields = fields
         for i, r in enumerate(rows):
-            t = r.get("type", "")
-            typ_label = {
-                "track": "TRK",
-                "album": "ALB",
-                "artist": "ART",
-                "playlist": "PLY",
-                "single": "SNG",
-                "episode": "EPS",
-                "podcast": "PDC",
-            }.get(t, t.upper())
-            saved_cell = Text(GLYPHS['disk']) if r.get('saved', False) else Text("")
-            table.add_row(saved_cell, typ_label, r.get("title", ""), r.get("artist", ""), r.get("album", ""), r.get("dur", ""), r.get("source", ""), key=i)
+            table.add_row(*self._search_cells(r, fields), key=i)
             table.row_to_uri[i] = r.get("uri")
             table.row_to_title[i] = f"{r.get('title','')} {GLYPHS['sep']} {r.get('artist','')}"
             if r.get("id"): table.row_to_id[i] = r.get("id")
