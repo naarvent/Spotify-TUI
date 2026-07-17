@@ -7,7 +7,8 @@ import threading
 import traceback
 from typing import Dict, List, Optional
 
-from textual.widgets import Static
+from textual.widgets import Static, DataTable
+from textual.css.query import NoMatches
 from rich.markup import escape as rich_escape
 from rich.text import Text
 
@@ -417,14 +418,32 @@ class SearchMixin:
                 pass
 
     def _render_search_table(self, title: str, rows: List[Dict], check_saved: bool = True):
-        right = self._clear_right()
-        table = self._create_table_with_full_width(
-            ["S", "Type", "Title", "Artist/Owner", "Album", "Duration", "Source"],
-            fixed_widths={0: 3, 1: 7, 5: 9, 6: 10},
-            widget_id="search_table",
-        )
+        # Reuse an already-mounted search_table in place. Textual's remove() is
+        # async, so calling _clear_right() and immediately mounting a second
+        # widget with the same id in the same callback raises DuplicateIds (seen
+        # in the log on saved-view reopen and back-to-back searches). The id is
+        # also a behaviour discriminator elsewhere, so it must stay stable.
+        try:
+            table = self.query_one("#search_table", DataTable)
+        except NoMatches:
+            table = None
+        reused = table is not None
+        if reused:
+            try:
+                table.clear()  # drop rows, keep columns
+            except Exception:
+                reused = False
+                table = None
+        if not reused:
+            right = self._clear_right()
+            table = self._create_table_with_full_width(
+                ["S", "Type", "Title", "Artist/Owner", "Album", "Duration", "Source"],
+                fixed_widths={0: 3, 1: 7, 5: 9, 6: 10},
+                widget_id="search_table",
+            )
         table.row_to_uri = {}; table.row_to_title = {}; table.row_to_id = {}; table.row_to_type = {}; table.row_to_obj = {}
         table._col_saved = 0
+        table._saved_check_done = False
         for i, r in enumerate(rows):
             t = r.get("type", "")
             typ_label = {
@@ -444,7 +463,13 @@ class SearchMixin:
             table.row_to_type[i] = r.get("type")
             table.row_to_obj[i] = r.get("raw")
         table._model_rows = rows
-        right.mount(Static(title, markup=True)); right.mount(table)
+        if not reused:
+            right.mount(Static(title, markup=True, id="results_title")); right.mount(table)
+        else:
+            try:
+                self.query_one("#results_title", Static).update(title)
+            except NoMatches:
+                pass
         table.focus()
         self.level = self.LVL_VIEW
         try:

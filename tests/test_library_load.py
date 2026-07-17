@@ -76,6 +76,66 @@ class Fake:
 class TApp(SptPy):
     def __init__(self, fake): super().__init__(); self.spotify = fake
 
+
+# --- Realistic payload fixtures (mirroring real spotipy responses) --------- #
+def real_album(i):
+    """A well-formed saved-album item: items[].album, all real fields."""
+    return {"added_at": "2024-05-01T00:00:00Z", "album": {
+        "id": f"4aawyAB9vmqN3uQ7FjRGT{i}", "uri": f"spotify:album:4aawyAB9vmqN3uQ7FjRGT{i}",
+        "name": f"Real Album {i}", "album_type": "album", "total_tracks": 12,
+        "release_date": "2024-01-01", "release_date_precision": "day",
+        "artists": [{"id": "0abc", "name": "Real Artist", "uri": "spotify:artist:0abc"}],
+        "external_urls": {"spotify": f"https://open.spotify.com/album/{i}"},
+        "images": [{"url": "https://i.example/x.jpg", "height": 640, "width": 640}],
+    }}
+
+def real_episode(i):
+    """A well-formed saved-episode item: items[].episode with a real show."""
+    return {"added_at": "2024-05-01T00:00:00Z", "episode": {
+        "id": f"epid{i}", "uri": f"spotify:episode:epid{i}", "name": f"Real Episode {i}",
+        "duration_ms": 1830000, "description": "d", "release_date": "2024-02-02",
+        "external_urls": {"spotify": f"https://open.spotify.com/episode/{i}"},
+        "images": [{"url": "https://i.example/e.jpg", "height": 640, "width": 640}],
+        "show": {"id": "sh1", "name": "Real Show", "publisher": "Real Publisher",
+                 "uri": "spotify:show:sh1", "external_urls": {"spotify": "https://open.spotify.com/show/sh1"}},
+    }}
+
+def tombstone_episode():
+    """Exactly the shape Spotify returns for an unavailable saved episode: the
+    'episode' wrapper exists but every identity field is null (verified against
+    the real /me/episodes response), including the nested show fields."""
+    return {"added_at": "2023-01-01T00:00:00Z", "episode": {
+        "id": None, "uri": None, "name": None, "duration_ms": None,
+        "description": None, "html_description": None, "release_date": "0000",
+        "external_urls": {"spotify": None}, "images": [],
+        "resume_point": {"fully_played": False, "resume_position_ms": 0},
+        "show": {"id": None, "name": None, "publisher": None, "uri": None,
+                 "external_urls": {"spotify": None}},
+    }}
+
+
+class LibFake:
+    """Minimal Spotify fake driven by explicit realistic pages (albums/episodes)."""
+    def __init__(self, albums=None, episodes=None):
+        self._albums = albums if albums is not None else []
+        self._episodes = episodes if episodes is not None else []
+    def has_cached_token(self): return True
+    def user_playlists(self, limit=50, offset=0): return {"items": [], "next": None}
+    def devices(self): return []
+    def get_playback(self): return {}
+    def ensure(self): return self
+    def _normalize_track_id(self, x): return x
+    def fmt_duration(self, ms):
+        s = int((ms or 0) / 1000); return f"{s // 60}:{s % 60:02d}"
+    def _slice(self, data, limit, offset):
+        page = data[offset:offset + limit]
+        nxt = "x" if offset + limit < len(data) else None
+        return {"items": page, "next": nxt}
+    def current_user_saved_albums(self, limit=50, offset=0):
+        return self._slice(self._albums, limit, offset)
+    def current_user_saved_episodes(self, limit=50, offset=0):
+        return self._slice(self._episodes, limit, offset)
+
 def pause_intervals(app):
     for a in ("_now_sync_interval","_now_tick_interval","_now_interval","_devices_interval","_queue_interval"):
         t = getattr(app, a, None)
@@ -298,11 +358,71 @@ async def test_cursor_preserved_during_progressive():
               f"cursor={table_by_id(app,'tracks_table').cursor_row}")
 
 
+async def test_saved_albums_skips_null_item():
+    # Real library returned a null item for an unavailable album, which crashed
+    # the whole page fetch (AttributeError on None.get) -> "Could not load".
+    fake = LibFake(albums=[real_album(0), None, real_album(1)]); app = TApp(fake)
+    async with app.run_test(size=(120, 20)) as pilot:
+        await pilot.pause(); pause_intervals(app)
+        app._open_saved_albums()
+        tbl = await poll(lambda: table_by_id(app, "search_table"), timeout=5.0)
+        check("saved albums with a null item loads (not 'Could not load')",
+              tbl is not None and "Could not load" not in right_text(app),
+              f"tbl={tbl} right={right_text(app)!r}")
+        await poll(lambda: nrows(table_by_id(app, "search_table")) == 2, timeout=5.0)
+        t = table_by_id(app, "search_table")
+        check("null album item skipped, both valid albums kept", nrows(t) == 2, f"n={nrows(t)}")
+        check("kept album has its real name", t._model_rows[0]["title"] == "Real Album 0",
+              f"row0={t._model_rows[0]}")
+
+
+async def test_saved_episodes_tombstone_degrades():
+    fake = LibFake(episodes=[tombstone_episode(), real_episode(1)]); app = TApp(fake)
+    async with app.run_test(size=(120, 20)) as pilot:
+        await pilot.pause(); pause_intervals(app)
+        app._open_saved_episodes()
+        await poll(lambda: table_by_id(app, "search_table"), timeout=5.0)
+        await poll(lambda: nrows(table_by_id(app, "search_table")) == 2, timeout=5.0)
+        rows = table_by_id(app, "search_table")._model_rows
+        ts, ok = rows[0], rows[1]
+        check("tombstone episode title degrades explicitly (no empty/None cell)",
+              ts["title"] == "(unavailable episode)", f"ts={ts}")
+        check("tombstone episode duration blank, not '0:00'", ts["dur"] == "", f"dur={ts['dur']!r}")
+        check("tombstone episode owner blank, not 'None'", ts["artist"] == "", f"artist={ts['artist']!r}")
+        check("both rows are episodes (Type=EPS)", ts["type"] == "episode" and ok["type"] == "episode")
+        check("valid episode keeps its real name", ok["title"] == "Real Episode 1", f"ok={ok}")
+        check("valid episode owner = show name", ok["artist"] == "Real Show", f"ok={ok}")
+        check("valid episode has a real duration", ok["dur"] not in ("", "0:00"), f"dur={ok['dur']!r}")
+
+
+async def test_search_table_reuse_no_duplicate_ids():
+    # Rendering a second search_table while one is still mounted used to raise
+    # textual DuplicateIds (remove() is async). It must reuse the widget in place.
+    from textual.widgets import DataTable
+    fake = LibFake(albums=[real_album(0)]); app = TApp(fake)
+    async with app.run_test(size=(120, 20)) as pilot:
+        await pilot.pause(); pause_intervals(app)
+        rows1 = [{"type": "album", "id": "a1", "uri": "u1", "title": "A1", "artist": "x",
+                  "album": "", "dur": "", "raw": {}, "saved": True}]
+        rows2 = [{"type": "album", "id": "a2", "uri": "u2", "title": "A2", "artist": "y",
+                  "album": "", "dur": "", "raw": {}, "saved": True},
+                 {"type": "artist", "id": "r1", "uri": "u3", "title": "R1", "artist": "",
+                  "album": "", "dur": "", "raw": {}, "saved": True}]
+        t1 = app._render_search_table("[b]T1[/b]", rows1, check_saved=False)
+        t2 = app._render_search_table("[b]T2[/b]", rows2, check_saved=False)
+        count = sum(1 for w in app.query(DataTable) if getattr(w, "id", "") == "search_table")
+        check("consecutive renders reuse one search_table (no DuplicateIds)",
+              t1 is t2 and count == 1, f"same={t1 is t2} count={count}")
+        check("reused table shows the newest rows", nrows(t2) == 2, f"n={nrows(t2)}")
+
+
 ALL = [test_immediate_feedback_non_blocking, test_progressive_paint,
        test_superseded_worker_stops_and_does_not_paint, test_leaving_view_prevents_paint,
        test_partial_on_error_keeps_rows, test_empty_vs_error,
        test_cache_shows_before_network_and_ctrlr_reloads,
-       test_ctrlr_routes_albums_and_no_accumulation, test_cursor_preserved_during_progressive]
+       test_ctrlr_routes_albums_and_no_accumulation, test_cursor_preserved_during_progressive,
+       test_saved_albums_skips_null_item, test_saved_episodes_tombstone_degrades,
+       test_search_table_reuse_no_duplicate_ids]
 
 async def main():
     for fn in ALL:

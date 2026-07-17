@@ -585,15 +585,25 @@ class LibraryMixin:
                 page = sp.current_user_saved_episodes(limit=50) or {}
             rows = []
             for it in page.get('items', []):
+                if not it:
+                    continue
                 ep = (it.get('episode') or {})
                 if not ep:
                     continue
+                # Spotify returns "tombstone" episode objects (every field None)
+                # for unavailable episodes: the keys exist but the values are
+                # null, so .get(key, default) yields None, not the default.
+                # Coalesce explicitly and degrade instead of inventing data.
+                show = (ep.get('show') or {})
+                name = ep.get('name')
+                dur_ms = ep.get('duration_ms')
                 rows.append({
                     "type": "episode", "id": ep.get("id"),
-                    "uri": ep.get("uri") or ep.get("external_urls", {}).get("spotify", ""),
-                    "title": ep.get("name", "(no title)"),
-                    "artist": ep.get('show', {}).get('name', ''),
-                    "album": "", "dur": self.spotify.fmt_duration(ep.get('duration_ms') or 0),
+                    "uri": ep.get("uri") or (ep.get("external_urls") or {}).get("spotify", ""),
+                    "title": name or "(unavailable episode)",
+                    "artist": show.get('name') or "",
+                    "album": "",
+                    "dur": self.spotify.fmt_duration(dur_ms) if dur_ms else "",
                     "raw": ep, "saved": True,
                 })
             return rows, bool(page.get('next'))
@@ -663,6 +673,10 @@ class LibraryMixin:
             page = self.spotify.ensure().current_user_saved_albums(limit=50, offset=offset) or {}
             rows = []
             for it in page.get("items", []):
+                # Spotify returns a null item for an unavailable saved album;
+                # accessing it.get() on None was crashing the whole page fetch.
+                if not it:
+                    continue
                 album = (it.get("album") or {})
                 if not album:
                     continue
