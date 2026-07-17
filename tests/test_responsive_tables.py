@@ -66,25 +66,37 @@ def content_w(app):
     return int(getattr(sz, "width", 0) or 0)
 
 
-async def test_no_horizontal_overflow_reasonable_sizes():
-    for size in [(140, 30), (110, 25)]:
+async def test_no_horizontal_scrollbar_reasonable_sizes():
+    # Many rows so the vertical scrollbar is present (the width worst case).
+    for size in [(180, 40), (140, 30), (110, 25)]:
         app = TApp(Fake())
         async with app.run_test(size=size) as pilot:
             await pilot.pause(); pause_intervals(app)
-            cw = content_w(app)
-            checks = []
-            t = app._render_tracks_table("[b]P[/b]", rows_n(4), [False] * 4, profile="playlist")
-            await pilot.pause()
-            checks.append(("playlist", sum(col_widths(t)), cw))
+            t = app._render_tracks_table("[b]P[/b]", rows_n(60), [False] * 60, profile="playlist")
+            for _ in range(4):
+                await pilot.pause()
+            check(f"tracks table has no horizontal scrollbar at {size}",
+                  not bool(getattr(t, "show_horizontal_scrollbar", False)), f"widths={col_widths(t)}")
             app.action_escape_to_menu(); await pilot.pause()
-            srows = [{"type": "track", "id": "t", "uri": "u", "title": "T", "artist": "a",
-                      "album": "al", "dur": "3:21", "raw": {}}]
+            srows = [{"type": "track", "id": f"t{i}", "uri": "u", "title": "T", "artist": "a",
+                      "album": "al", "dur": "3:21", "raw": {}} for i in range(60)]
             st = app._render_search_table("[b]S[/b]", srows, check_saved=False, layout="full")
-            await pilot.pause()
-            checks.append(("search-full", sum(col_widths(st)), cw))
-            for name, total, cwv in checks:
-                check(f"{name} columns fit the content width at {size}", total <= cwv,
-                      f"sum={total} content={cwv}")
+            for _ in range(4):
+                await pilot.pause()
+            check(f"search table has no horizontal scrollbar at {size}",
+                  not bool(getattr(st, "show_horizontal_scrollbar", False)), f"widths={col_widths(st)}")
+
+
+async def test_flex_columns_capped_on_wide_terminals():
+    app = TApp(Fake())
+    async with app.run_test(size=(200, 40)) as pilot:
+        await pilot.pause(); pause_intervals(app)
+        t = app._render_tracks_table("[b]P[/b]", rows_n(3), [False] * 3, profile="playlist")
+        await pilot.pause()
+        w = col_widths(t)   # [heart, title, artist, album, dur, added]
+        check("Title is bounded (does not over-stretch) on a wide terminal", 6 <= w[1] <= 42, f"title={w[1]}")
+        check("Artist is bounded on a wide terminal", 6 <= w[2] <= 28, f"artist={w[2]}")
+        check("Album is bounded on a wide terminal", 6 <= w[3] <= 26, f"album={w[3]}")
 
 
 async def test_title_weighted_wider_than_artist():
@@ -109,7 +121,7 @@ async def test_recompute_preserves_cursor_and_scroll():
         before_cursor, before_scroll, before_w = t.cursor_row, scroll_y(t), col_widths(t)
         # Simulate a resize: force _column_widths to return different values.
         orig = app._column_widths
-        app._column_widths = lambda labels, fixed=None, weights=None: [x + 1 for x in orig(labels, fixed, weights)]
+        app._column_widths = lambda labels, fixed=None, weights=None, max_widths=None: [x + 1 for x in orig(labels, fixed, weights, max_widths)]
         try:
             app._recompute_table_widths(t)
         finally:
@@ -161,9 +173,9 @@ async def test_column_profiles():
               col_labels(sp) == ["S", "Type", "Name", "Owner"], f"cols={col_labels(sp)}")
 
 
-ALL = [test_no_horizontal_overflow_reasonable_sizes, test_title_weighted_wider_than_artist,
-       test_recompute_preserves_cursor_and_scroll, test_no_manual_resize_widget,
-       test_column_profiles]
+ALL = [test_no_horizontal_scrollbar_reasonable_sizes, test_flex_columns_capped_on_wide_terminals,
+       test_title_weighted_wider_than_artist, test_recompute_preserves_cursor_and_scroll,
+       test_no_manual_resize_widget, test_column_profiles]
 
 async def main():
     for fn in ALL:

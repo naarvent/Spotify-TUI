@@ -532,6 +532,7 @@ class SearchMixin:
         # in the log on saved-view reopen and back-to-back searches). The id is
         # also a behaviour discriminator elsewhere, so it must stay stable.
         col_labels, fixed_widths, fields, weights = self._SEARCH_LAYOUTS.get(layout, self._SEARCH_LAYOUTS["full"])
+        max_widths = {i: self._FLEX_MAX[f] for i, f in enumerate(fields) if f in self._FLEX_MAX}
         try:
             table = self.query_one("#search_table", DataTable)
         except NoMatches:
@@ -543,8 +544,8 @@ class SearchMixin:
                 # current size); clear(columns=True) drops both rows and columns,
                 # so a layout change reuses the widget without a remount.
                 table.clear(columns=True)
-                table._width_spec = (list(col_labels), dict(fixed_widths), dict(weights))
-                for lbl, w in zip(col_labels, self._column_widths(col_labels, fixed_widths, weights)):
+                table._width_spec = (list(col_labels), dict(fixed_widths), dict(weights), dict(max_widths))
+                for lbl, w in zip(col_labels, self._column_widths(col_labels, fixed_widths, weights, max_widths)):
                     try: table.add_column(lbl, width=int(w))
                     except Exception:
                         try: table.add_column(lbl)
@@ -555,7 +556,7 @@ class SearchMixin:
         if not reused:
             right = self._clear_right()
             table = self._create_table_with_full_width(
-                col_labels, fixed_widths=fixed_widths, widget_id="search_table", weights=weights,
+                col_labels, fixed_widths=fixed_widths, widget_id="search_table", weights=weights, max_widths=max_widths,
             )
         table.row_to_uri = {}; table.row_to_title = {}; table.row_to_id = {}; table.row_to_type = {}; table.row_to_obj = {}
         table._col_saved = 0

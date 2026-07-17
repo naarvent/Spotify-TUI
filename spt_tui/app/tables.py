@@ -76,8 +76,9 @@ class TablesMixin:
         right = self._clear_right()
         col_labels, fixed_widths, weights, fields = self._TRACKS_PROFILES.get(
             profile, self._TRACKS_PROFILES["playlist"])
+        max_widths = {i: self._FLEX_MAX[f] for i, f in enumerate(fields) if f in self._FLEX_MAX}
         table = self._create_table_with_full_width(
-            col_labels, fixed_widths=fixed_widths, widget_id="tracks_table", weights=weights,
+            col_labels, fixed_widths=fixed_widths, widget_id="tracks_table", weights=weights, max_widths=max_widths,
         )
         table._col_heart = 0
         table._track_fields = fields
@@ -568,13 +569,20 @@ class TablesMixin:
         try: table.refresh()
         except Exception: pass
 
-    def _column_widths(self, col_labels: list, fixed_widths: dict | None = None, weights: dict | None = None) -> list:
+    # Max width (by field name) for flexible columns, so Title/Artist/Album do
+    # not over-stretch on wide terminals — they get a considerable but bounded
+    # size and leave room for the rest.
+    _FLEX_MAX = {"title": 42, "artist": 28, "album": 26}
+
+    def _column_widths(self, col_labels: list, fixed_widths: dict | None = None,
+                       weights: dict | None = None, max_widths: dict | None = None) -> list:
         """Distribute the right panel's width across columns. Fixed columns take
         their set width; the remainder is split among the flexible columns in
-        proportion to their weight (default 1.0) so e.g. Title can be wider than
-        Artist/Album. The total never exceeds the available width (no horizontal
-        scroll on reasonable sizes); any rounding leftover goes to the first
-        flexible column. Each flexible column keeps a minimum legible width."""
+        proportion to their weight (default 1.0), each clamped to an optional max
+        so Title can be wider than Artist/Album without over-stretching. The
+        rendered total (columns + the DataTable's per-column cell padding and its
+        border) never exceeds the content area, so no horizontal scrollbar appears
+        on reasonable sizes; leftover from capping stays unused (bounded width)."""
         right = getattr(self, 'right_panel', None)
         avail_w = 0
         if right is not None:
@@ -590,13 +598,18 @@ class TablesMixin:
                 avail_w = int(getattr(self, 'size').width or 80)
             except Exception:
                 avail_w = 80
-        # Leave room for the table's own borders/cell padding so the columns
-        # never total wider than the content area.
-        avail = max(20, avail_w - 4)
 
         n = len(col_labels)
+        # A DataTable renders each column as width + 2*cell_padding (cell_padding
+        # defaults to 1), adds its own round border (2) and, once the row count
+        # overflows, a vertical scrollbar (~2). Reserve all of that so the set
+        # column widths always fit the visible area with no horizontal scrollbar.
+        overhead = 4 + 2 * n
+        avail = max(20, avail_w - overhead)
+
         fixed = fixed_widths or {}
         w = weights or {}
+        mx = max_widths or {}
         fixed_total = sum(int(v) for v in fixed.values() if isinstance(v, int))
         flexible_idxs = [i for i in range(n) if i not in fixed]
         widths = [int(fixed[i]) if i in fixed else 0 for i in range(n)]
@@ -604,18 +617,32 @@ class TablesMixin:
             rem = max(0, avail - fixed_total)
             total_weight = sum(float(w.get(i, 1.0)) for i in flexible_idxs) or 1.0
             for i in flexible_idxs:
-                widths[i] = max(6, int(rem * (float(w.get(i, 1.0)) / total_weight)))
+                wd = max(6, int(rem * (float(w.get(i, 1.0)) / total_weight)))
+                cap = mx.get(i)
+                if cap is not None:
+                    wd = min(wd, int(cap))
+                widths[i] = wd
+            # Give rounding/uncapped leftover to the first flexible column up to
+            # its own cap; any remainder stays unused so wide terminals keep a
+            # bounded table instead of stretching Title/Artist/Album across the
+            # whole panel.
+            i0 = flexible_idxs[0]
             leftover = avail - sum(widths)
-            widths[flexible_idxs[0]] = max(6, widths[flexible_idxs[0]] + leftover)
+            if leftover > 0:
+                cap0 = mx.get(i0)
+                room = (int(cap0) - widths[i0]) if cap0 is not None else leftover
+                widths[i0] += max(0, min(leftover, room))
+            elif leftover < 0:
+                widths[i0] = max(6, widths[i0] + leftover)
         return widths
 
-    def _create_table_with_full_width(self, col_labels: list, fixed_widths: dict | None = None, widget_id: Optional[str] = None, weights: dict | None = None) -> DataTable:
+    def _create_table_with_full_width(self, col_labels: list, fixed_widths: dict | None = None, widget_id: Optional[str] = None, weights: dict | None = None, max_widths: dict | None = None) -> DataTable:
         try:
-            widths = self._column_widths(col_labels, fixed_widths, weights)
+            widths = self._column_widths(col_labels, fixed_widths, weights, max_widths)
             table = DataTable(zebra_stripes=True, id=(widget_id or "table"))
             table.show_cursor = True; table.cursor_type = "row"
             # Remember the profile so on_resize can recompute widths in place.
-            table._width_spec = (list(col_labels), dict(fixed_widths or {}), dict(weights or {}))
+            table._width_spec = (list(col_labels), dict(fixed_widths or {}), dict(weights or {}), dict(max_widths or {}))
             for lbl, wd in zip(col_labels, widths):
                 try:
                     table.add_column(lbl, width=int(wd))
@@ -639,16 +666,16 @@ class TablesMixin:
         resize) without rebuilding rows, preserving cursor and scroll. No-op if
         the widths are unchanged."""
         spec = getattr(table, "_width_spec", None)
-        if not spec:
+        if not spec or len(spec) < 4:
             return
-        col_labels, fixed, weights = spec
+        col_labels, fixed, weights, max_widths = spec
         try:
             cols = list(table.ordered_columns)
         except Exception:
             return
         if len(cols) != len(col_labels):
             return
-        widths = self._column_widths(col_labels, fixed, weights)
+        widths = self._column_widths(col_labels, fixed, weights, max_widths)
         changed = False
         for col, wd in zip(cols, widths):
             try:
