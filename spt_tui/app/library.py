@@ -150,12 +150,20 @@ class LibraryMixin:
     def _playlists_cache_path(self) -> str:
         return os.path.join(config.CACHE_DIR, "playlists_cache.json")
 
-    def _save_playlists_disk(self, items) -> None:
+    def _save_playlists_disk(self, items, *, allow_empty: bool = False) -> None:
+        # Never overwrite a valid on-disk cache with an empty list unless the API
+        # unambiguously confirmed an empty library. Write atomically (tmp + replace)
+        # so a crash mid-write can't leave a truncated/corrupt cache.
+        if not items and not allow_empty:
+            return
         try:
             minimal = [{"name": p.get("name"), "id": p.get("id"), "uri": p.get("uri")}
-                       for p in items if p]
-            with open(self._playlists_cache_path(), "w", encoding="utf-8") as f:
+                       for p in (items or []) if p]
+            path = self._playlists_cache_path()
+            tmp = f"{path}.tmp"
+            with open(tmp, "w", encoding="utf-8") as f:
                 json.dump(minimal, f, ensure_ascii=False)
+            os.replace(tmp, path)
         except Exception:
             logger.exception("could not save playlists cache")
 
@@ -184,38 +192,69 @@ class LibraryMixin:
             logger.exception("could not paint cached playlists")
 
     def _load_playlists(self, force: bool = False):
+        if not force and not getattr(self, '_auto_load_playlists', False):
+            return
+        # Generation guard: many events trigger a reload (startup, escape, help,
+        # retry worker, Ctrl+R). Only the newest load may replace the list, so a
+        # slow older worker can never overwrite a newer result.
+        self._playlists_gen = int(getattr(self, "_playlists_gen", 0)) + 1
+        gen = self._playlists_gen
         try:
-            if not force and not getattr(self, '_auto_load_playlists', False):
-                return
             # Gate on a cached token, not a currently-*valid* one: an expired
-            # token is refreshed transparently by ensure() on the API call
-            # below. Requiring validity here made playlists silently fail to
-            # load after the ~1h token expiry (the "press Ctrl+R" workaround).
+            # token is refreshed transparently by ensure() on the API call below.
             if not self.spotify.has_cached_token():
-                self.playlists_cache = []
-                def _paint_empty():
+                # A transient token miss must not wipe an already-loaded list.
+                if not self.playlists_cache:
+                    def _paint_empty():
+                        try:
+                            self.pl_list.clear()
+                        except Exception:
+                            pass
                     try:
-                        self.pl_list.clear()
+                        self.call_from_thread(_paint_empty)
                     except Exception:
-                        pass
-                try:
-                    self.call_from_thread(_paint_empty)
-                except Exception:
-                    if getattr(self, '_closing', False):
-                        logger.debug("playlists empty paint dropped during teardown")
-                    else:
-                        logger.exception("playlists empty paint: call_from_thread failed")
+                        if getattr(self, '_closing', False):
+                            logger.debug("playlists empty paint dropped during teardown")
+                        else:
+                            logger.exception("playlists empty paint: call_from_thread failed")
                 return
 
-            items: List[Dict] = []; offset = 0
+            items: List[Dict] = []
+            offset = 0
+            total = None
+            ok = True
             while True:
                 page = self.spotify.user_playlists(limit=50, offset=offset)
-                items.extend(page.get("items", []))
-                if page.get("next"): offset += 50
-                else: break
+                if not isinstance(page, dict) or "items" not in page:
+                    ok = False   # malformed / unexpected shape -> treat as a failure
+                    break
+                if total is None:
+                    total = page.get("total")
+                items.extend(page.get("items") or [])
+                if page.get("next"):
+                    offset += 50
+                else:
+                    break
+
+            if gen != getattr(self, "_playlists_gen", gen):
+                return   # superseded by a newer load; do not touch anything
+
+            # Only trust an empty result if the API unambiguously reports 0 total.
+            confirmed_empty = ok and not items and (total == 0)
+            if not ok:
+                logger.warning("playlists load: malformed response, keeping current list")
+                return
+            if not items and not confirmed_empty:
+                logger.warning("playlists load: unexpected empty response, keeping current list")
+                return
+
+            # Valid, complete result (non-empty, or a confirmed empty library).
             self.playlists_cache = items
-            self._save_playlists_disk(items)
+            self._save_playlists_disk(items, allow_empty=confirmed_empty)
+
             def paint():
+                if gen != getattr(self, "_playlists_gen", gen):
+                    return
                 self.pl_list.clear()
                 for p in items:
                     li = ListItem(Label(p.get("name", "(no title)")))
@@ -223,14 +262,17 @@ class LibraryMixin:
                     self.pl_list.append(li)
                 if self.pl_list.children and 0 <= self.pl_index < len(self.pl_list.children):
                     self._suppress_first_selection = True; self.pl_list.index = self.pl_index
-            self.call_from_thread(paint)
-        except Exception as e:
-            logger.exception("Error loading playlists: %s", e)
-            err_msg = rich_escape(str(e))
-            def show_err():
-                right = self._clear_right()
-                right.update(f"[b]Error loading playlists:[/b] {err_msg}")
-            self.call_from_thread(show_err)
+            try:
+                self.call_from_thread(paint)
+            except Exception:
+                if getattr(self, '_closing', False):
+                    logger.debug("playlists paint dropped during teardown")
+                else:
+                    logger.exception("playlists paint: call_from_thread failed")
+        except Exception:
+            # Never wipe a valid list on error: keep data (memory + disk), log,
+            # and do not repaint (so a Welcome refresh can't replace the welcome).
+            logger.exception("Error loading playlists")
 
     def _open_playlist_table(self, pdata: Dict):
         self._leave_lyrics_mode()
