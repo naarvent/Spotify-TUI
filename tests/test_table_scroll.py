@@ -93,7 +93,79 @@ def test_toggle_like_keeps_position():
           f"before={before} after={after}")
 
 
-ALL = [test_repaint_preserves_cursor_and_scroll, test_toggle_like_keeps_position]
+def _col_labels(table):
+    return [str(getattr(c, "label", "")) for c in table.ordered_columns]
+
+def _col_widths(table):
+    out = []
+    for c in table.ordered_columns:
+        try: out.append(int(getattr(c, "width", 0) or 0))
+        except Exception: out.append(0)
+    return out
+
+
+def test_playlist_columns_drop_source():
+    async def body():
+        app = TApp(Fake())
+        async with app.run_test(size=(120, 20)) as pilot:
+            await pilot.pause(); pause_intervals(app)
+            rows = rows_n(5)
+            pt = app._render_tracks_table("[b]PL[/b]", rows, [False] * 5,
+                                          context_uris=[r["uri"] for r in rows], show_source=False)
+            await pilot.pause()
+            pl_labels, pl_widths = _col_labels(pt), _col_widths(pt)
+            # a repaint (e.g. likes loaded) must keep the playlist layout
+            pt._liked_map = {i: True for i in range(5)}
+            app._repaint_rows_from_model(pt)
+            await pilot.pause()
+            rep_labels = _col_labels(pt)
+            # a non-playlist view keeps Source (not removed globally)
+            app.action_escape_to_menu(); await pilot.pause()
+            gt = app._render_tracks_table("[b]G[/b]", rows, [False] * 5,
+                                          context_uris=[r["uri"] for r in rows])
+            await pilot.pause()
+            gen_labels = _col_labels(gt)
+            return pl_labels, pl_widths, rep_labels, gen_labels
+    pl, pw, rep, gen = asyncio.run(body())
+    check("playlist table drops the Source column",
+          pl == ["♥", "Title", "Artist", "Album", "Duration", "Added"], f"cols={pl}")
+    check("playlist layout survives a repaint (still no Source)", rep == pl, f"cols={rep}")
+    check("other views keep Source (not removed globally)", "Source" in gen, f"cols={gen}")
+    # heart/Duration/Added compact & fixed; Title/Artist/Album flexible (share space)
+    if len(pw) == 6:
+        heart, title, artist, album, dur, added = pw
+        check("heart column is a small fixed width", heart <= 4, f"w={pw}")
+        check("Duration/Added stay compact", dur <= 11 and added <= 14, f"w={pw}")
+        check("Title/Artist/Album are flexible (wider than Duration)",
+              min(title, artist, album) > dur, f"w={pw}")
+
+
+def test_playlist_long_values_do_not_break():
+    async def body():
+        app = TApp(Fake())
+        async with app.run_test(size=(120, 20)) as pilot:
+            await pilot.pause(); pause_intervals(app)
+            rows = [{"id": "id0", "uri": "spotify:track:id0",
+                     "title": "A very very very long track title " * 4,
+                     "artist": "An extremely long artist name " * 3,
+                     "album": "A ridiculously long album name " * 3,
+                     "dur": "1:23:45", "added": "2024-01-01"}]
+            t = app._render_tracks_table("[b]PL[/b]", rows, [False], show_source=False,
+                                         context_uris=["spotify:track:id0"])
+            await pilot.pause()
+            return _col_labels(t), len(getattr(t, "_model_rows", []))
+    labels, n = body_run(body)
+    check("long values keep the 6-column playlist layout", len(labels) == 6 and "Source" not in labels,
+          f"cols={labels}")
+    check("row still added with long values", n == 1, f"n={n}")
+
+
+def body_run(body):
+    return asyncio.run(body())
+
+
+ALL = [test_repaint_preserves_cursor_and_scroll, test_toggle_like_keeps_position,
+       test_playlist_columns_drop_source, test_playlist_long_values_do_not_break]
 
 def main():
     for fn in ALL:

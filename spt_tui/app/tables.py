@@ -28,8 +28,9 @@ class TablesMixin:
     # Colour used to mark the row that is currently playing.
     PLAYING_STYLE = "bold #b388ff"
 
-    def _track_cells(self, r: Dict, liked: bool, playing: bool):
-        """Build the 7 cells for a tracks_table row, purple if it's playing."""
+    def _track_cells(self, r: Dict, liked: bool, playing: bool, show_source: bool = True):
+        """Build the cells for a tracks_table row, purple if it's playing. The
+        Source column is optional (playlists drop it — it is always empty there)."""
         heart = Text("❤", style="bold red") if liked else Text("")
         style = self.PLAYING_STYLE if playing else None
 
@@ -37,8 +38,12 @@ class TablesMixin:
             val = val or ""
             return Text(val, style=style) if style else val
 
-        return [heart, c(r.get("title", "")), c(r.get("artist", "")), c(r.get("album", "")),
-                c(r.get("dur", "")), c(r.get("source", "")), c(r.get("added", ""))]
+        cells = [heart, c(r.get("title", "")), c(r.get("artist", "")), c(r.get("album", "")),
+                 c(r.get("dur", ""))]
+        if show_source:
+            cells.append(c(r.get("source", "")))
+        cells.append(c(r.get("added", "")))
+        return cells
 
     def _refresh_playing_highlight(self):
         """Re-paint the visible tracks table so the playing row is marked purple."""
@@ -52,20 +57,29 @@ class TablesMixin:
         except Exception:
             logger.exception("_refresh_playing_highlight failed")
 
-    def _render_tracks_table(self, title: str, rows: List[Dict], liked_bools: Optional[List[bool]] = None, *, context_uri: Optional[str] = None, context_uris: Optional[List[str]] = None):
+    def _render_tracks_table(self, title: str, rows: List[Dict], liked_bools: Optional[List[bool]] = None, *, context_uri: Optional[str] = None, context_uris: Optional[List[str]] = None, show_source: bool = True):
         right = self._clear_right()
+        if show_source:
+            col_labels = ["♥", "Title", "Artist", "Album", "Duration", "Source", "Added"]
+            fixed_widths = {0: 3, 4: 9, 5: 10}
+        else:
+            # Playlist layout: no Source; Title/Artist/Album share the space,
+            # Duration and Added stay compact and fixed.
+            col_labels = ["♥", "Title", "Artist", "Album", "Duration", "Added"]
+            fixed_widths = {0: 3, 4: 9, 5: 12}
         table = self._create_table_with_full_width(
-            ["♥", "Title", "Artist", "Album", "Duration", "Source", "Added"],
-            fixed_widths={0: 3, 4: 9, 5: 10},
+            col_labels,
+            fixed_widths=fixed_widths,
             widget_id="tracks_table",
         )
         table._col_heart = 0
+        table._show_source = show_source
         table.row_to_uri = {}; table.row_to_title = {}; table.row_to_id = {}
         playing_id = getattr(self, "_now_internal_track_id", None)
         for i, r in enumerate(rows):
             liked = bool(liked_bools and i < len(liked_bools) and liked_bools[i])
             playing = bool(r.get("id") and r.get("id") == playing_id)
-            table.add_row(*self._track_cells(r, liked, playing), key=i)
+            table.add_row(*self._track_cells(r, liked, playing, show_source=show_source), key=i)
             table.row_to_uri[i] = r["uri"]
             table.row_to_title[i] = f"{r['title']} {GLYPHS['sep']} {r['artist']}"
             if r.get("id"): table.row_to_id[i] = r["id"]
@@ -538,11 +552,12 @@ class TablesMixin:
             return
 
         playing_id = getattr(self, "_now_internal_track_id", None)
+        show_source = getattr(table, "_show_source", True)
         for i, r in enumerate(rows):
             liked = bool(liked_map.get(i, False))
             playing = bool(r.get("id") and r.get("id") == playing_id)
             try:
-                table.add_row(*self._track_cells(r, liked, playing), key=i)
+                table.add_row(*self._track_cells(r, liked, playing, show_source=show_source), key=i)
             except Exception:
                 heart = Text("❤", style="bold red") if liked else Text("")
                 try:

@@ -282,7 +282,7 @@ class LibraryMixin:
                     return
                 self._render_tracks_table(
                     title, rows, None, context_uri=pl_uri,
-                    context_uris=[r["uri"] for r in rows],
+                    context_uris=[r["uri"] for r in rows], show_source=False,
                 )
             self.call_from_thread(do)
 
@@ -298,7 +298,7 @@ class LibraryMixin:
                     # No preview was shown (single-page playlist): fresh render.
                     self._render_tracks_table(
                         title, rows, liked, context_uri=pl_uri,
-                        context_uris=[r["uri"] for r in rows],
+                        context_uris=[r["uri"] for r in rows], show_source=False,
                     )
                     return
                 # Update the preview table in place — mounting a second widget
