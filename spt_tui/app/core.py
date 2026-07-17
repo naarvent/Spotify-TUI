@@ -367,24 +367,31 @@ class CoreMixin:
         self._welcome_on = True
 
     def on_resize(self, event) -> None:
-        # Only re-render while the welcome is actually showing, and only when the
-        # chosen variant changes — so resizing never flickers the welcome and
-        # never touches another open view (search/playlist/lyrics/help/…). Use
-        # event.size: self.size still holds the pre-resize value at this point.
-        if not getattr(self, "_welcome_on", False):
-            return
-        try:
-            tw, th = int(event.size.width), int(event.size.height)
-        except Exception:
-            tw, th = int(self.size.width or 0), int(self.size.height or 0)
-        w, h = self._welcome_dims(tw, th)
-        variant = self._welcome_variant_for(w, h)
-        if variant != getattr(self, "_welcome_variant", None):
-            self._welcome_variant = variant
+        # While the welcome is showing, re-render its responsive variant (only when
+        # the variant changes, so resizing never flickers it). Use event.size:
+        # self.size still holds the pre-resize value at this point.
+        if getattr(self, "_welcome_on", False):
             try:
-                self.right_panel.update(self._render_welcome(w, h))
+                tw, th = int(event.size.width), int(event.size.height)
             except Exception:
-                logger.exception("welcome resize repaint failed")
+                tw, th = int(self.size.width or 0), int(self.size.height or 0)
+            w, h = self._welcome_dims(tw, th)
+            variant = self._welcome_variant_for(w, h)
+            if variant != getattr(self, "_welcome_variant", None):
+                self._welcome_variant = variant
+                try:
+                    self.right_panel.update(self._render_welcome(w, h))
+                except Exception:
+                    logger.exception("welcome resize repaint failed")
+            return
+        # Otherwise a result table may be visible: recompute its column widths for
+        # the new panel width, preserving rows/cursor/scroll (no data rebuild).
+        # _recompute_table_widths is a no-op when the effective widths are unchanged.
+        try:
+            for t in self.query(DataTable):
+                self._recompute_table_widths(t)
+        except Exception:
+            logger.exception("table resize recompute failed")
 
     def on_input_submitted(self, event: Input.Submitted) -> None:
 

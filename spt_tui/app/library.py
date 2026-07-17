@@ -324,7 +324,7 @@ class LibraryMixin:
                     return
                 self._render_tracks_table(
                     title, rows, None, context_uri=pl_uri,
-                    context_uris=[r["uri"] for r in rows], show_source=False,
+                    context_uris=[r["uri"] for r in rows], profile="playlist",
                 )
             self.call_from_thread(do)
 
@@ -340,7 +340,7 @@ class LibraryMixin:
                     # No preview was shown (single-page playlist): fresh render.
                     self._render_tracks_table(
                         title, rows, liked, context_uri=pl_uri,
-                        context_uris=[r["uri"] for r in rows], show_source=False,
+                        context_uris=[r["uri"] for r in rows], profile="playlist",
                     )
                     return
                 # Update the preview table in place — mounting a second widget
@@ -689,7 +689,7 @@ class LibraryMixin:
             liked = self.spotify.check_saved_tracks(ids) if ids else []
             def paint():
                 if not self._is_current_view("recent", "", token): return
-                table = self._render_tracks_table("[b]Recently Played[/b]", rows, liked, context_uris=[r["uri"] for r in rows])
+                table = self._render_tracks_table("[b]Recently Played[/b]", rows, liked, context_uris=[r["uri"] for r in rows], profile="recent")
                 if table is not None:
                     self._revalidate_liked_column(table, max_rows=100)
             self.call_from_thread(paint)

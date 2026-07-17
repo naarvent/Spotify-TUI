@@ -452,7 +452,16 @@ class SearchMixin:
                     self._right_view = (rv[0], rv[1], rv[2], rows)
             except Exception:
                 logger.exception("_do_search: failed setting search view token")
-            table = self._render_search_table(title, rows)
+            # A forced single-type search gets a layout tailored to that type;
+            # a combined search keeps the full (mixed-type) layout.
+            layout = "full"
+            if force_type in ("album", "single"):
+                layout = "albums"
+            elif force_type == "playlist":
+                layout = "playlists"
+            elif force_type == "artist":
+                layout = "artists"
+            table = self._render_search_table(title, rows, layout=layout)
             # Stamp the token so late saved/liked updates (this render's own
             # worker, and post-favourite revalidation) can verify the table is
             # still the current search before painting.
@@ -488,14 +497,18 @@ class SearchMixin:
     # Column layouts for the shared search_table. Each entry is
     # (labels, fixed_widths, fields). `fields` maps 1:1 to the cells built by
     # _search_cells; flexible columns (not in fixed_widths) share the rest.
+    # Column profiles for the shared search_table: (labels, fixed_widths, fields,
+    # weights). Source is dropped from every content table (only the Queue keeps
+    # it). Name/Title carries the highest weight so it takes the most free space.
     _SEARCH_LAYOUTS = {
-        # Source is dropped from every content table (it is only meaningful in the
-        # Queue, which has its own render path).
         "full": (["S", "Type", "Title", "Artist/Owner", "Album", "Duration"],
                  {0: 3, 1: 7, 5: 9},
-                 ["saved", "type", "title", "artist", "album", "dur"]),
-        "artists": (["S", "Type", "Name"], {0: 3, 1: 7}, ["saved", "type", "title"]),
-        "podcasts": (["S", "Type", "Name", "Owner"], {0: 3, 1: 7}, ["saved", "type", "title", "artist"]),
+                 ["saved", "type", "title", "artist", "album", "dur"], {2: 1.4}),
+        "artists": (["S", "Type", "Name"], {0: 3, 1: 7}, ["saved", "type", "title"], {}),
+        "podcasts": (["S", "Type", "Name", "Owner"], {0: 3, 1: 7}, ["saved", "type", "title", "artist"], {2: 1.4}),
+        # Search albums / playlists have no meaningful Duration.
+        "albums": (["S", "Type", "Name", "Artist"], {0: 3, 1: 7}, ["saved", "type", "title", "artist"], {2: 1.4}),
+        "playlists": (["S", "Type", "Name", "Owner"], {0: 3, 1: 7}, ["saved", "type", "title", "artist"], {2: 1.4}),
     }
 
     def _search_cells(self, r: Dict, fields: List[str]):
@@ -518,7 +531,7 @@ class SearchMixin:
         # widget with the same id in the same callback raises DuplicateIds (seen
         # in the log on saved-view reopen and back-to-back searches). The id is
         # also a behaviour discriminator elsewhere, so it must stay stable.
-        col_labels, fixed_widths, fields = self._SEARCH_LAYOUTS.get(layout, self._SEARCH_LAYOUTS["full"])
+        col_labels, fixed_widths, fields, weights = self._SEARCH_LAYOUTS.get(layout, self._SEARCH_LAYOUTS["full"])
         try:
             table = self.query_one("#search_table", DataTable)
         except NoMatches:
@@ -530,7 +543,8 @@ class SearchMixin:
                 # current size); clear(columns=True) drops both rows and columns,
                 # so a layout change reuses the widget without a remount.
                 table.clear(columns=True)
-                for lbl, w in zip(col_labels, self._column_widths(col_labels, fixed_widths)):
+                table._width_spec = (list(col_labels), dict(fixed_widths), dict(weights))
+                for lbl, w in zip(col_labels, self._column_widths(col_labels, fixed_widths, weights)):
                     try: table.add_column(lbl, width=int(w))
                     except Exception:
                         try: table.add_column(lbl)
@@ -541,7 +555,7 @@ class SearchMixin:
         if not reused:
             right = self._clear_right()
             table = self._create_table_with_full_width(
-                col_labels, fixed_widths=fixed_widths, widget_id="search_table",
+                col_labels, fixed_widths=fixed_widths, widget_id="search_table", weights=weights,
             )
         table.row_to_uri = {}; table.row_to_title = {}; table.row_to_id = {}; table.row_to_type = {}; table.row_to_obj = {}
         table._col_saved = 0

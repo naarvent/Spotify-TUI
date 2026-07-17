@@ -22,15 +22,26 @@ except Exception:
 
 from ..config import logger
 from ..constants import GLYPHS
-from ..widgets import ResizableDataTable
 
 class TablesMixin:
     # Colour used to mark the row that is currently playing.
     PLAYING_STYLE = "bold #b388ff"
 
-    def _track_cells(self, r: Dict, liked: bool, playing: bool, show_source: bool = True):
-        """Build the cells for a tracks_table row, purple if it's playing. The
-        Source column is optional (playlists drop it — it is always empty there)."""
+    # Column profiles for tracks tables: (labels, fixed_widths, weights, fields).
+    # Title carries the highest weight so it takes the most of the free space;
+    # Artist and Album share the rest. Heart, Duration and Added stay compact.
+    _TRACKS_PROFILES = {
+        "playlist": (["♥", "Title", "Artist", "Album", "Duration", "Added"],
+                     {0: 3, 4: 9, 5: 12}, {1: 1.4}, ["heart", "title", "artist", "album", "dur", "added"]),
+        "recent":   (["♥", "Title", "Artist", "Album", "Duration", "Played"],
+                     {0: 3, 4: 9, 5: 12}, {1: 1.4}, ["heart", "title", "artist", "album", "dur", "added"]),
+        "album":    (["♥", "Title", "Artist", "Duration"],
+                     {0: 3, 3: 9}, {1: 1.4}, ["heart", "title", "artist", "dur"]),
+    }
+
+    def _track_cells(self, r: Dict, liked: bool, playing: bool, fields):
+        """Build the cells for a tracks_table row (purple if playing) for the
+        given field list (see _TRACKS_PROFILES)."""
         heart = Text("❤", style="bold red") if liked else Text("")
         style = self.PLAYING_STYLE if playing else None
 
@@ -38,12 +49,16 @@ class TablesMixin:
             val = val or ""
             return Text(val, style=style) if style else val
 
-        cells = [heart, c(r.get("title", "")), c(r.get("artist", "")), c(r.get("album", "")),
-                 c(r.get("dur", ""))]
-        if show_source:
-            cells.append(c(r.get("source", "")))
-        cells.append(c(r.get("added", "")))
-        return cells
+        cell_map = {
+            "heart": heart,
+            "title": c(r.get("title", "")),
+            "artist": c(r.get("artist", "")),
+            "album": c(r.get("album", "")),
+            "dur": c(r.get("dur", "")),
+            "added": c(r.get("added", "")),
+            "source": c(r.get("source", "")),
+        }
+        return [cell_map[f] for f in fields]
 
     def _refresh_playing_highlight(self):
         """Re-paint the visible tracks table so the playing row is marked purple."""
@@ -57,29 +72,21 @@ class TablesMixin:
         except Exception:
             logger.exception("_refresh_playing_highlight failed")
 
-    def _render_tracks_table(self, title: str, rows: List[Dict], liked_bools: Optional[List[bool]] = None, *, context_uri: Optional[str] = None, context_uris: Optional[List[str]] = None, show_source: bool = False):
+    def _render_tracks_table(self, title: str, rows: List[Dict], liked_bools: Optional[List[bool]] = None, *, context_uri: Optional[str] = None, context_uris: Optional[List[str]] = None, profile: str = "playlist"):
         right = self._clear_right()
-        if show_source:
-            col_labels = ["♥", "Title", "Artist", "Album", "Duration", "Source", "Added"]
-            fixed_widths = {0: 3, 4: 9, 5: 10}
-        else:
-            # Playlist layout: no Source; Title/Artist/Album share the space,
-            # Duration and Added stay compact and fixed.
-            col_labels = ["♥", "Title", "Artist", "Album", "Duration", "Added"]
-            fixed_widths = {0: 3, 4: 9, 5: 12}
+        col_labels, fixed_widths, weights, fields = self._TRACKS_PROFILES.get(
+            profile, self._TRACKS_PROFILES["playlist"])
         table = self._create_table_with_full_width(
-            col_labels,
-            fixed_widths=fixed_widths,
-            widget_id="tracks_table",
+            col_labels, fixed_widths=fixed_widths, widget_id="tracks_table", weights=weights,
         )
         table._col_heart = 0
-        table._show_source = show_source
+        table._track_fields = fields
         table.row_to_uri = {}; table.row_to_title = {}; table.row_to_id = {}
         playing_id = getattr(self, "_now_internal_track_id", None)
         for i, r in enumerate(rows):
             liked = bool(liked_bools and i < len(liked_bools) and liked_bools[i])
             playing = bool(r.get("id") and r.get("id") == playing_id)
-            table.add_row(*self._track_cells(r, liked, playing, show_source=show_source), key=i)
+            table.add_row(*self._track_cells(r, liked, playing, fields), key=i)
             table.row_to_uri[i] = r["uri"]
             table.row_to_title[i] = f"{r['title']} {GLYPHS['sep']} {r['artist']}"
             if r.get("id"): table.row_to_id[i] = r["id"]
@@ -124,7 +131,7 @@ class TablesMixin:
                     })
                 def paint():
                     title = f"[b]Album:[/b] {rich_escape(album_name)}"
-                    table = self._render_tracks_table(title, rows, None, context_uris=[r["uri"] for r in rows])
+                    table = self._render_tracks_table(title, rows, None, context_uris=[r["uri"] for r in rows], profile="album")
                     self._revalidate_liked_column(table, max_rows=200)
                 self.call_from_thread(paint)
             threading.Thread(target=worker, daemon=True).start()
@@ -288,7 +295,7 @@ class TablesMixin:
                 def paint():
                     if not self._is_current_view("podcast", show_id, token): return
                     title = f"[b]Podcast:[/b] {rich_escape(show_name)}"
-                    table = self._render_tracks_table(title, rows, None, context_uris=[r["uri"] for r in rows])
+                    table = self._render_tracks_table(title, rows, None, context_uris=[r["uri"] for r in rows], profile="album")
                     self._revalidate_liked_column(table, max_rows=200)
 
                 self.call_from_thread(paint)
@@ -539,12 +546,12 @@ class TablesMixin:
             return
 
         playing_id = getattr(self, "_now_internal_track_id", None)
-        show_source = getattr(table, "_show_source", True)
+        fields = getattr(table, "_track_fields", ["heart", "title", "artist", "album", "dur", "added"])
         for i, r in enumerate(rows):
             liked = bool(liked_map.get(i, False))
             playing = bool(r.get("id") and r.get("id") == playing_id)
             try:
-                table.add_row(*self._track_cells(r, liked, playing, show_source=show_source), key=i)
+                table.add_row(*self._track_cells(r, liked, playing, fields), key=i)
             except Exception:
                 heart = Text("❤", style="bold red") if liked else Text("")
                 try:
@@ -561,10 +568,13 @@ class TablesMixin:
         try: table.refresh()
         except Exception: pass
 
-    def _column_widths(self, col_labels: list, fixed_widths: dict | None = None) -> list:
-        """Distribute the right panel's width across columns: fixed columns take
-        their set width, the rest share the remainder (leftover goes to the first
-        flexible column)."""
+    def _column_widths(self, col_labels: list, fixed_widths: dict | None = None, weights: dict | None = None) -> list:
+        """Distribute the right panel's width across columns. Fixed columns take
+        their set width; the remainder is split among the flexible columns in
+        proportion to their weight (default 1.0) so e.g. Title can be wider than
+        Artist/Album. The total never exceeds the available width (no horizontal
+        scroll on reasonable sizes); any rounding leftover goes to the first
+        flexible column. Each flexible column keeps a minimum legible width."""
         right = getattr(self, 'right_panel', None)
         avail_w = 0
         if right is not None:
@@ -580,29 +590,35 @@ class TablesMixin:
                 avail_w = int(getattr(self, 'size').width or 80)
             except Exception:
                 avail_w = 80
+        # Leave room for the table's own borders/cell padding so the columns
+        # never total wider than the content area.
         avail = max(20, avail_w - 4)
 
         n = len(col_labels)
         fixed = fixed_widths or {}
+        w = weights or {}
         fixed_total = sum(int(v) for v in fixed.values() if isinstance(v, int))
         flexible_idxs = [i for i in range(n) if i not in fixed]
-        flex_count = max(1, len(flexible_idxs))
-        rem = max(0, avail - fixed_total)
-        base = max(6, rem // flex_count) if flex_count else max(6, rem)
-        widths = [int(fixed[i]) if i in fixed else base for i in range(n)]
-        leftover = avail - sum(widths)
-        if leftover > 0 and flexible_idxs:
-            widths[flexible_idxs[0]] += leftover
+        widths = [int(fixed[i]) if i in fixed else 0 for i in range(n)]
+        if flexible_idxs:
+            rem = max(0, avail - fixed_total)
+            total_weight = sum(float(w.get(i, 1.0)) for i in flexible_idxs) or 1.0
+            for i in flexible_idxs:
+                widths[i] = max(6, int(rem * (float(w.get(i, 1.0)) / total_weight)))
+            leftover = avail - sum(widths)
+            widths[flexible_idxs[0]] = max(6, widths[flexible_idxs[0]] + leftover)
         return widths
 
-    def _create_table_with_full_width(self, col_labels: list, fixed_widths: dict | None = None, widget_id: Optional[str] = None) -> ResizableDataTable:
+    def _create_table_with_full_width(self, col_labels: list, fixed_widths: dict | None = None, widget_id: Optional[str] = None, weights: dict | None = None) -> DataTable:
         try:
-            widths = self._column_widths(col_labels, fixed_widths)
-            table = ResizableDataTable(zebra_stripes=True, id=(widget_id or "table"))
+            widths = self._column_widths(col_labels, fixed_widths, weights)
+            table = DataTable(zebra_stripes=True, id=(widget_id or "table"))
             table.show_cursor = True; table.cursor_type = "row"
-            for lbl, w in zip(col_labels, widths):
+            # Remember the profile so on_resize can recompute widths in place.
+            table._width_spec = (list(col_labels), dict(fixed_widths or {}), dict(weights or {}))
+            for lbl, wd in zip(col_labels, widths):
                 try:
-                    table.add_column(lbl, width=int(w))
+                    table.add_column(lbl, width=int(wd))
                 except Exception:
                     try: table.add_column(lbl)
                     except Exception: pass
@@ -610,13 +626,42 @@ class TablesMixin:
         except Exception:
             logger.exception("_create_table_with_full_width failed")
             try:
-                t = ResizableDataTable(zebra_stripes=True, id=(widget_id or "table"))
+                t = DataTable(zebra_stripes=True, id=(widget_id or "table"))
                 for lbl in col_labels:
                     try: t.add_column(lbl)
                     except Exception: pass
                 return t
             except Exception:
                 raise
+
+    def _recompute_table_widths(self, table) -> None:
+        """Recompute a table's column widths for the current panel size (on
+        resize) without rebuilding rows, preserving cursor and scroll. No-op if
+        the widths are unchanged."""
+        spec = getattr(table, "_width_spec", None)
+        if not spec:
+            return
+        col_labels, fixed, weights = spec
+        try:
+            cols = list(table.ordered_columns)
+        except Exception:
+            return
+        if len(cols) != len(col_labels):
+            return
+        widths = self._column_widths(col_labels, fixed, weights)
+        changed = False
+        for col, wd in zip(cols, widths):
+            try:
+                if int(getattr(col, "width", -1)) != int(wd):
+                    col.width = int(wd); changed = True
+            except Exception:
+                pass
+        if changed:
+            try:
+                table.refresh(layout=True)
+            except Exception:
+                try: table.refresh()
+                except Exception: pass
 
     def _open_url_in_browser(self, url: str) -> bool:
         if not url:

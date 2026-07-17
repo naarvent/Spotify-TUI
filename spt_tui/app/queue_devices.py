@@ -22,7 +22,6 @@ from textual.css.query import NoMatches
 
 from ..config import logger
 from ..constants import GLYPHS
-from ..widgets import ResizableDataTable
 from ..spotify_client import SpotifyClient
 
 class QueueDevicesMixin:
@@ -293,8 +292,8 @@ class QueueDevicesMixin:
         except NoMatches:
             table = None
         if table is None:
-            table = ResizableDataTable(id="devices_table")
-            table.add_columns("", "Name", "Type")
+            table = self._create_table_with_full_width(
+                ["", "Name", "Type"], fixed_widths={0: 3, 2: 14}, widget_id="devices_table")
             right.mount(Static("[b]Devices[/b] (Press Enter to transfer)", markup=True))
             right.mount(table)
         table.focus()

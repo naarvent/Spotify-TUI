@@ -111,7 +111,7 @@ def test_playlist_columns_drop_source():
             await pilot.pause(); pause_intervals(app)
             rows = rows_n(5)
             pt = app._render_tracks_table("[b]PL[/b]", rows, [False] * 5,
-                                          context_uris=[r["uri"] for r in rows], show_source=False)
+                                          context_uris=[r["uri"] for r in rows], profile="playlist")
             await pilot.pause()
             pl_labels, pl_widths = _col_labels(pt), _col_widths(pt)
             # a repaint (e.g. likes loaded) must keep the playlist layout
@@ -150,7 +150,7 @@ def test_playlist_long_values_do_not_break():
                      "artist": "An extremely long artist name " * 3,
                      "album": "A ridiculously long album name " * 3,
                      "dur": "1:23:45", "added": "2024-01-01"}]
-            t = app._render_tracks_table("[b]PL[/b]", rows, [False], show_source=False,
+            t = app._render_tracks_table("[b]PL[/b]", rows, [False], profile="playlist",
                                          context_uris=["spotify:track:id0"])
             await pilot.pause()
             return _col_labels(t), len(getattr(t, "_model_rows", []))
