@@ -119,10 +119,6 @@ class CoreMixin:
                 with Container(id="help_wrap", classes="section"):
                     yield Static("Help\n(press ?)", id="help_box")
 
-            # Mirror of #grid_spacer so the gap above the central block matches
-            # the gap below it (between the central block and Now Playing).
-            yield Static("", id="top_spacer")
-
             with Container(id="left_col"):
                 yield Vertical(Static("Library", classes="title"), self.lib_list,
                                id="section_lib", classes="section")
@@ -130,8 +126,6 @@ class CoreMixin:
                                id="section_pl", classes="section")
 
             yield self.right_panel
-
-            yield Static("", id="grid_spacer")
 
             with Container(id="now_wrap"):
                 self.np_title = Static("[dim]Now Playing: —[/dim]", id="np_title")

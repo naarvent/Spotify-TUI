@@ -1,6 +1,10 @@
-"""Phase 6: the Now Playing block is separated from the central block by the
-same vertical gap as the top bar (Search + Help) is — a uniform layout gap,
-resolved purely in the grid CSS. Now Playing stays visible.
+"""Main layout is tight: the central block sits directly under the top bar
+(Search + Help) and directly above Now Playing, with no extra empty rows — the
+effective gaps are 0, resolved purely by the grid CSS (no spacer widgets). Now
+Playing stays visible and nothing overflows vertically.
+
+This reverses the earlier change that added a #top_spacer to make both gaps 1;
+the spacers are gone and the grid is auto / 1fr / auto.
 
 Run standalone:  python tests/test_now_playing_spacing.py
 """
@@ -35,11 +39,21 @@ def pause_intervals(app):
             try: t.pause()
             except Exception: pass
 
+# Tolerance: 0 in every observed case. Allow a single cell only if a future
+# Textual inserts an inseparable border row; anything larger is a real gap.
+TOL = 1
 
-async def _gaps(size):
+SIZES = [(140, 40), (120, 30), (100, 24), (90, 20), (70, 18)]
+
+
+async def _gaps(size, mount_table=False):
     app = TApp(Fake())
     async with app.run_test(size=size) as pilot:
         await pilot.pause(); pause_intervals(app)
+        if mount_table:
+            rows = [{"id": f"t{i}", "uri": f"spotify:track:t{i}", "title": f"Song {i}",
+                     "artist": "A", "album": "Al", "dur": "0:00"} for i in range(40)]
+            app._render_tracks_table("[b]Long[/b]", rows, [False] * len(rows), profile="playlist")
         for _ in range(3):
             await pilot.pause()
 
@@ -51,22 +65,43 @@ async def _gaps(size):
         lc = region("#left_col")
         rt = region("#right")
         nw = region("#now_wrap")
-        top_bottom = tb[2]
-        central_top = min(lc[0], rt[0])
-        central_bottom = max(lc[2], rt[2])
-        now_top = nw[0]
-        return (central_top - top_bottom, now_top - central_bottom, nw[1])
+        gap_top = min(lc[0], rt[0]) - tb[2]
+        gap_bottom = nw[0] - max(lc[2], rt[2])
+        # Bottom of Now Playing must not exceed the screen height (no vertical
+        # overflow hiding it).
+        overflow = nw[2] - int(size[1])
+        return gap_top, gap_bottom, nw[1], overflow
 
 
-async def test_uniform_gap_multiple_sizes():
-    for size in [(120, 30), (100, 24), (90, 20)]:
-        gap_top, gap_bottom, now_h = await _gaps(size)
-        check(f"gap above central == gap below central at {size}",
-              abs(gap_top - gap_bottom) <= 1 and gap_top >= 1, f"top={gap_top} bottom={gap_bottom}")
-        check(f"Now Playing stays visible at {size}", now_h > 0, f"now_h={now_h}")
+async def test_zero_gaps_menu():
+    for size in SIZES:
+        gt, gb, now_h, overflow = await _gaps(size)
+        check(f"gap above central == 0 at {size}", gt <= TOL and gt >= 0, f"gap_top={gt}")
+        check(f"gap below central == 0 at {size}", gb <= TOL and gb >= 0, f"gap_bottom={gb}")
+        check(f"Now Playing visible at {size}", now_h > 0, f"now_h={now_h}")
+        check(f"no vertical overflow past Now Playing at {size}", overflow <= 0, f"overflow={overflow}")
 
 
-ALL = [test_uniform_gap_multiple_sizes]
+async def test_zero_gaps_with_long_table():
+    for size in [(120, 30), (90, 20)]:
+        gt, gb, now_h, overflow = await _gaps(size, mount_table=True)
+        check(f"gap above central == 0 with a long table at {size}", 0 <= gt <= TOL, f"gap_top={gt}")
+        check(f"gap below central == 0 with a long table at {size}", 0 <= gb <= TOL, f"gap_bottom={gb}")
+        check(f"Now Playing still visible with a long table at {size}", now_h > 0 and overflow <= 0,
+              f"now_h={now_h} overflow={overflow}")
+
+
+async def test_no_spacer_widgets():
+    app = TApp(Fake())
+    async with app.run_test(size=(120, 30)) as pilot:
+        await pilot.pause(); pause_intervals(app)
+        n_top = len(app.query("#top_spacer"))
+        n_grid = len(app.query("#grid_spacer"))
+        check("no #top_spacer widget mounted", n_top == 0, f"n={n_top}")
+        check("no #grid_spacer widget mounted", n_grid == 0, f"n={n_grid}")
+
+
+ALL = [test_zero_gaps_menu, test_zero_gaps_with_long_table, test_no_spacer_widgets]
 
 async def main():
     for fn in ALL:
