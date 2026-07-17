@@ -135,6 +135,7 @@ class LibFake:
         self._episodes = episodes if episodes is not None else []
         self._artists = artists if artists is not None else []
         self._shows = shows if shows is not None else []
+        self.raise_artists = False
     def has_cached_token(self): return True
     def user_playlists(self, limit=50, offset=0): return {"items": [], "next": None}
     def devices(self): return []
@@ -154,6 +155,8 @@ class LibFake:
     def current_user_saved_shows(self, limit=50, offset=0):
         return self._slice(self._shows, limit, offset)
     def current_user_followed_artists(self, limit=50, after=None):
+        if self.raise_artists:
+            raise RuntimeError("followed artists API error")
         return {"artists": {"items": list(self._artists), "next": None}}
 
 def pause_intervals(app):
@@ -490,6 +493,44 @@ async def test_search_table_layout_switch_no_duplicate_ids():
         check("columns switched to the artists layout", labels == ["S", "Type", "Name"], f"cols={labels}")
 
 
+async def test_saved_artists_uses_session_cache():
+    # Unified through _stream_library_view: a first load fills the in-memory
+    # cache and a reopen paints it instantly.
+    fake = LibFake(artists=[real_artist(0), real_artist(1)]); app = TApp(fake)
+    async with app.run_test(size=(120, 20)) as pilot:
+        await pilot.pause(); pause_intervals(app)
+        app._open_saved_artists()
+        await poll(lambda: nrows(table_by_id(app, "search_table")) == 2, timeout=5.0)
+        filled = await poll(lambda: "artists" in (getattr(app, "_lib_cache", {}) or {}), timeout=3.0)
+        check("first artists load fills the session cache", filled,
+              f"cache={list((getattr(app, '_lib_cache', {}) or {}).keys())}")
+        app.action_escape_to_menu(); await pump(pilot, 5)
+        app._open_saved_artists()
+        cached = await poll(lambda: nrows(table_by_id(app, "search_table")) == 2, timeout=2.0)
+        check("reopen paints cached artists instantly", cached,
+              f"n={nrows(table_by_id(app, 'search_table'))}")
+
+
+async def test_saved_artists_error_vs_empty():
+    # genuine empty -> empty message
+    fake = LibFake(artists=[]); app = TApp(fake)
+    async with app.run_test(size=(120, 20)) as pilot:
+        await pilot.pause(); pause_intervals(app)
+        app._open_saved_artists()
+        await poll(lambda: "No saved artists" in right_text(app), timeout=5.0)
+        check("empty artists shows the empty message", "No saved artists" in right_text(app),
+              f"right={right_text(app)!r}")
+    # API error -> error state, not a false empty
+    fake2 = LibFake(artists=[real_artist(0)]); fake2.raise_artists = True; app2 = TApp(fake2)
+    async with app2.run_test(size=(120, 20)) as pilot:
+        await pilot.pause(); pause_intervals(app2)
+        app2._open_saved_artists()
+        await poll(lambda: "Could not load" in right_text(app2), timeout=5.0)
+        check("artists API error shows error, not a false empty",
+              "Could not load" in right_text(app2) and "No saved artists" not in right_text(app2),
+              f"right={right_text(app2)!r}")
+
+
 ALL = [test_immediate_feedback_non_blocking, test_progressive_paint,
        test_superseded_worker_stops_and_does_not_paint, test_leaving_view_prevents_paint,
        test_partial_on_error_keeps_rows, test_empty_vs_error,
@@ -497,7 +538,8 @@ ALL = [test_immediate_feedback_non_blocking, test_progressive_paint,
        test_ctrlr_routes_albums_and_no_accumulation, test_cursor_preserved_during_progressive,
        test_saved_albums_skips_null_item, test_saved_episodes_tombstone_degrades,
        test_search_table_reuse_no_duplicate_ids, test_saved_artists_columns,
-       test_saved_podcasts_columns, test_search_table_layout_switch_no_duplicate_ids]
+       test_saved_podcasts_columns, test_search_table_layout_switch_no_duplicate_ids,
+       test_saved_artists_uses_session_cache, test_saved_artists_error_vs_empty]
 
 async def main():
     for fn in ALL:

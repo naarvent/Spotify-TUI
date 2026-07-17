@@ -400,53 +400,37 @@ class LibraryMixin:
         threading.Thread(target=worker, daemon=True).start()
 
     def _open_saved_artists(self):
-        token = self._new_view_token("artists", "")
-        rv = getattr(self, "_right_view", None)
-        if rv and len(rv) >= 3:
+        # Unified with the other saved-list views via the shared streaming loader:
+        # gains the session cache, generation/token guard and empty-vs-error
+        # distinction. Followed artists uses cursor pagination; the app shows the
+        # first page, returned as a single page here (offset>0 => no more).
+        def fetch_page(offset):
+            if offset > 0:
+                return [], False
+            sp = self.spotify.ensure()
             try:
-                self._right_view = (rv[0], rv[1], rv[2], None)
-            except Exception:
-                pass
-        self._safe_update_right("artists", "", token, "[b]Loading Saved Artists[/b]")
-
-        def worker():
+                page = sp.current_user_followed_artists(limit=50) or {}
+            except TypeError:
+                # Signature drift only — a real API error must propagate so the
+                # loader shows an error state instead of a false "empty".
+                page = sp.current_user_followed_artists() or {}
+            artists = (page.get('artists') or {}).get('items', [])
             rows = []
-            try:
-                sp = self.spotify.ensure()
-                try:
-                    page = sp.current_user_followed_artists(limit=50) or {}
-                    artists = (page.get('artists') or {}).get('items', [])
-                except Exception:
-                    try:
-                        artists = sp.current_user_followed_artists() or {}
-                        artists = (artists.get('artists') or {}).get('items', [])
-                    except Exception:
-                        artists = []
-
-                for it in artists:
-                    if not it: continue
-                    rows.append({
-                        "type": "artist",
-                        "id": it.get("id"),
-                        "uri": it.get("uri") or it.get("external_urls", {}).get("spotify", ""),
-                        "title": it.get("name", "(no name)"),
-                        "artist": "",
-                        "album": "",
-                        "dur": "",
-                        "raw": it,
-                        "saved": True,
-                    })
-            except Exception:
-                logger.exception("_open_saved_artists: error fetching saved artists")
-
-            def paint():
-                if not self._is_current_view("artists", "", token): return
-                title = "[b]Saved Artists[/b]"
-                # Artists are followed (saved) by definition — no saved-state check.
-                self._render_search_table(title, rows, check_saved=False, layout="artists")
-            self.call_from_thread(paint)
-
-        threading.Thread(target=worker, daemon=True).start()
+            for it in artists:
+                if not it:
+                    continue
+                rows.append({
+                    "type": "artist", "id": it.get("id"),
+                    "uri": it.get("uri") or (it.get("external_urls") or {}).get("spotify", ""),
+                    "title": it.get("name") or "(no name)",
+                    "artist": "", "album": "", "dur": "", "raw": it, "saved": True,
+                })
+            return rows, False
+        self._stream_library_view(
+            key="artists", title="[b]Saved Artists[/b]",
+            loading_msg="[b]Loading Saved Artists…[/b]",
+            empty_msg="[b]No saved artists yet.[/b]",
+            fetch_page=fetch_page, tracks_mode=False, layout="artists")
 
     def _stream_library_view(self, *, key, title, loading_msg, empty_msg, fetch_page, tracks_mode, layout="full"):
         """Responsive, deduplicated loader shared by the saved-library views.
