@@ -473,7 +473,7 @@ class TablesMixin:
                             for key, val in results.items():
                                 rows = row_for.get(key, [])
                                 for rk in rows:
-                                    cell = Text(GLYPHS['disk']) if val else Text("")
+                                    cell = Text("❤", style="bold red") if val else Text("")
                                     try:
                                         table.update_cell(rk, col, cell)
                                         logger.debug("_revalidate_saved_column: painted fallback row=%s col=%s val=%s", rk, col, val)
@@ -563,7 +563,7 @@ class TablesMixin:
                 try:
                     table.add_row(*self._search_cells(r, fields), key=i)
                 except Exception:
-                    saved_cell = Text(GLYPHS['disk']) if r.get('saved', False) else Text("")
+                    saved_cell = Text("❤", style="bold red") if r.get('saved', False) else Text("")
                     try:
                         table.add_row(saved_cell, (r.get("type") or "").upper(), r.get("title", ""), key=i)
                     except Exception:

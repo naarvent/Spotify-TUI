@@ -500,22 +500,26 @@ class SearchMixin:
     # Column profiles for the shared search_table: (labels, fixed_widths, fields,
     # weights). Source is dropped from every content table (only the Queue keeps
     # it). Name/Title carries the highest weight so it takes the most free space.
+    # First column shows the saved/liked/followed state as a heart (its exact
+    # semantics stay per-type: liked track, saved album, followed artist, saved
+    # show/episode — see _revalidate_saved_column). The glyph is unified, the
+    # endpoints are not.
     _SEARCH_LAYOUTS = {
-        "full": (["S", "Type", "Title", "Artist/Owner", "Album", "Duration"],
+        "full": (["♥", "Type", "Title", "Artist/Owner", "Album", "Duration"],
                  {0: 3, 1: 7, 5: 9},
                  ["saved", "type", "title", "artist", "album", "dur"], {2: 1.4}),
-        "artists": (["S", "Type", "Name"], {0: 3, 1: 7}, ["saved", "type", "title"], {}),
-        "podcasts": (["S", "Type", "Name", "Owner"], {0: 3, 1: 7}, ["saved", "type", "title", "artist"], {2: 1.4}),
+        "artists": (["♥", "Type", "Name"], {0: 3, 1: 7}, ["saved", "type", "title"], {}),
+        "podcasts": (["♥", "Type", "Name", "Owner"], {0: 3, 1: 7}, ["saved", "type", "title", "artist"], {2: 1.4}),
         # Search albums / playlists have no meaningful Duration.
-        "albums": (["S", "Type", "Name", "Artist"], {0: 3, 1: 7}, ["saved", "type", "title", "artist"], {2: 1.4}),
-        "playlists": (["S", "Type", "Name", "Owner"], {0: 3, 1: 7}, ["saved", "type", "title", "artist"], {2: 1.4}),
+        "albums": (["♥", "Type", "Name", "Artist"], {0: 3, 1: 7}, ["saved", "type", "title", "artist"], {2: 1.4}),
+        "playlists": (["♥", "Type", "Name", "Owner"], {0: 3, 1: 7}, ["saved", "type", "title", "artist"], {2: 1.4}),
     }
 
     def _search_cells(self, r: Dict, fields: List[str]):
         """Build search_table cells for the given field list (see _SEARCH_LAYOUTS)."""
         t = (r.get("type") or "")
         cell_map = {
-            "saved": Text(GLYPHS['disk']) if r.get('saved', False) else Text(""),
+            "saved": Text("❤", style="bold red") if r.get('saved', False) else Text(""),
             "type": self._TYPE_LABELS.get(t, t.upper()),
             "title": r.get("title", ""),
             "artist": r.get("artist", ""),

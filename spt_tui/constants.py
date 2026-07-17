@@ -15,7 +15,6 @@ GLYPHS = {
     "play": ">" if USE_ASCII else "▶",
     "pause": "||" if USE_ASCII else "⏸",
     "sep": "-" if USE_ASCII else "—",
-    "disk": "💾",
 }
 
 LIBRARY_ITEMS = [

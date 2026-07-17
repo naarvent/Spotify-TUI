@@ -176,7 +176,7 @@ def test_search_full_layout_drops_source():
             return _col_labels(t)
     labels = asyncio.run(body())
     check("full search/album/episode layout drops Source",
-          labels == ["S", "Type", "Title", "Artist/Owner", "Album", "Duration"], f"cols={labels}")
+          labels == ["♥", "Type", "Title", "Artist/Owner", "Album", "Duration"], f"cols={labels}")
 
 
 def test_queue_keeps_source():

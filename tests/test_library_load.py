@@ -453,7 +453,7 @@ async def test_saved_artists_columns():
         await poll(lambda: nrows(table_by_id(app, "search_table")) == 2, timeout=5.0)
         labels = _search_col_labels(app)
         rows = table_by_id(app, "search_table")._model_rows
-        check("saved artists columns are exactly S / Type / Name", labels == ["S", "Type", "Name"],
+        check("saved artists columns are exactly heart / Type / Name", labels == ["♥", "Type", "Name"],
               f"cols={labels}")
         check("artist Name = full artist name", rows[0]["title"] == "Real Artist 0", f"r={rows[0]}")
         check("artist row type stays 'artist' (ART)", rows[0]["type"] == "artist")
@@ -468,8 +468,8 @@ async def test_saved_podcasts_columns():
         await poll(lambda: nrows(table_by_id(app, "search_table")) == 2, timeout=5.0)
         labels = _search_col_labels(app)
         rows = table_by_id(app, "search_table")._model_rows
-        check("saved podcasts columns are exactly S / Type / Name / Owner",
-              labels == ["S", "Type", "Name", "Owner"], f"cols={labels}")
+        check("saved podcasts columns are exactly heart / Type / Name / Owner",
+              labels == ["♥", "Type", "Name", "Owner"], f"cols={labels}")
         check("podcast Name = show name", rows[0]["title"] == "Real Show 0", f"r={rows[0]}")
         check("podcast Owner = publisher", rows[0]["artist"] == "Publisher 0", f"r={rows[0]}")
         check("podcast row type stays 'podcast' (PDC)", rows[0]["type"] == "podcast")
@@ -490,7 +490,7 @@ async def test_search_table_layout_switch_no_duplicate_ids():
         labels = [str(getattr(c, "label", "")) for c in t2.ordered_columns]
         check("layout switch reuses one widget (no DuplicateIds)", t1 is t2 and count == 1,
               f"same={t1 is t2} count={count}")
-        check("columns switched to the artists layout", labels == ["S", "Type", "Name"], f"cols={labels}")
+        check("columns switched to the artists layout", labels == ["♥", "Type", "Name"], f"cols={labels}")
 
 
 async def test_saved_artists_uses_session_cache():

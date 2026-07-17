@@ -164,13 +164,13 @@ async def test_column_profiles():
         arows = [{"type": "album", "id": "a", "uri": "u", "title": "N", "artist": "Ar", "album": "", "dur": "", "raw": {}}]
         sa = app._render_search_table("[b]SA[/b]", arows, check_saved=False, layout="albums")
         await pilot.pause()
-        check("search albums profile: S/Type/Name/Artist, no Duration",
-              col_labels(sa) == ["S", "Type", "Name", "Artist"], f"cols={col_labels(sa)}")
+        check("search albums profile: heart/Type/Name/Artist, no Duration",
+              col_labels(sa) == ["♥", "Type", "Name", "Artist"], f"cols={col_labels(sa)}")
         prows = [{"type": "playlist", "id": "p", "uri": "u", "title": "PL", "artist": "Owner", "album": "", "dur": "", "raw": {}}]
         sp = app._render_search_table("[b]SP[/b]", prows, check_saved=False, layout="playlists")
         await pilot.pause()
-        check("search playlists profile: S/Type/Name/Owner, no Duration",
-              col_labels(sp) == ["S", "Type", "Name", "Owner"], f"cols={col_labels(sp)}")
+        check("search playlists profile: heart/Type/Name/Owner, no Duration",
+              col_labels(sp) == ["♥", "Type", "Name", "Owner"], f"cols={col_labels(sp)}")
 
 
 ALL = [test_no_horizontal_scrollbar_reasonable_sizes, test_flex_columns_capped_on_wide_terminals,
