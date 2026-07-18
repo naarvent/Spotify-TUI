@@ -112,9 +112,10 @@ async def test_combined_requests_exact_limits():
         await poll(lambda: has_grid(app), timeout=5.0)
         await pump(pilot, 5)
         calls = list(fake.calls)
-        check("combined asks track=10, album=5, artist=3, playlist=2 in order",
-              calls == [('track', 10), ('album', 5), ('artist', 3), ('playlist', 2)],
-              f"calls={calls}")
+        gl = app.GRID_LIMIT
+        check("combined fills each panel (track/album/artist/playlist at GRID_LIMIT)",
+              calls == [('track', gl), ('album', gl), ('artist', gl), ('playlist', gl)],
+              f"calls={calls} gl={gl}")
         check("combined issues exactly 4 requests (not 6)", len(calls) == 4, f"calls={calls}")
         types = [t for t, _ in calls]
         check("no podcast/show request in combined search", 'show' not in types, f"types={types}")
@@ -128,16 +129,15 @@ async def test_combined_result_caps():
         app._dispatch_search("metallica")
         await poll(lambda: has_grid(app), timeout=5.0)
         await pump(pilot, 6)
+        gl = app.GRID_LIMIT
         songs, artists = panel_rows(app, "songs"), panel_rows(app, "artists")
         albums, plays = panel_rows(app, "albums"), panel_rows(app, "playlists")
-        check("<=10 songs shown", songs <= 10, f"songs={songs}")
-        check("<=3 artists shown", artists <= 3, f"artists={artists}")
-        check("<=5 albums shown", albums <= 5, f"albums={albums}")
-        check("<=2 playlists shown", plays <= 2, f"plays={plays}")
+        check("songs filled up to GRID_LIMIT", songs <= gl and songs > 0, f"songs={songs}")
+        check("artists filled up to GRID_LIMIT", artists <= gl and artists > 0, f"artists={artists}")
+        check("albums filled up to GRID_LIMIT", albums <= gl and albums > 0, f"albums={albums}")
+        check("playlists filled up to GRID_LIMIT", plays <= gl and plays > 0, f"plays={plays}")
         check("no podcasts panel exists", app._grid_panel_table("podcasts") is None)
         check("no episodes panel exists", app._grid_panel_table("episodes") is None)
-        check("total shown <= 20", songs + artists + albums + plays <= 20,
-              f"total={songs + artists + albums + plays}")
 
 
 async def test_prefix_keeps_larger_limit():
@@ -148,10 +148,11 @@ async def test_prefix_keeps_larger_limit():
         t = await poll(lambda: stbl(app), timeout=5.0)
         await pump(pilot, 5)
         check("prefix /TRK issues a single request", len(fake.calls) == 1, f"calls={fake.calls}")
-        check("prefix /TRK asks for the larger limit (25, not 10)",
+        check("prefix /TRK asks for its own larger limit (25)",
               fake.calls == [('track', 25)], f"calls={fake.calls}")
         rows = getattr(t, "_model_rows", [])
-        check("prefix /TRK not squeezed to 10 (shows >10)", len(rows) > 10, f"n={len(rows)}")
+        check("prefix /TRK keeps its own limit (shows > the combined per-panel cap)",
+              len(rows) > app.GRID_LIMIT, f"n={len(rows)} gl={app.GRID_LIMIT}")
 
 
 async def test_prefix_album_single_request():

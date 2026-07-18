@@ -10,37 +10,64 @@ class SearchPanel(DataTable):
     """One quadrant of the combined-search 2x2 results grid (Songs / Artists /
     Albums / Playlists).
 
-    Local key handling moves focus BETWEEN panels so navigation.py's global
-    on_key stays untouched:
-      * Left / Right  -> horizontal panel;
-      * Ctrl+Up / Ctrl+Down -> vertical panel;
-      * Tab / Shift+Tab -> cycle through the non-empty panels.
-    Up / Down keep moving the row cursor inside the panel (DataTable's own
-    bindings); Enter, ``f`` and Escape bubble to the app as usual. A key is only
-    consumed when it actually moved focus, so a move that has no target (Left
-    from a left-edge panel, Right from a right-edge panel) falls through to the
-    app's existing handler — e.g. Left from Songs/Albums reaches the standard
-    'back to the main menu' behaviour, exactly like the single-table view."""
+    Navigation is two-level, and lives here so navigation.py's global on_key
+    stays untouched:
 
-    _NAV = {
-        "left": "left", "right": "right",
-        "ctrl+up": "up", "ctrl+down": "down",
+    * "select" mode (the initial state): you pick WHICH panel. Arrow keys move
+      the selection across the 2x2 (Left/Right horizontally, Up/Down vertically,
+      Tab/Shift+Tab to cycle); no row is highlighted. Enter dives into the
+      selected panel's content. Left from a left-edge panel falls through to the
+      app's existing 'back to the main menu' handler.
+    * "content" mode: you're inside a panel's rows. Up/Down move the row cursor
+      (DataTable's own bindings); Left OR Right step back out to panel selection;
+      Enter / f / Escape bubble to the app (play/open, favourite, menu)."""
+
+    _SELECT_NAV = {
+        "left": "left", "right": "right", "up": "up", "down": "down",
         "tab": "next", "shift+tab": "prev", "backtab": "prev",
     }
 
     def on_key(self, event) -> None:
-        direction = self._NAV.get(getattr(event, "key", ""))
+        key = getattr(event, "key", "")
+        app = self.app
+        panel_key = (getattr(self, "id", "") or "").replace("_table", "")
+        mode = getattr(app, "_grid_mode", "select")
+
+        if mode == "content":
+            # Left OR Right steps back out to panel selection; everything else
+            # (Up/Down rows, Enter open, f, Escape) bubbles as usual.
+            if key in ("left", "right"):
+                fn = getattr(app, "_grid_exit_to_select", None)
+                if fn is not None:
+                    try: fn(panel_key)
+                    except Exception: pass
+                try: event.stop(); event.prevent_default()
+                except Exception: pass
+            return
+
+        # select mode
+        if key == "enter":
+            fn = getattr(app, "_grid_enter_content", None)
+            if fn is not None:
+                try: fn(panel_key)
+                except Exception: pass
+            try: event.stop(); event.prevent_default()
+            except Exception: pass
+            return
+
+        direction = self._SELECT_NAV.get(key)
         if direction is None:
             return
-        panel_key = (getattr(self, "id", "") or "").replace("_table", "")
-        nav = getattr(self.app, "_search_grid_key", None)
-        handled = False
+        moved = False
+        nav = getattr(app, "_search_grid_key", None)
         if nav is not None:
             try:
-                handled = bool(nav(panel_key, direction))
+                moved = bool(nav(panel_key, direction))
             except Exception:
-                handled = False
-        if handled:
+                moved = False
+        # Consume the key, EXCEPT an unhandled Left (from a left-edge panel):
+        # let that fall through to the app's back-to-the-menu handler.
+        if moved or key != "left":
             try:
                 event.stop(); event.prevent_default()
             except Exception:

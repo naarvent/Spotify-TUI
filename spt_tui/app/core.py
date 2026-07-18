@@ -982,12 +982,15 @@ class CoreMixin:
 
     [b]Combined search results (2x2)[/b]
     A search without a prefix opens four panels — Songs / Artists on top,
-    Albums / Playlists below:
-        - ↑ / ↓ : Move between results inside the focused panel
-        - ← / → : Move between panels horizontally (Songs↔Artists, Albums↔Playlists)
-        - Ctrl+↑ / Ctrl+↓ : Move between panels vertically (Songs↔Albums, Artists↔Playlists)
+    Albums / Playlists below. Navigation has two levels:
+      Choosing a panel (start here):
+        - ↑ / ↓ / ← / → : Move the selection between the four panels
         - Tab / Shift+Tab : Cycle through the panels
         - ← on a left panel: back to the main menu
+        - Enter: enter the selected panel's content
+      Inside a panel's content:
+        - ↑ / ↓ : Move between results
+        - ← / → : Back to choosing a panel
         - Enter: play a song / open an artist, album or playlist
         - f: Like / Unlike the selected song (Songs panel)
     (A prefixed search — /TRK, /ART, /ALB, /PLY, /PDC, /EPS — keeps a single

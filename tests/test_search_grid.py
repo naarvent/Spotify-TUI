@@ -136,13 +136,16 @@ async def test_grid_four_panels_and_counts():
     async with app.run_test(size=(140, 40)) as pilot:
         await pilot.pause(); pause_intervals(app)
         await do_search(app, pilot, "metallica")
+        gl = app.GRID_LIMIT
         check("four panels present", all(gp(app, pk) is not None for pk in
               ("songs", "artists", "albums", "playlists")))
-        check("songs capped at 10", prows(app, "songs") == 10, f"n={prows(app,'songs')}")
-        check("artists capped at 3", prows(app, "artists") == 3, f"n={prows(app,'artists')}")
-        check("albums capped at 5", prows(app, "albums") == 5, f"n={prows(app,'albums')}")
-        check("playlists capped at 2", prows(app, "playlists") == 2, f"n={prows(app,'playlists')}")
-        check("initial focus is Songs", app.focused is gp(app, "songs"))
+        check("songs filled to GRID_LIMIT", prows(app, "songs") == gl, f"n={prows(app,'songs')}")
+        check("artists filled to GRID_LIMIT", prows(app, "artists") == gl, f"n={prows(app,'artists')}")
+        check("albums filled to GRID_LIMIT", prows(app, "albums") == gl, f"n={prows(app,'albums')}")
+        check("playlists filled to GRID_LIMIT", prows(app, "playlists") == gl, f"n={prows(app,'playlists')}")
+        check("initial focus is Songs (panel selection)", app.focused is gp(app, "songs"))
+        check("initial state is panel selection (no row cursor)",
+              gp(app, "songs").show_cursor is False and app._grid_mode == "select")
 
 
 async def test_initial_focus_first_nonempty_when_songs_empty():
@@ -178,7 +181,8 @@ async def test_all_empty_shows_no_results():
         check("no grid mounted on no-results", not has_grid(app))
 
 
-async def test_navigation_between_and_within_panels():
+async def test_panel_selection_navigation():
+    """Panel-selection mode: arrows move the selection across the 2x2 grid."""
     fake = GridFake({"track": 5, "album": 4, "artist": 3, "playlist": 2})
     app = TApp(fake)
     async with app.run_test(size=(140, 40)) as pilot:
@@ -186,19 +190,40 @@ async def test_navigation_between_and_within_panels():
         await do_search(app, pilot, "q")
         await pilot.press("right"); await pump(pilot, 3)
         check("Right: Songs -> Artists", app.focused is gp(app, "artists"))
-        await pilot.press("ctrl+down"); await pump(pilot, 3)
-        check("Ctrl+Down: Artists -> Playlists", app.focused is gp(app, "playlists"))
+        await pilot.press("down"); await pump(pilot, 3)
+        check("Down: Artists -> Playlists", app.focused is gp(app, "playlists"))
         await pilot.press("left"); await pump(pilot, 3)
         check("Left: Playlists -> Albums", app.focused is gp(app, "albums"))
-        await pilot.press("ctrl+up"); await pump(pilot, 3)
-        check("Ctrl+Up: Albums -> Songs", app.focused is gp(app, "songs"))
-        # within a panel: Down moves the row cursor, never leaves the panel
-        await pilot.press("down"); await pump(pilot, 2)
+        await pilot.press("up"); await pump(pilot, 3)
+        check("Up: Albums -> Songs", app.focused is gp(app, "songs"))
+        check("still in selection mode (no cursor)", app._grid_mode == "select"
+              and gp(app, "songs").show_cursor is False)
+
+
+async def test_enter_content_then_rows_then_back():
+    """Enter dives into a panel's rows; Up/Down move rows; Left/Right step out."""
+    fake = GridFake({"track": 5, "album": 4, "artist": 3, "playlist": 2})
+    app = TApp(fake)
+    async with app.run_test(size=(140, 40)) as pilot:
+        await pilot.pause(); pause_intervals(app)
+        await do_search(app, pilot, "q")
         songs = gp(app, "songs")
-        check("Down moves the row cursor inside Songs", getattr(songs, "cursor_row", 0) == 1
-              and app.focused is songs, f"cur={getattr(songs,'cursor_row',None)}")
-        # Tab cycles forward through the panels
-        gp(app, "songs").focus(); await pump(pilot, 2)
+        await pilot.press("enter"); await pump(pilot, 3)
+        check("Enter enters content mode (cursor shown at row 0)",
+              app._grid_mode == "content" and songs.show_cursor is True
+              and getattr(songs, "cursor_row", None) == 0)
+        await pilot.press("down"); await pump(pilot, 2)
+        check("Down moves the row cursor inside the panel", getattr(songs, "cursor_row", 0) == 1
+              and app.focused is songs)
+        await pilot.press("left"); await pump(pilot, 3)
+        check("Left in content returns to panel selection",
+              app._grid_mode == "select" and songs.show_cursor is False)
+        # Right also steps out of content
+        await pilot.press("enter"); await pump(pilot, 2)
+        await pilot.press("right"); await pump(pilot, 3)
+        check("Right in content also returns to panel selection", app._grid_mode == "select")
+        # Tab cycles panels in selection mode
+        gp(app, "songs").focus(); app._grid_mode = "select"; await pump(pilot, 2)
         await pilot.press("tab"); await pump(pilot, 3)
         check("Tab cycles Songs -> Artists", app.focused is gp(app, "artists"))
 
@@ -227,19 +252,22 @@ async def test_enter_routing_per_panel():
         app._open_playlist_table = lambda obj, **k: calls.append(("playlist", obj.get("id")))
         await do_search(app, pilot, "q")
 
-        async def enter_on(pk):
+        async def open_on(pk):
+            # select the panel, Enter into its content, Enter opens the first row
             calls.clear()
-            gp(app, pk).focus(); await pump(pilot, 2)
-            gp(app, pk).move_cursor(row=0, column=0)
-            await pilot.press("enter"); await pump(pilot, 3)
+            app._grid_mode = "select"
+            gp(app, pk).focus(); gp(app, pk).show_cursor = False
+            await pump(pilot, 2)
+            await pilot.press("enter"); await pump(pilot, 2)   # into content
+            await pilot.press("enter"); await pump(pilot, 3)   # open/play the row
 
-        await enter_on("songs")
+        await open_on("songs")
         check("Enter on a Song plays it", calls and calls[0][0] == "play", f"calls={calls}")
-        await enter_on("artists")
+        await open_on("artists")
         check("Enter on an Artist opens the artist", calls and calls[0][0] == "artist", f"calls={calls}")
-        await enter_on("albums")
+        await open_on("albums")
         check("Enter on an Album opens the album", calls and calls[0][0] == "album", f"calls={calls}")
-        await enter_on("playlists")
+        await open_on("playlists")
         check("Enter on a Playlist opens the playlist", calls and calls[0][0] == "playlist", f"calls={calls}")
 
 
@@ -257,8 +285,9 @@ async def test_songs_hearts_and_favourite_toggle():
         check("saved song 0 shows a heart", isheart(songs, 0) is True, f"cell={isheart(songs,0)}")
         check("unsaved song 1 blank", isheart(songs, 1) is False)
         check("saved song 2 shows a heart", isheart(songs, 2) is True)
-        # toggle favourite on an unsaved song
-        songs.focus(); await pump(pilot, 2)
+        # enter the Songs content, move to an unsaved song, toggle favourite
+        songs.focus(); app._grid_mode = "select"; await pump(pilot, 2)
+        await pilot.press("enter"); await pump(pilot, 2)   # into content
         songs.move_cursor(row=1, column=0)
         await pilot.press("f")
         await poll(lambda: isheart(gp(app, "songs"), 1) is True)
@@ -357,8 +386,9 @@ async def test_resize_reflows_and_preserves_state():
         grid = app.query_one("#search_grid")
         check("wide terminal: 2x2 (not stacked)", not grid.has_class("-stacked"))
         counts_before = {pk: prows(app, pk) for pk in ("songs", "artists", "albums", "playlists")}
-        # focus Albums and select row 1, then shrink
-        gp(app, "albums").focus(); await pump(pilot, 2)
+        # select Albums, enter its content and pick row 1, then shrink
+        gp(app, "albums").focus(); app._grid_mode = "select"; await pump(pilot, 2)
+        await pilot.press("enter"); await pump(pilot, 2)
         gp(app, "albums").move_cursor(row=1, column=0); await pump(pilot, 2)
         await pilot.resize_terminal(70, 30); await pump(pilot, 5)
         check("narrow terminal: stacked", app.query_one("#search_grid").has_class("-stacked"))
@@ -377,7 +407,8 @@ async def test_resize_reflows_and_preserves_state():
 
 ALL = [test_grid_four_panels_and_counts, test_initial_focus_first_nonempty_when_songs_empty,
        test_several_empty_panels_render, test_all_empty_shows_no_results,
-       test_navigation_between_and_within_panels, test_left_from_left_edge_reaches_menu,
+       test_panel_selection_navigation, test_enter_content_then_rows_then_back,
+       test_left_from_left_edge_reaches_menu,
        test_enter_routing_per_panel, test_songs_hearts_and_favourite_toggle,
        test_prefix_keeps_single_table_not_grid, test_escape_clears_grid_to_welcome,
        test_ctrl_r_repeats_search_no_duplicate_ids, test_fast_A_then_B_stale_dropped,

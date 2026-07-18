@@ -26,6 +26,10 @@ from ..constants import GLYPHS
 from ..widgets import SearchPanel
 
 class SearchMixin:
+    # Per-panel cap for the combined (no-prefix) 2x2 dashboard: each of Songs /
+    # Artists / Albums / Playlists is filled with up to this many results.
+    GRID_LIMIT = 20
+
     def _build_search_query(self, raw: str) -> str:
         parts = raw.split()
         tokens = []
@@ -143,17 +147,18 @@ class SearchMixin:
                 res = self.spotify.ensure().search(q, type='show', limit=25) or {}
                 res = {'shows': res.get('shows') or {}}
             else:
-                # Combined (no-prefix) search: request only what the 4-panel view
-                # shows, at its exact caps — 10 tracks, 5 albums, 3 artists,
-                # 2 playlists (20 max). Podcasts/episodes are intentionally not
-                # requested here; they remain reachable via /PDC and /EPS. The
-                # calls stay sequential on the shared spotipy session (no parallel
-                # calls on one session).
+                # Combined (no-prefix) search: fill each of the four panels
+                # (Songs / Artists / Albums / Playlists) with up to GRID_LIMIT
+                # results each. Podcasts/episodes are intentionally not requested
+                # here; they remain reachable via /PDC and /EPS. The calls stay
+                # sequential on the shared spotipy session (no parallel calls on
+                # one session).
+                gl = self.GRID_LIMIT
                 try:
-                    tr = self.spotify.ensure().search(q, type='track', limit=10) or {}
-                    al = self.spotify.ensure().search(q, type='album', limit=5) or {}
-                    ar = self.spotify.ensure().search(q, type='artist', limit=3) or {}
-                    pl = self.spotify.ensure().search(q, type='playlist', limit=2) or {}
+                    tr = self.spotify.ensure().search(q, type='track', limit=gl) or {}
+                    al = self.spotify.ensure().search(q, type='album', limit=gl) or {}
+                    ar = self.spotify.ensure().search(q, type='artist', limit=gl) or {}
+                    pl = self.spotify.ensure().search(q, type='playlist', limit=gl) or {}
 
                     res = {
                         'tracks': tr.get('tracks') or {'items': []},
@@ -164,19 +169,19 @@ class SearchMixin:
                 except Exception:
                     fail = 0
                     try:
-                        tr = self.spotify.ensure().search(q, type='track', limit=10) or {}
+                        tr = self.spotify.ensure().search(q, type='track', limit=gl) or {}
                     except Exception:
                         tr = {'tracks': {'items': []}}; fail += 1
                     try:
-                        al = self.spotify.ensure().search(q, type='album', limit=5) or {}
+                        al = self.spotify.ensure().search(q, type='album', limit=gl) or {}
                     except Exception:
                         al = {'albums': {'items': []}}; fail += 1
                     try:
-                        ar = self.spotify.ensure().search(q, type='artist', limit=3) or {}
+                        ar = self.spotify.ensure().search(q, type='artist', limit=gl) or {}
                     except Exception:
                         ar = {'artists': {'items': []}}; fail += 1
                     try:
-                        pl = self.spotify.ensure().search(q, type='playlist', limit=2) or {}
+                        pl = self.spotify.ensure().search(q, type='playlist', limit=gl) or {}
                     except Exception:
                         pl = {'playlists': {'items': []}}; fail += 1
 
@@ -361,12 +366,13 @@ class SearchMixin:
                 # fetched limit (25); the tight combined caps must not apply here.
                 pass
             else:
-                # Combined (no-prefix) view: exact 10/3/5/2 caps, and no
-                # podcasts/episodes (they are reachable only via /PDC and /EPS).
-                artist_rows = artist_rows[:3]
-                album_rows = album_rows[:5]
-                track_rows = track_rows[:10]
-                playlist_rows = playlist_rows[:2]
+                # Combined (no-prefix) view: fill each panel up to GRID_LIMIT,
+                # and no podcasts/episodes (reachable only via /PDC and /EPS).
+                gl = self.GRID_LIMIT
+                artist_rows = artist_rows[:gl]
+                album_rows = album_rows[:gl]
+                track_rows = track_rows[:gl]
+                playlist_rows = playlist_rows[:gl]
                 show_rows = []
                 episode_rows = []
 
@@ -727,6 +733,11 @@ class SearchMixin:
             table.clear(columns=True)
         except Exception:
             pass
+        # Fresh results start in panel-selection mode: no row cursor shown.
+        try:
+            table.show_cursor = False
+        except Exception:
+            pass
         is_songs = (panel_key == "songs")
         if is_songs:
             table.add_column("♥", width=3)
@@ -769,7 +780,7 @@ class SearchMixin:
             panel_widgets = []
             for pk, title in self._GRID_SPECS:
                 tbl = SearchPanel(id=f"{pk}_table", zebra_stripes=True)
-                tbl.show_cursor = True
+                tbl.show_cursor = False
                 tbl.cursor_type = "row"
                 tbl.show_header = False
                 self._fill_grid_panel(tbl, pk, rows_by[pk], cw)
@@ -793,6 +804,8 @@ class SearchMixin:
                     except Exception: pass
 
         self.level = self.LVL_VIEW
+        # Fresh results begin at the panel-selection level, not inside the rows.
+        self._grid_mode = "select"
 
         # Focus and the liked lookup must wait until the freshly-mounted panels
         # are actually in the tree (a just-mounted widget can't take focus, and
@@ -824,12 +837,13 @@ class SearchMixin:
         return out
 
     def _focus_grid_panel(self, panel_key: str) -> bool:
+        """Focus a panel for SELECTION (no row cursor). Used when moving the
+        selection across the grid; entering a panel's rows is _grid_enter_content."""
         t = self._grid_panel_table(panel_key)
         if t is None or int(getattr(t, "row_count", 0) or 0) == 0:
             return False
         try:
-            if getattr(t, "cursor_row", None) is None:
-                t.move_cursor(row=0, column=0, animate=False)
+            t.show_cursor = (getattr(self, "_grid_mode", "select") == "content")
         except Exception:
             pass
         try:
@@ -844,10 +858,42 @@ class SearchMixin:
         self._grid_focus_key = panel_key
         return True
 
+    def _grid_enter_content(self, panel_key: str) -> None:
+        """Enter a selected panel's rows (Enter in select mode): show the row
+        cursor and let Up/Down navigate results."""
+        t = self._grid_panel_table(panel_key)
+        if t is None or int(getattr(t, "row_count", 0) or 0) == 0:
+            return
+        self._grid_mode = "content"
+        self._grid_focus_key = panel_key
+        try:
+            t.show_cursor = True
+            row = getattr(t, "cursor_row", None)
+            row = 0 if row is None else max(0, min(int(row), int(t.row_count) - 1))
+            t.move_cursor(row=row, column=0, animate=False)
+        except Exception:
+            pass
+        try:
+            t.focus()
+        except Exception:
+            pass
+
+    def _grid_exit_to_select(self, panel_key: str) -> None:
+        """Step back out of a panel's rows to panel selection (Left/Right in
+        content mode): hide the row cursor, keep this panel selected."""
+        self._grid_mode = "select"
+        t = self._grid_panel_table(panel_key)
+        if t is not None:
+            try: t.show_cursor = False
+            except Exception: pass
+            try: t.focus()
+            except Exception: pass
+
     def _grid_initial_focus(self) -> None:
         nonempty = self._grid_nonempty()
         if not nonempty:
             return
+        self._grid_mode = "select"
         target = "songs" if "songs" in nonempty else nonempty[0]
         self._focus_grid_panel(target)
 
