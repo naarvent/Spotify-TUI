@@ -7,6 +7,7 @@ import threading
 from typing import Dict, List, Optional
 
 from textual.widgets import Static, DataTable
+from textual.containers import Container
 from textual.css.query import NoMatches
 from rich.markup import escape as rich_escape
 from rich.text import Text
@@ -22,6 +23,7 @@ except Exception:
 
 from ..config import logger
 from ..constants import GLYPHS
+from ..widgets import SearchPanel
 
 class SearchMixin:
     def _build_search_query(self, raw: str) -> str:
@@ -60,9 +62,18 @@ class SearchMixin:
         schedule a one-shot 'taking longer' update tied to this token via a
         Textual timer (no extra thread; stops on teardown)."""
         try:
-            # _clear_right() resets _searching_token; mark this search active
-            # right after so the watchdog can tell it is still the current state.
-            self._clear_right().update(f"[b]Searching for:[/b] {rich_escape(raw)}")
+            # If a reusable results widget is already up (the 2x2 grid or the
+            # single table), keep it mounted — the upcoming render refills it in
+            # place. Clearing it here would schedule an async removal that races
+            # the re-fill; the grid's larger widget tree removes over several
+            # cycles and would vanish on a Ctrl+R / back-to-back search. When
+            # nothing reusable is up (Welcome / another view), clear and show the
+            # immediate 'Searching for:' feedback. _clear_right() resets
+            # _searching_token, so mark this search active right after either way.
+            reusable = (len(self.query("#search_grid")) > 0
+                        or len(self.query("#search_table")) > 0)
+            if not reusable:
+                self._clear_right().update(f"[b]Searching for:[/b] {rich_escape(raw)}")
             self._searching_token = token
         except Exception:
             logger.exception("_begin_search_feedback failed")
@@ -222,13 +233,13 @@ class SearchMixin:
         except Exception:
             pass
         try:
-            right = self._clear_right()
-            try:
-                right.update(f"[b]Rendering results for:[/b] {rich_escape(raw)} …")
-            except Exception:
-                pass
+            # Do NOT clear the right panel here: the render methods below reuse an
+            # existing #search_grid / #search_table in place (else they clear and
+            # mount fresh). Clearing first would schedule the reusable widget for
+            # async removal and race the re-fill (the grid would vanish on a
+            # Ctrl+R / back-to-back search).
             if not res:
-                right.update(f"[b]No results:[/b] {rich_escape(raw)}")
+                self._clear_right().update(f"[b]No results:[/b] {rich_escape(raw)}")
                 # Mark rendered so the 8s watchdog won't overwrite this message.
                 try:
                     self._search_rendered_token = my_search_token
@@ -451,28 +462,35 @@ class SearchMixin:
                     self._right_view = (rv[0], rv[1], rv[2], rows)
             except Exception:
                 logger.exception("_do_search: failed setting search view token")
-            # A forced single-type search gets a layout tailored to that type;
-            # a combined search keeps the full (mixed-type) layout.
-            layout = "full"
-            if force_type in ("album", "single"):
-                layout = "albums"
-            elif force_type == "playlist":
-                layout = "playlists"
-            elif force_type == "artist":
-                layout = "artists"
-            table = self._render_search_table(title, rows, layout=layout)
-            # Stamp the token so late saved/liked updates (this render's own
-            # worker, and post-favourite revalidation) can verify the table is
-            # still the current search before painting.
-            try:
-                table._search_token = my_search_token
-            except Exception:
-                pass
+            if not force_type:
+                # A combined (no-prefix) search shows the 2x2 dashboard: Songs /
+                # Artists on top, Albums / Playlists below. Each panel is a
+                # single specialized type (no mixed-type table).
+                self._render_search_grid(track_rows, artist_rows, album_rows,
+                                         playlist_rows, my_search_token)
+            else:
+                # A forced single-type search keeps the specialized single-type
+                # table with a layout tailored to that type.
+                layout = "full"
+                if force_type in ("album", "single"):
+                    layout = "albums"
+                elif force_type == "playlist":
+                    layout = "playlists"
+                elif force_type == "artist":
+                    layout = "artists"
+                table = self._render_search_table(title, rows, layout=layout)
+                # Stamp the token so late saved/liked updates (this render's own
+                # worker, and post-favourite revalidation) can verify the table
+                # is still the current search before painting.
+                try:
+                    table._search_token = my_search_token
+                except Exception:
+                    pass
 
-            # P2: the saved-state lookup is a network call — never run it on the
-            # UI thread. The table is already rendered above; fetch liked flags
-            # on a worker and apply them only if this search is still current.
-            self._fetch_liked_for_search(table, rows, my_search_token)
+                # P2: the saved-state lookup is a network call — never run it on
+                # the UI thread. The table is already rendered above; fetch liked
+                # flags on a worker and apply them only if this search is current.
+                self._fetch_liked_for_search(table, rows, my_search_token)
 
             # Mark this token as rendered (suppresses the 8s watchdog nag).
             try:
@@ -647,3 +665,296 @@ class SearchMixin:
                 pass
 
         threading.Thread(target=worker, daemon=True).start()
+
+    # ------------------------------------------------------------------ #
+    # Combined-search 2x2 dashboard (Songs / Artists / Albums / Playlists)
+    # ------------------------------------------------------------------ #
+    _GRID_SPECS = [("songs", "Songs"), ("artists", "Artists"),
+                   ("albums", "Albums"), ("playlists", "Playlists")]
+    _GRID_ORDER = ["songs", "artists", "albums", "playlists"]
+    _GRID_POS = {"songs": (0, 0), "artists": (0, 1), "albums": (1, 0), "playlists": (1, 1)}
+    _GRID_POS_INV = {(0, 0): "songs", (0, 1): "artists", (1, 0): "albums", (1, 1): "playlists"}
+
+    def _grid_avail_width(self) -> int:
+        """Inner width available to the results grid, derived from the TERMINAL
+        width (right content ~= terminal - 44: the 38-col left column plus grid
+        and panel borders). Deliberately not the right panel's content_size —
+        that is inflated by the panels' current column widths, so on a shrink it
+        would stay wide and never re-flow. Falls back to content_size only if the
+        terminal size is not yet known."""
+        try:
+            tw = int(self.size.width or 0)
+        except Exception:
+            tw = 0
+        if tw > 0:
+            return max(0, tw - 44)
+        right = getattr(self, "right_panel", None)
+        cs = getattr(right, "content_size", None) if right is not None else None
+        if cs is not None:
+            return max(0, int(getattr(cs, "width", 0) or 0))
+        return 40
+
+    def _grid_is_stacked(self) -> bool:
+        """Below this width a side-by-side 2x2 leaves each panel too narrow, so
+        stack the four panels vertically (single column)."""
+        return self._grid_avail_width() < 46
+
+    def _grid_col_width(self, stacked: bool) -> int:
+        aw = self._grid_avail_width() or 40
+        panel_w = aw if stacked else max(8, (aw - 1) // 2)
+        # Leave room for the panel border + the DataTable's cell padding.
+        return max(8, panel_w - 4)
+
+    def _grid_song_line(self, r: Dict) -> str:
+        title = r.get("title", "") or ""
+        artist = r.get("artist", "") or ""
+        return f"{title} {GLYPHS['sep']} {artist}" if artist else title
+
+    def _grid_line(self, panel_key: str, r: Dict) -> str:
+        title = r.get("title", "") or ""
+        if panel_key == "albums":
+            artist = r.get("artist", "") or ""
+            return f"{title} {GLYPHS['sep']} {artist}" if artist else title
+        # artists / playlists: just the name (owner omitted to stay compact in a
+        # narrow panel). Overlong text is truncated to the column width by the
+        # DataTable, never producing a horizontal scrollbar.
+        return title
+
+    def _fill_grid_panel(self, table, panel_key: str, rows: List[Dict], cw: int) -> None:
+        """(Re)build one panel's columns and rows. Reused in place on a repeated
+        search / resize so no widget is remounted (no DuplicateIds)."""
+        try:
+            table.clear(columns=True)
+        except Exception:
+            pass
+        is_songs = (panel_key == "songs")
+        if is_songs:
+            table.add_column("♥", width=3)
+            table.add_column("Songs", width=max(6, cw - 3))
+            table._col_heart = 0
+        else:
+            table.add_column(panel_key.capitalize(), width=max(6, cw))
+        table.row_to_uri = {}; table.row_to_id = {}; table.row_to_title = {}
+        table.row_to_type = {}; table.row_to_obj = {}
+        table._model_rows = rows
+        table._panel_key = panel_key
+        liked_map = {}
+        for i, r in enumerate(rows):
+            if is_songs:
+                liked_map[i] = False
+                table.add_row(Text(""), self._grid_song_line(r), key=i)
+            else:
+                table.add_row(self._grid_line(panel_key, r), key=i)
+            table.row_to_uri[i] = r.get("uri")
+            if r.get("id"):
+                table.row_to_id[i] = r.get("id")
+            table.row_to_type[i] = r.get("type")
+            table.row_to_obj[i] = r.get("raw")
+            table.row_to_title[i] = f"{r.get('title','')} {GLYPHS['sep']} {r.get('artist','')}"
+        if is_songs:
+            table._liked_map = liked_map
+
+    def _render_search_grid(self, track_rows, artist_rows, album_rows, playlist_rows, my_search_token):
+        rows_by = {"songs": track_rows, "artists": artist_rows,
+                   "albums": album_rows, "playlists": playlist_rows}
+        stacked = self._grid_is_stacked()
+        cw = self._grid_col_width(stacked)
+        try:
+            grid = self.query_one("#search_grid", Container)
+        except NoMatches:
+            grid = None
+
+        if grid is None:
+            right = self._clear_right()
+            panel_widgets = []
+            for pk, title in self._GRID_SPECS:
+                tbl = SearchPanel(id=f"{pk}_table", zebra_stripes=True)
+                tbl.show_cursor = True
+                tbl.cursor_type = "row"
+                tbl.show_header = False
+                self._fill_grid_panel(tbl, pk, rows_by[pk], cw)
+                try: tbl._search_token = my_search_token
+                except Exception: pass
+                panel = Container(tbl, id=f"panel_{pk}", classes="search-panel")
+                panel_widgets.append((panel, title))
+            grid = Container(*[p for p, _ in panel_widgets], id="search_grid")
+            grid.set_class(stacked, "-stacked")
+            right.mount(grid)
+            for panel, title in panel_widgets:
+                try: panel.border_title = title
+                except Exception: pass
+        else:
+            grid.set_class(stacked, "-stacked")
+            for pk, _ in self._GRID_SPECS:
+                t = self._grid_panel_table(pk)
+                if t is not None:
+                    self._fill_grid_panel(t, pk, rows_by[pk], cw)
+                    try: t._search_token = my_search_token
+                    except Exception: pass
+
+        self.level = self.LVL_VIEW
+
+        # Focus and the liked lookup must wait until the freshly-mounted panels
+        # are actually in the tree (a just-mounted widget can't take focus, and
+        # a fast liked lookup could otherwise apply() before .parent is set and
+        # get dropped). call_after_refresh runs once the DOM has settled.
+        def _post():
+            self._grid_initial_focus()
+            songs = self._grid_panel_table("songs")
+            if songs is not None:
+                self._fetch_liked_for_grid(songs, track_rows, my_search_token)
+        try:
+            self.call_after_refresh(_post)
+        except Exception:
+            _post()
+        return grid
+
+    def _grid_panel_table(self, panel_key: str):
+        try:
+            return self.query_one(f"#{panel_key}_table", SearchPanel)
+        except NoMatches:
+            return None
+
+    def _grid_nonempty(self) -> List[str]:
+        out = []
+        for pk in self._GRID_ORDER:
+            t = self._grid_panel_table(pk)
+            if t is not None and int(getattr(t, "row_count", 0) or 0) > 0:
+                out.append(pk)
+        return out
+
+    def _focus_grid_panel(self, panel_key: str) -> bool:
+        t = self._grid_panel_table(panel_key)
+        if t is None or int(getattr(t, "row_count", 0) or 0) == 0:
+            return False
+        try:
+            if getattr(t, "cursor_row", None) is None:
+                t.move_cursor(row=0, column=0, animate=False)
+        except Exception:
+            pass
+        try:
+            t.focus()
+        except Exception:
+            try: self.set_focus(t)
+            except Exception: pass
+        # Focusing a panel means we are inside the results view; keep the level
+        # in sync so the app's edge handlers (e.g. Right on a right-edge panel)
+        # behave as a view, not as the section menu.
+        self.level = self.LVL_VIEW
+        self._grid_focus_key = panel_key
+        return True
+
+    def _grid_initial_focus(self) -> None:
+        nonempty = self._grid_nonempty()
+        if not nonempty:
+            return
+        target = "songs" if "songs" in nonempty else nonempty[0]
+        self._focus_grid_panel(target)
+
+    def _search_grid_key(self, panel_key: str, direction: str) -> bool:
+        """Move focus between panels. Called from SearchPanel.on_key so the app's
+        global on_key is untouched. Returns True if it acted."""
+        nonempty = self._grid_nonempty()
+        if not nonempty:
+            return False
+        if direction in ("next", "prev"):
+            if panel_key not in nonempty:
+                return self._focus_grid_panel(nonempty[0])
+            i = nonempty.index(panel_key)
+            j = (i + (1 if direction == "next" else -1)) % len(nonempty)
+            return self._focus_grid_panel(nonempty[j])
+        pos = self._GRID_POS.get(panel_key)
+        if pos is None:
+            return False
+        r, c = pos
+        target = None
+        if direction == "left":
+            if c == 0:
+                # Left-edge panel: let the event fall through to the app's
+                # existing 'back to the main menu' handler (same as the
+                # single-table search view), so the behaviour stays consistent.
+                return False
+            target = self._GRID_POS_INV.get((r, c - 1))
+        elif direction == "right":
+            target = self._GRID_POS_INV.get((r, c + 1))
+        elif direction == "up":
+            target = self._GRID_POS_INV.get((r - 1, c))
+        elif direction == "down":
+            target = self._GRID_POS_INV.get((r + 1, c))
+        if target:
+            return self._focus_grid_panel(target)
+        return False
+
+    def _fetch_liked_for_grid(self, songs_table, song_rows, my_search_token):
+        """Resolve liked hearts for the Songs panel off the UI thread (like
+        _fetch_liked_for_search) and paint them only if this search is still
+        current and the panel is still mounted."""
+        track_ids = [r["id"] for r in song_rows if r.get("id")]
+
+        def worker():
+            try:
+                liked = self.spotify.check_saved_tracks(track_ids) if track_ids else []
+            except Exception:
+                logger.exception("grid liked lookup failed")
+                return
+            id_to = {}
+            li = 0
+            for r in song_rows:
+                if r.get("id"):
+                    id_to[r["id"]] = bool(liked[li]) if li < len(liked) else False
+                    li += 1
+
+            def apply():
+                if getattr(self, "_last_search_worker", None) != my_search_token:
+                    return
+                if getattr(songs_table, "_search_token", None) != my_search_token:
+                    return
+                if getattr(songs_table, "parent", None) is None:
+                    return
+                liked_map = {i: bool(id_to.get(r.get("id"), False)) for i, r in enumerate(song_rows)}
+                try:
+                    songs_table._liked_map = liked_map
+                    self._repaint_rows_from_model(songs_table)
+                except Exception:
+                    logger.exception("applying grid liked hearts failed")
+
+            try:
+                self.call_from_thread(apply)
+            except Exception:
+                pass
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _relayout_search_grid(self) -> None:
+        """Resize hook: re-flow the 2x2 <-> stacked layout and resize the panel
+        columns in place, preserving rows / cursor / focus (no re-query)."""
+        try:
+            grid = self.query_one("#search_grid", Container)
+        except NoMatches:
+            return
+        stacked = self._grid_is_stacked()
+        grid.set_class(stacked, "-stacked")
+        cw = self._grid_col_width(stacked)
+        for pk, _ in self._GRID_SPECS:
+            t = self._grid_panel_table(pk)
+            if t is None:
+                continue
+            try:
+                cols = list(t.ordered_columns)
+            except Exception:
+                continue
+            if pk == "songs" and len(cols) >= 2:
+                try:
+                    cols[0].width = 3
+                    cols[1].width = max(6, cw - 3)
+                except Exception:
+                    pass
+            elif cols:
+                try:
+                    cols[-1].width = max(6, cw)
+                except Exception:
+                    pass
+            try:
+                t.refresh(layout=True)
+            except Exception:
+                pass

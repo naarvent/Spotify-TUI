@@ -579,6 +579,30 @@ class TablesMixin:
             self._restore_table_view(table, cur_coord, saved_y, len(rows))
             return
 
+        if getattr(table, "_panel_key", None) == "songs":
+            # Combined-search Songs panel: 2 columns (heart + "Title — Artist").
+            # Kept in sync here so a favourite toggle / liked lookup repaints its
+            # heart without mangling the compact single-line layout.
+            for i, r in enumerate(rows):
+                liked = bool(liked_map.get(i, False))
+                heart = Text("❤", style="bold red") if liked else Text("")
+                title = r.get("title", "") or ""
+                artist = r.get("artist", "") or ""
+                line = f"{title} {GLYPHS['sep']} {artist}" if artist else title
+                try:
+                    table.add_row(heart, line, key=i)
+                except Exception:
+                    pass
+                table.row_to_uri[i] = r.get("uri")
+                table.row_to_title[i] = f"{title} {GLYPHS['sep']} {artist}"
+                if r.get("id"):
+                    table.row_to_id[i] = r.get("id")
+                table.row_to_type[i] = r.get("type")
+            try: table.refresh()
+            except Exception: pass
+            self._restore_table_view(table, cur_coord, saved_y, len(rows))
+            return
+
         playing_id = getattr(self, "_now_internal_track_id", None)
         fields = getattr(table, "_track_fields", ["heart", "title", "artist", "album", "dur", "added"])
         for i, r in enumerate(rows):

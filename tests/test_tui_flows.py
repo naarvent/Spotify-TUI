@@ -219,9 +219,9 @@ async def clear_and_settle(app, pilot):
     app._clear_right()
     for _ in range(50):
         await pilot.pause()
-        if find_search_table(app) is None:
+        if find_search_table(app) is None and len(app.query("#search_grid")) == 0:
             return True
-    return find_search_table(app) is None
+    return find_search_table(app) is None and len(app.query("#search_grid")) == 0
 
 def pause_intervals(app):
     for attr in ("_now_sync_interval", "_now_tick_interval", "_now_interval",
@@ -278,13 +278,17 @@ async def test_search_types_and_edges():
             check(f"search force_type={ftype} renders {rowtype} rows", ok,
                   f"rows={[r.get('type') for r in (getattr(tbl,'_model_rows',[]) or [])]}")
 
-        # combined
+        # combined -> the 2x2 dashboard (Songs / Artists / Albums / Playlists)
         fake.inner.contains = False
         await clear_and_settle(app, pilot)
         dispatch_search(app, "combo", "combo", None)
-        tbl = await poll(lambda: table_refs_q(app, "combo"), timeout=4.0)
-        types = set(r.get("type") for r in (getattr(tbl, "_model_rows", []) or [])) if tbl else set()
-        check("combined search renders >=4 distinct types", len(types) >= 4, f"types={sorted(types)}")
+        await poll(lambda: len(app.query("#search_grid")) > 0, timeout=4.0)
+        for _ in range(6):
+            await pilot.pause()
+        populated = [pk for pk in ("songs", "artists", "albums", "playlists")
+                     if app._grid_panel_table(pk) is not None
+                     and int(getattr(app._grid_panel_table(pk), "row_count", 0) or 0) > 0]
+        check("combined search populates all four panels", len(populated) == 4, f"panels={populated}")
 
         # empty -> a distinct 'No results' state (not an empty table, not an error)
         await clear_and_settle(app, pilot)

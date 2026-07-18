@@ -390,6 +390,15 @@ class CoreMixin:
                 self._recompute_table_widths(t)
         except Exception:
             logger.exception("table resize recompute failed")
+        # The combined-search 2x2 dashboard reflows (2x2 <-> stacked) and resizes
+        # its panel columns on its own; the loop above is a no-op for the panels
+        # (they carry no _width_spec). Defer to after the refresh so the right
+        # panel's content_size reflects the new size (it lags during on_resize).
+        try:
+            if len(self.query("#search_grid")) > 0:
+                self.call_after_refresh(self._relayout_search_grid)
+        except Exception:
+            logger.exception("search grid resize failed")
 
     def on_input_submitted(self, event: Input.Submitted) -> None:
 
@@ -970,6 +979,19 @@ class CoreMixin:
         - /TRK <query>  — search tracks
         - /PLY <query>  — search playlists
     You can also craft queries normally; prefixes and smart parsing are supported.
+
+    [b]Combined search results (2x2)[/b]
+    A search without a prefix opens four panels — Songs / Artists on top,
+    Albums / Playlists below:
+        - ↑ / ↓ : Move between results inside the focused panel
+        - ← / → : Move between panels horizontally (Songs↔Artists, Albums↔Playlists)
+        - Ctrl+↑ / Ctrl+↓ : Move between panels vertically (Songs↔Albums, Artists↔Playlists)
+        - Tab / Shift+Tab : Cycle through the panels
+        - ← on a left panel: back to the main menu
+        - Enter: play a song / open an artist, album or playlist
+        - f: Like / Unlike the selected song (Songs panel)
+    (A prefixed search — /TRK, /ART, /ALB, /PLY, /PDC, /EPS — keeps a single
+    full-size list of that one type.)
 
     [b]Lyrics & Now Playing[/b]
         - l: Toggle Lyrics view (shows synced lyrics when available)

@@ -1079,7 +1079,8 @@ class NavigationMixin:
             if fid == "tracks_table" and hasattr(focused, "row_to_uri"):
                 row = self._get_cursor_row(focused)
                 if row is not None: self._play_row(row, focused)
-            elif fid == "search_table" and hasattr(focused, "row_to_type"):
+            elif fid in ("search_table", "songs_table", "artists_table",
+                         "albums_table", "playlists_table") and hasattr(focused, "row_to_type"):
                 row = self._get_cursor_row(focused)
                 if row is None: return
                 rtype = focused.row_to_type.get(row)

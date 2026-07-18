@@ -56,6 +56,12 @@ class SptPy(
         "ListItem.-highlight { text-style: bold; color: #27e1c1; background: #0e2d34; }\n"
         "DataTable { height: 1fr; border: round #1a3a40; overflow: auto; }\n"
         "DataTable:focus { border: round #27e1c1; }\n"
+        # Combined-search 2x2 dashboard (Songs/Artists over Albums/Playlists).
+        "#search_grid { layout: grid; grid-size: 2 2; grid-gutter: 0 1; width: 1fr; height: 1fr; }\n"
+        "#search_grid.-stacked { grid-size: 1 4; grid-gutter: 0 0; }\n"
+        ".search-panel { border: round #1a3a40; height: 1fr; padding: 0; }\n"
+        ".search-panel:focus-within { border: round #27e1c1; }\n"
+        ".search-panel > DataTable { height: 1fr; border: none; background: transparent; overflow-x: hidden; }\n"
         "#now_wrap { column-span: 2; layout: vertical; border: round #1a3a40; margin: 0; padding: 0 1; height: 5; }\n"
         "#now_wrap.-playing { border: round #27e1c1; }\n"
         "#np_title { height: 1; padding: 0; margin: 0; text-align: left; }\n"

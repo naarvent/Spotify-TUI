@@ -74,6 +74,13 @@ def stbl(app):
             return w
     return None
 
+def sgrid(app):
+    return len(app.query("#search_grid")) > 0
+
+def results_shown(app):
+    # A no-prefix search renders the 2x2 grid; a prefixed one the single table.
+    return sgrid(app) or stbl(app) is not None
+
 async def poll(fn, timeout=5.0):
     loop = asyncio.get_event_loop(); end = loop.time() + timeout
     while loop.time() < end:
@@ -102,10 +109,10 @@ async def test_immediate_feedback_before_blocked_response():
               f"txt={txt!r}")
         check("query is visible in the searching state", "daft punk" in txt, f"txt={txt!r}")
         check("no internal 'worker' wording shown", "worker" not in txt.lower(), f"txt={txt!r}")
-        check("no results table while the response is blocked", stbl(app) is None)
+        check("no results while the response is blocked", not results_shown(app))
         fake.gate.set()
-        await poll(lambda: stbl(app) is not None, timeout=5.0)
-        check("results replace the searching state", stbl(app) is not None and "Searching for:" not in right_text(app),
+        await poll(lambda: results_shown(app), timeout=5.0)
+        check("results replace the searching state", results_shown(app) and "Searching for:" not in right_text(app),
               f"txt={right_text(app)!r}")
 
 
@@ -128,7 +135,7 @@ async def test_prolonged_state_only_when_active():
         check("watchdog would fire while search is active", active is True)
         # after results, the same guard must be false
         fake.gate.set()
-        await poll(lambda: stbl(app) is not None, timeout=5.0)
+        await poll(lambda: results_shown(app), timeout=5.0)
         stale = (getattr(app, "_searching_token", None) == token
                  and getattr(app, "_search_rendered_token", None) != token)
         check("watchdog is suppressed once results are rendered", stale is False)
@@ -144,7 +151,7 @@ async def test_stale_A_dropped_when_B_supersedes():
         tokenA = app._last_search_worker
         fake.gate = None
         app._dispatch_search("BBBB")             # B supersedes and renders
-        await poll(lambda: stbl(app) is not None, timeout=5.0)
+        await poll(lambda: results_shown(app), timeout=5.0)
         tokenB = app._last_search_worker
         check("B token is newer than A", tokenB > tokenA)
         # A's late render must be a no-op.
@@ -170,7 +177,7 @@ async def test_leaving_search_cancels_repaint():
         check("leaving Search clears the searching token", getattr(app, "_searching_token", None) != token)
         fake.gate.set()                          # blocked worker finishes now
         await pump(pilot, 30)
-        check("no results table painted over the menu after leaving", stbl(app) is None,
+        check("no results painted over the menu after leaving", not results_shown(app),
               f"txt={right_text(app)!r}")
 
 
@@ -206,11 +213,11 @@ async def test_no_worker_thread_accumulation():
         for i in range(5):
             app._dispatch_search(f"q{i}")
             await pilot.pause()
-        await poll(lambda: stbl(app) is not None, timeout=5.0)
+        await poll(lambda: results_shown(app), timeout=5.0)
         check("only the last search is current", app._last_search_worker == app._search_rendered_token,
               f"last={app._last_search_worker} rendered={app._search_rendered_token}")
-        check("exactly one search_table mounted", sum(1 for w in app.query(DataTable)
-              if getattr(w, "id", "") == "search_table") == 1)
+        check("exactly one results grid mounted (no accumulation)",
+              len(app.query("#search_grid")) == 1, f"n={len(app.query('#search_grid'))}")
 
 
 ALL = [test_immediate_feedback_before_blocked_response, test_prolonged_state_only_when_active,

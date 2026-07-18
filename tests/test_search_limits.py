@@ -81,6 +81,13 @@ def stbl(app):
             return w
     return None
 
+def has_grid(app):
+    return len(app.query("#search_grid")) > 0
+
+def panel_rows(app, pk):
+    t = app._grid_panel_table(pk)
+    return int(getattr(t, "row_count", 0) or 0) if t is not None else 0
+
 async def poll(fn, timeout=5.0):
     loop = asyncio.get_event_loop(); end = loop.time() + timeout
     while loop.time() < end:
@@ -102,7 +109,7 @@ async def test_combined_requests_exact_limits():
     async with app.run_test(size=(120, 30)) as pilot:
         await pilot.pause(); pause_intervals(app)
         app._dispatch_search("metallica")
-        await poll(lambda: stbl(app) is not None, timeout=5.0)
+        await poll(lambda: has_grid(app), timeout=5.0)
         await pump(pilot, 5)
         calls = list(fake.calls)
         check("combined asks track=10, album=5, artist=3, playlist=2 in order",
@@ -119,19 +126,18 @@ async def test_combined_result_caps():
     async with app.run_test(size=(120, 30)) as pilot:
         await pilot.pause(); pause_intervals(app)
         app._dispatch_search("metallica")
-        t = await poll(lambda: stbl(app), timeout=5.0)
-        await pump(pilot, 5)
-        rows = getattr(t, "_model_rows", [])
-        counts = {}
-        for r in rows:
-            counts[r.get("type")] = counts.get(r.get("type"), 0) + 1
-        check("<=10 tracks shown", counts.get("track", 0) <= 10, f"counts={counts}")
-        check("<=3 artists shown", counts.get("artist", 0) <= 3, f"counts={counts}")
-        check("<=5 albums shown", counts.get("album", 0) <= 5, f"counts={counts}")
-        check("<=2 playlists shown", counts.get("playlist", 0) <= 2, f"counts={counts}")
-        check("zero podcasts shown", counts.get("podcast", 0) == 0, f"counts={counts}")
-        check("zero episodes shown", counts.get("episode", 0) == 0, f"counts={counts}")
-        check("total combined rows <= 20", len(rows) <= 20, f"n={len(rows)}")
+        await poll(lambda: has_grid(app), timeout=5.0)
+        await pump(pilot, 6)
+        songs, artists = panel_rows(app, "songs"), panel_rows(app, "artists")
+        albums, plays = panel_rows(app, "albums"), panel_rows(app, "playlists")
+        check("<=10 songs shown", songs <= 10, f"songs={songs}")
+        check("<=3 artists shown", artists <= 3, f"artists={artists}")
+        check("<=5 albums shown", albums <= 5, f"albums={albums}")
+        check("<=2 playlists shown", plays <= 2, f"plays={plays}")
+        check("no podcasts panel exists", app._grid_panel_table("podcasts") is None)
+        check("no episodes panel exists", app._grid_panel_table("episodes") is None)
+        check("total shown <= 20", songs + artists + albums + plays <= 20,
+              f"total={songs + artists + albums + plays}")
 
 
 async def test_prefix_keeps_larger_limit():
@@ -164,14 +170,15 @@ async def test_partial_error_shows_good_types():
     async with app.run_test(size=(120, 30)) as pilot:
         await pilot.pause(); pause_intervals(app)
         app._dispatch_search("metallica")
-        t = await poll(lambda: stbl(app), timeout=5.0)
-        await pump(pilot, 5)
-        check("partial failure still renders a table", t is not None)
+        await poll(lambda: has_grid(app), timeout=5.0)
+        await pump(pilot, 6)
+        check("partial failure still renders the grid", has_grid(app))
         check("partial failure is not shown as 'Search failed'",
               "Search failed" not in right_text(app), f"txt={right_text(app)!r}")
-        types = {r.get("type") for r in getattr(t, "_model_rows", [])}
-        check("good types present when one type fails",
-              "track" in types and "album" in types and "artist" not in types, f"types={types}")
+        check("good types present, failed type empty",
+              panel_rows(app, "songs") > 0 and panel_rows(app, "albums") > 0
+              and panel_rows(app, "artists") == 0,
+              f"songs={panel_rows(app,'songs')} albums={panel_rows(app,'albums')} artists={panel_rows(app,'artists')}")
 
 
 async def test_total_error():
