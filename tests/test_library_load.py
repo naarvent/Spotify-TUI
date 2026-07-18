@@ -295,9 +295,10 @@ async def test_partial_on_error_keeps_rows():
 
 
 def right_text_title(app):
-    from textual.widgets import Static
+    # The content table's title now rides in its integrated border title.
+    from textual.widgets import DataTable
     try:
-        return str(getattr(app.query_one("#tracks_title", Static), "_Static__content", "") or "")
+        return str(app.query_one("#tracks_table", DataTable).border_title or "")
     except Exception:
         return ""
 

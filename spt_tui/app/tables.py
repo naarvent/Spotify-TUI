@@ -6,7 +6,7 @@ import time
 import threading
 from typing import Dict, List, Optional
 
-from textual.widgets import Static, DataTable
+from textual.widgets import DataTable
 from textual.css.query import NoMatches
 from rich.markup import escape as rich_escape
 from rich.text import Text
@@ -72,6 +72,21 @@ class TablesMixin:
         except Exception:
             logger.exception("_refresh_playing_highlight failed")
 
+    def _content_title(self, title) -> str:
+        """Plain-text (markup-stripped) title for a content table's integrated
+        border header — e.g. '[b]Album:[/b] X' -> 'Album: X'."""
+        try:
+            return Text.from_markup(str(title)).plain
+        except Exception:
+            return str(title)
+
+    def _set_table_title(self, table_id: str, title) -> None:
+        """Update a mounted content table's border title (streaming progress)."""
+        try:
+            self.query_one(f"#{table_id}", DataTable).border_title = self._content_title(title)
+        except Exception:
+            pass
+
     def _render_tracks_table(self, title: str, rows: List[Dict], liked_bools: Optional[List[bool]] = None, *, context_uri: Optional[str] = None, context_uris: Optional[List[str]] = None, profile: str = "playlist"):
         right = self._clear_right()
         col_labels, fixed_widths, weights, fields = self._TRACKS_PROFILES.get(
@@ -95,7 +110,8 @@ class TablesMixin:
         table._context_uris = list(context_uris) if context_uris else None
         table._model_rows = rows
         table._liked_map = {i: (bool(liked_bools[i]) if liked_bools and i < len(liked_bools) else False) for i in range(len(rows))}
-        right.mount(Static(title, markup=True, id="tracks_title")); right.mount(table)
+        table.border_title = self._content_title(title)
+        right.mount(table)
         table.focus()
         self.level = self.LVL_VIEW
         return table
@@ -279,7 +295,10 @@ class TablesMixin:
                 def paint():
                     if not self._is_current_view("artist", artist_id, token): return
                     title = f"[b]Profile of:[/b] {rich_escape(artist_name)}"
-                    self._render_search_table(title, rows)
+                    # Every item here is by this one artist, so the full search
+                    # layout left Artist/Owner redundant and Album/Duration blank.
+                    # Use the compact heart/type/name layout instead.
+                    self._render_search_table(title, rows, layout="artists")
 
                 self.call_from_thread(paint)
             threading.Thread(target=worker, daemon=True).start()

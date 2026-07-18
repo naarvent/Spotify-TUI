@@ -6,7 +6,7 @@ import time
 import threading
 from typing import Dict, List, Optional
 
-from textual.widgets import Static, DataTable
+from textual.widgets import DataTable
 from textual.containers import Container
 from textual.css.query import NoMatches
 from rich.markup import escape as rich_escape
@@ -597,13 +597,9 @@ class SearchMixin:
             table.row_to_type[i] = r.get("type")
             table.row_to_obj[i] = r.get("raw")
         table._model_rows = rows
+        table.border_title = self._content_title(title)
         if not reused:
-            right.mount(Static(title, markup=True, id="results_title")); right.mount(table)
-        else:
-            try:
-                self.query_one("#results_title", Static).update(title)
-            except NoMatches:
-                pass
+            right.mount(table)
         table.focus()
         self.level = self.LVL_VIEW
         try:

@@ -354,12 +354,7 @@ class LibraryMixin:
             self.call_from_thread(do)
 
         def _set_title(text):
-            def do():
-                try:
-                    self.query_one("#tracks_title", Static).update(text)
-                except Exception:
-                    pass
-            self.call_from_thread(do)
+            self.call_from_thread(lambda: self._set_table_title("tracks_table", text))
 
         def worker():
             try:
@@ -493,11 +488,9 @@ class LibraryMixin:
             return tbl
 
         def set_status(msg):
-            # Only the tracks view has an id'd title Static; a no-op elsewhere.
-            try:
-                self.query_one("#tracks_title", Static).update(msg)
-            except NoMatches:
-                pass
+            # Progress now rides in the table's integrated border title (a no-op
+            # until the table is mounted).
+            self._set_table_title("tracks_table", msg)
 
         def setup():
             if not current():
@@ -669,7 +662,13 @@ class LibraryMixin:
         rv = getattr(self, "_right_view", None)
         if rv and len(rv) >= 3:
             self._right_view = (rv[0], rv[1], rv[2], None)
-        self._safe_update_right("recent", "", token, "[b]Loading Recently Played…[/b]")
+        # Clear any stale view first so the loading message is actually visible —
+        # a bare right_panel.update() leaves a previously-mounted table on top of
+        # it, which is why opening Recently Played looked like nothing happened.
+        # Runs on the UI thread (keyboard Enter and Ctrl+R both call this here).
+        right = self._clear_right()
+        if self._is_current_view("recent", "", token):
+            right.update("[b]Loading Recently Played…[/b]")
         def worker():
             rows, ids = [], []
             page = self.spotify.recently_played(limit=50)

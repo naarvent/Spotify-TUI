@@ -886,7 +886,10 @@ class CoreMixin:
                 if kind == 'liked':
                     self._open_liked_table(); return
                 if kind == 'recent':
-                    threading.Thread(target=self._open_recently_table, daemon=True).start(); return
+                    # Runs on the UI thread: its setup (token + clear + loading)
+                    # is light and must clear on the UI thread; the fetch is on
+                    # its own inner worker.
+                    self._open_recently_table(); return
                 if kind == 'albums':
                     self._open_saved_albums(); return
                 if kind == 'podcasts':
