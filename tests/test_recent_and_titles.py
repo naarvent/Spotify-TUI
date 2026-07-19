@@ -96,15 +96,28 @@ async def test_content_tables_have_border_title():
         t = app._render_tracks_table("[b]Recently Played[/b]", [{"id": "t0", "uri": "u",
                      "title": "S", "artist": "a", "album": "al", "dur": "0:00"}], [False], profile="recent")
         await pilot.pause()
-        check("tracks table title is in its border header",
-              str(t.border_title) == "Recently Played", f"bt={t.border_title!r}")
+        check("content view title is on #right's frame (tracks)",
+              str(app.right_panel.border_title) == "Recently Played", f"bt={app.right_panel.border_title!r}")
         check("no separate #tracks_title Static is mounted", len(app.query("#tracks_title")) == 0)
+        # One clean frame: #right keeps its border/title but drops padding, and the
+        # table is borderless (its grey layer is clipped inside #right's border).
+        check("content view borrows #right's frame (table-view)", app.right_panel.has_class("table-view"))
+        check("content table is borderless (no nested double border)",
+              t.styles.border.top[0] in ("", None), f"border={t.styles.border.top}")
+        rr, tr = app.right_panel.region, t.region
+        check("content table fills #right (inset only by its border, no padding gap)",
+              (tr.x, tr.y, tr.width, tr.height) == (rr.x + 1, rr.y + 1, rr.width - 2, rr.height - 2),
+              f"right={rr} table={tr}")
+        app.action_escape_to_menu()
+        await pilot.pause()
+        check("#right frame restored after leaving the table view",
+              not app.right_panel.has_class("table-view"))
         s = app._render_search_table("[b]Saved Albums[/b]", [{"type": "album", "id": "a1",
                      "uri": "u", "title": "Alb", "artist": "Ar", "album": "", "dur": "",
                      "raw": {}, "saved": True}], check_saved=False, layout="albums")
         await pilot.pause()
-        check("search table title is in its border header",
-              str(s.border_title) == "Saved Albums", f"bt={s.border_title!r}")
+        check("content view title is on #right's frame (search)",
+              str(app.right_panel.border_title) == "Saved Albums", f"bt={app.right_panel.border_title!r}")
         check("no separate #results_title Static is mounted", len(app.query("#results_title")) == 0)
 
 

@@ -45,6 +45,17 @@ class SptPy(
         ".section.-active { border: round #27e1c1; }\n"
         ".section > .title { padding: 0 1; color: #93e1e1; text-style: bold; }\n"
         "#right { border: round #27e1c1; padding: 1 2; overflow: auto; background: #0d252c; min-width: 60; margin: 0; height: 1fr; content-align: center middle; text-align: center; }\n"
+        # A single full-width content table brings its own bordered+titled frame,
+        # so #right drops its border and padding: the table fills edge to edge and
+        # there is no #0d252c gap between the two frames. (The 2x2 grid keeps
+        # #right's border — it does not set this class.)
+        # A single content table borrows #right's frame: #right keeps its border
+        # and shows the title, but drops its padding, and the table inside is
+        # borderless + transparent. So there is one clean frame (no nested double
+        # border, no #0d252c gap) and #right's border clips the DataTable's grey
+        # header/zebra layer — exactly how the grid panels do it.
+        "#right.table-view { padding: 0; }\n"
+        "#right.table-view > DataTable, #right.table-view > DataTable:focus { border: none; }\n"
         "#right.lyrics-mode { content-align: center middle; }\n"
         "#lyrics_box { width: 1fr; height: 1fr; text-align: center; padding: 1 2; }\n"
         "#help_scroll { width: 1fr; height: 1fr; }\n"
@@ -63,7 +74,7 @@ class SptPy(
         ".search-panel { border: round #1a3a40; height: 1fr; padding: 0; "
         "border-title-color: #93e1e1; border-title-align: left; }\n"
         ".search-panel:focus-within { border: round #27e1c1; }\n"
-        ".search-panel > DataTable { height: 1fr; border: none; background: transparent; overflow-x: hidden; }\n"
+        ".search-panel > DataTable, .search-panel > DataTable:focus { height: 1fr; border: none; background: transparent; overflow-x: hidden; }\n"
         "#now_wrap { column-span: 2; layout: vertical; border: round #1a3a40; margin: 0; padding: 0 1; height: 5; }\n"
         "#now_wrap.-playing { border: round #27e1c1; }\n"
         "#np_title { height: 1; padding: 0; margin: 0; text-align: left; }\n"

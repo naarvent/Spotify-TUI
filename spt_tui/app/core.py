@@ -299,6 +299,13 @@ class CoreMixin:
         # "searching" state, so the taking-longer watchdog must not repaint.
         self._searching_token = None
         right.update("")
+        # A content table borrows #right's frame (title + no padding); reset both
+        # so the next view (Welcome, lyrics, the search grid, …) is unaffected.
+        try:
+            right.remove_class("table-view")
+            right.border_title = ""
+        except Exception:
+            pass
         for w in list(right.children):
             w.remove()
         return right

@@ -81,9 +81,11 @@ class TablesMixin:
             return str(title)
 
     def _set_table_title(self, table_id: str, title) -> None:
-        """Update a mounted content table's border title (streaming progress)."""
+        """Update the content view's title, shown on #right's frame (streaming
+        progress). No-op if the given content table is not the one on screen."""
         try:
-            self.query_one(f"#{table_id}", DataTable).border_title = self._content_title(title)
+            if len(self.query(f"#{table_id}")) > 0:
+                self.right_panel.border_title = self._content_title(title)
         except Exception:
             pass
 
@@ -110,7 +112,10 @@ class TablesMixin:
         table._context_uris = list(context_uris) if context_uris else None
         table._model_rows = rows
         table._liked_map = {i: (bool(liked_bools[i]) if liked_bools and i < len(liked_bools) else False) for i in range(len(rows))}
-        table.border_title = self._content_title(title)
+        # The borderless table borrows #right's frame (single clean border, no
+        # grey bleed): #right shows the title and drops its padding.
+        self.right_panel.add_class("table-view")
+        self.right_panel.border_title = self._content_title(title)
         right.mount(table)
         table.focus()
         self.level = self.LVL_VIEW

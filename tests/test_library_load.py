@@ -295,10 +295,9 @@ async def test_partial_on_error_keeps_rows():
 
 
 def right_text_title(app):
-    # The content table's title now rides in its integrated border title.
-    from textual.widgets import DataTable
+    # The content view's title rides on #right's frame (border title).
     try:
-        return str(app.query_one("#tracks_table", DataTable).border_title or "")
+        return str(app.right_panel.border_title or "")
     except Exception:
         return ""
 

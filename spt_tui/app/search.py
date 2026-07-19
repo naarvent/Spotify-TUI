@@ -597,7 +597,10 @@ class SearchMixin:
             table.row_to_type[i] = r.get("type")
             table.row_to_obj[i] = r.get("raw")
         table._model_rows = rows
-        table.border_title = self._content_title(title)
+        # The borderless table borrows #right's frame (single clean border, no
+        # grey bleed); #right shows the title and drops its padding.
+        self.right_panel.add_class("table-view")
+        self.right_panel.border_title = self._content_title(title)
         if not reused:
             right.mount(table)
         table.focus()
