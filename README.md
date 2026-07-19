@@ -14,6 +14,8 @@ suite, but APIs and behaviour may still change before `1.0`.
 
 ---
 
+<img width="1919" height="1199" alt="imagen" src="https://github.com/user-attachments/assets/35ab7ab0-43a7-43f3-b8b6-056d45521255" />
+
 ## Features
 
 - **Search** across tracks, artists, albums, playlists, podcasts and episodes.
