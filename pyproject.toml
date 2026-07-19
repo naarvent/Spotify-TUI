@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "Spotify-TUI"
-version = "0.1.0"
+version = "0.2.0"
 description = "A Spotify client for your terminal, built with Textual."
 readme = "README.md"
 requires-python = ">=3.9"
