@@ -361,6 +361,34 @@ async def test_fast_A_then_B_stale_dropped():
         check("exactly one grid (A did not stack a second)", len(app.query("#search_grid")) == 1)
 
 
+async def test_search_from_within_view_shows_feedback():
+    """Searching again while a grid is already showing keeps the results up but
+    shows a 'Searching…' indicator on the frame (there used to be no feedback)."""
+    fake = GridFake()
+    app = TApp(fake)
+    async with app.run_test(size=(140, 40)) as pilot:
+        await pilot.pause(); pause_intervals(app)
+        await do_search(app, pilot, "kendrick")
+        check("no searching indicator once results are up",
+              str(app.right_panel.border_title or "") == "", f"bt={app.right_panel.border_title!r}")
+        # second search, gated so we can observe the in-progress state
+        fake.gate = threading.Event(); fake.entered = threading.Event()
+        app._dispatch_search("joji")
+        await poll(lambda: fake.entered.is_set(), timeout=5.0)
+        await pilot.pause()
+        check("results stay visible while the new search runs", has_grid(app))
+        check("frame shows a 'Searching' indicator during the search",
+              "Searching" in str(app.right_panel.border_title or "")
+              and "joji" in str(app.right_panel.border_title or ""),
+              f"bt={app.right_panel.border_title!r}")
+        fake.gate.set()
+        await poll(lambda: gp(app, "songs") is not None and any(
+            str(i).startswith("joji") for i in getattr(gp(app, "songs"), "row_to_id", {}).values()), timeout=5.0)
+        await pump(pilot, 6)
+        check("indicator clears once the new results render",
+              str(app.right_panel.border_title or "") == "", f"bt={app.right_panel.border_title!r}")
+
+
 async def test_no_hscroll_nowplaying_visible():
     fake = GridFake({"track": 20, "album": 20, "artist": 20, "playlist": 20})
     app = TApp(fake)
@@ -412,6 +440,7 @@ ALL = [test_grid_four_panels_and_counts, test_initial_focus_first_nonempty_when_
        test_enter_routing_per_panel, test_songs_hearts_and_favourite_toggle,
        test_prefix_keeps_single_table_not_grid, test_escape_clears_grid_to_welcome,
        test_ctrl_r_repeats_search_no_duplicate_ids, test_fast_A_then_B_stale_dropped,
+       test_search_from_within_view_shows_feedback,
        test_no_hscroll_nowplaying_visible, test_resize_reflows_and_preserves_state]
 
 async def main():

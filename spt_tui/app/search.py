@@ -76,7 +76,14 @@ class SearchMixin:
             # _searching_token, so mark this search active right after either way.
             reusable = (len(self.query("#search_grid")) > 0
                         or len(self.query("#search_table")) > 0)
-            if not reusable:
+            if reusable:
+                # Keep the current results mounted (clearing would race the
+                # re-fill and blank the grid) but show a searching indicator on
+                # the frame, so a search started from within a results view still
+                # gives immediate visual feedback.
+                try: self.right_panel.border_title = f"Searching: {raw} …"
+                except Exception: pass
+            else:
                 self._clear_right().update(f"[b]Searching for:[/b] {rich_escape(raw)}")
             self._searching_token = token
         except Exception:
@@ -89,9 +96,13 @@ class SearchMixin:
                     or getattr(self, "_search_rendered_token", None) == token):
                 return
             try:
-                self.right_panel.update(
-                    f"[b]Searching for:[/b] {rich_escape(raw)}\n"
-                    f"[dim]This is taking longer than expected…[/dim]")
+                if (len(self.query("#search_grid")) > 0
+                        or len(self.query("#search_table")) > 0):
+                    self.right_panel.border_title = f"Searching: {raw} (taking longer) …"
+                else:
+                    self.right_panel.update(
+                        f"[b]Searching for:[/b] {rich_escape(raw)}\n"
+                        f"[dim]This is taking longer than expected…[/dim]")
             except Exception:
                 pass
         try:
@@ -805,6 +816,9 @@ class SearchMixin:
         self.level = self.LVL_VIEW
         # Fresh results begin at the panel-selection level, not inside the rows.
         self._grid_mode = "select"
+        # Results are up: clear any 'Searching…' indicator on the frame.
+        try: self.right_panel.border_title = ""
+        except Exception: pass
 
         # Focus and the liked lookup must wait until the freshly-mounted panels
         # are actually in the tree (a just-mounted widget can't take focus, and
