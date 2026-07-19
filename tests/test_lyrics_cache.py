@@ -283,8 +283,43 @@ def test_ctrlr_forces_retry_over_negative_cache():
         config.CACHE_DIR = old; shutil.rmtree(tmp, ignore_errors=True)
 
 
+def test_cache_bounded_by_count():
+    def body(tmp):
+        app = make_app(); app._lyrics_cache_data = {}
+        app._LYRICS_CACHE_MAX = 10
+        # Insert more than the cap; oldest (lowest ts) must be evicted.
+        for i in range(25):
+            app._lyrics_cache_data[f"k{i}"] = {"status": "found", "lines": [[1, "x"]], "ts": i}
+        app._lyrics_cache_save()
+        c = app._lyrics_cache_data
+        check("cache never exceeds the entry cap", len(c) <= 10, f"n={len(c)}")
+        check("oldest entries evicted, newest kept", "k24" in c and "k0" not in c, f"keys={sorted(c)[:5]}")
+        on_disk = json.load(open(os.path.join(tmp, "lyrics_cache.json"), encoding="utf-8"))
+        check("on-disk cache also bounded", len(on_disk) <= 10, f"n={len(on_disk)}")
+    with_tmp_cache(body)
+
+
+def test_cache_bounded_by_bytes():
+    def body(tmp):
+        app = make_app(); app._lyrics_cache_data = {}
+        app._LYRICS_CACHE_MAX = 100000            # let the byte cap be the binding limit
+        app._LYRICS_CACHE_MAX_BYTES = 50 * 1024   # 50 KiB
+        big = "L" * 4000                            # ~4 KB of "lyrics" per entry
+        for i in range(100):
+            app._lyrics_cache_data[f"k{i}"] = {"status": "found", "lines": [[1, big]], "ts": i}
+        app._lyrics_cache_save()
+        p = os.path.join(tmp, "lyrics_cache.json")
+        size = os.path.getsize(p)
+        check("cache file stays within the byte cap (with slack)", size <= 60 * 1024, f"size={size}")
+        c = app._lyrics_cache_data
+        check("byte cap dropped the oldest entries", "k99" in c and "k0" not in c, f"n={len(c)}")
+        check("cache not emptied entirely", len(c) >= 1, f"n={len(c)}")
+    with_tmp_cache(body)
+
+
 PURE = [test_cache_found_roundtrip, test_cache_notfound_ttl, test_cache_error_never_stored,
-        test_cache_key_duration_bucket, test_corrupt_json_recovers]
+        test_cache_key_duration_bucket, test_corrupt_json_recovers,
+        test_cache_bounded_by_count, test_cache_bounded_by_bytes]
 UI = [test_immediate_metadata_on_change, test_fast_switch_only_c_and_late_discarded,
       test_notfound_keeps_metadata, test_cache_hit_no_second_network,
       test_ctrlr_forces_retry_over_negative_cache]

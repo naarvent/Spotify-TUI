@@ -190,6 +190,7 @@ class LyricsMixin:
     # Lyrics cache (in-memory + best-effort JSON persistence)
     # ------------------------------------------------------------------ #
     _LYRICS_CACHE_MAX = 500
+    _LYRICS_CACHE_MAX_BYTES = 2 * 1024 * 1024   # hard 2 MiB cap on the file
     _LYRICS_NEG_TTL = 24 * 3600      # re-try a 'not found' after a day
 
     def _lyrics_cache_path(self) -> str:
@@ -218,10 +219,7 @@ class LyricsMixin:
     def _lyrics_cache_save(self):
         try:
             c = getattr(self, "_lyrics_cache_data", None) or {}
-            if len(c) > self._LYRICS_CACHE_MAX:
-                oldest = sorted(c.items(), key=lambda kv: (kv[1] or {}).get("ts", 0))
-                for k, _ in oldest[: len(c) - self._LYRICS_CACHE_MAX]:
-                    c.pop(k, None)
+            self._lyrics_cache_trim(c)
             p = self._lyrics_cache_path()
             tmp = f"{p}.{os.getpid()}.tmp"
             with open(tmp, "w", encoding="utf-8") as f:
@@ -229,6 +227,31 @@ class LyricsMixin:
             os.replace(tmp, p)       # atomic swap; no half-written file
         except OSError:
             logger.exception("lyrics cache save failed")
+
+    def _lyrics_cache_trim(self, c: dict) -> None:
+        """Bound the cache so it can never grow without end: evict the oldest
+        entries (by timestamp) until it is within BOTH the entry-count cap and
+        the on-disk byte cap. Mutates c in place."""
+        def _ts(kv):
+            return (kv[1] or {}).get("ts", 0) if isinstance(kv[1], dict) else 0
+
+        # 1) entry-count cap
+        if len(c) > self._LYRICS_CACHE_MAX:
+            for k, _ in sorted(c.items(), key=_ts)[: len(c) - self._LYRICS_CACHE_MAX]:
+                c.pop(k, None)
+
+        # 2) byte cap on the serialised file — drop oldest until it fits (an
+        # over-estimate of the freed size is fine; it only trims a little extra).
+        def _blen(obj):
+            return len(json.dumps(obj, ensure_ascii=False).encode("utf-8"))
+
+        total = _blen(c)
+        if total > self._LYRICS_CACHE_MAX_BYTES:
+            for k, v in sorted(c.items(), key=_ts):
+                if total <= self._LYRICS_CACHE_MAX_BYTES or len(c) <= 1:
+                    break
+                total -= _blen({k: v})
+                c.pop(k, None)
 
     def _lyrics_cache_key(self, track_id, title, artist, duration_ms, album) -> str:
         if track_id:
