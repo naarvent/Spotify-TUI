@@ -95,33 +95,37 @@ class LibraryMixin:
         except Exception:
             logger.exception('action_prompt_create_playlist failed')
 
-    def action_prompt_seek_settings(self) -> None:
+    def action_prompt_settings(self) -> None:
         try:
-            self._new_view_token('seek_settings', '')
+            self._new_view_token('settings', '')
             right = self._clear_right()
             cur_vol_down = int((config.LOCAL_CFG.get('seek_volume_down') if isinstance(config.LOCAL_CFG, dict) else None) or 5)
             cur_vol_up = int((config.LOCAL_CFG.get('seek_volume_up') if isinstance(config.LOCAL_CFG, dict) else None) or 5)
             cur_track = int((config.LOCAL_CFG.get('seek_seconds_track') if isinstance(config.LOCAL_CFG, dict) else None) or 5)
             cur_episode = int((config.LOCAL_CFG.get('seek_seconds_episode') if isinstance(config.LOCAL_CFG, dict) else None) or 15)
-            right.mount(Static('[b]Configure volume steps and seek jump times[/b]\nEnter values (numbers). Press Enter or use Up/Down arrows to move between fields.'))
-            right.mount(Static(f'Current: Vol Down = {cur_vol_down}%, Vol Up = {cur_vol_up}%, Tracks = {cur_track}s, Episodes = {cur_episode}s'))
+            cur_cache_bytes = int((config.LOCAL_CFG.get('lyrics_cache_max_bytes') if isinstance(config.LOCAL_CFG, dict) else None) or config.LYRICS_CACHE_DEFAULT_BYTES)
+            cur_cache_h = config.format_size(cur_cache_bytes)
+            right.mount(Static('[b]Settings[/b]\nConfigure volume steps, seek jump times and the lyrics cache size.\nEnter values and press Enter (or use Up/Down arrows) to move between fields.'))
+            right.mount(Static(f'Current: Vol Down = {cur_vol_down}%, Vol Up = {cur_vol_up}%, Tracks = {cur_track}s, Episodes = {cur_episode}s, Lyrics cache = {cur_cache_h}'))
             try:
-                right.mount(Static('[dim]Press ESC to go back[/dim]'))
+                right.mount(Static('[dim]Lyrics cache accepts sizes like "200 MB", "500 MB", "1 GB" or "2 GB". Press ESC to go back.[/dim]'))
             except Exception:
                 pass
             self.seek_vol_down_input = Input(placeholder=f'Volume Down step percent (current {cur_vol_down})', id='seek_vol_down_input')
             self.seek_vol_up_input = Input(placeholder=f'Volume Up step percent (current {cur_vol_up})', id='seek_vol_up_input')
             self.seek_track_input = Input(placeholder=f'Track jump seconds (current {cur_track})', id='seek_track_input')
             self.seek_episode_input = Input(placeholder=f'Episode jump seconds (current {cur_episode})', id='seek_episode_input')
+            self.lyrics_cache_input = Input(placeholder=f'Lyrics cache max size, e.g. 200 MB or 1 GB (current {cur_cache_h})', id='lyrics_cache_input')
             right.mount(self.seek_vol_down_input)
             right.mount(self.seek_vol_up_input)
             right.mount(self.seek_track_input)
             right.mount(self.seek_episode_input)
+            right.mount(self.lyrics_cache_input)
             self.seek_vol_down_input.focus()
             self.level = self.LVL_VIEW
             return
         except Exception:
-            logger.exception('action_prompt_seek_settings failed')
+            logger.exception('action_prompt_settings failed')
 
     def _open_library_item(self, name: str) -> bool:
         """Single source of truth for opening a Library list item, so keyboard

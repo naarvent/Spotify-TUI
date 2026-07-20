@@ -127,7 +127,7 @@ class NavigationMixin:
         try:
             focused = getattr(self, 'focused', None)
             rv = getattr(self, '_right_view', None)
-            if isinstance(focused, Input) and rv and isinstance(rv, (tuple, list)) and len(rv) >= 1 and rv[0] == 'seek_settings':
+            if isinstance(focused, Input) and rv and isinstance(rv, (tuple, list)) and len(rv) >= 1 and rv[0] == 'settings':
                 return
             self._focus_section_by_idx((self.section_idx - 1) % len(self.section_order))
         except Exception:
@@ -137,7 +137,7 @@ class NavigationMixin:
         try:
             focused = getattr(self, 'focused', None)
             rv = getattr(self, '_right_view', None)
-            if isinstance(focused, Input) and rv and isinstance(rv, (tuple, list)) and len(rv) >= 1 and rv[0] == 'seek_settings':
+            if isinstance(focused, Input) and rv and isinstance(rv, (tuple, list)) and len(rv) >= 1 and rv[0] == 'settings':
                 return
             self._focus_section_by_idx((self.section_idx + 1) % len(self.section_order))
         except Exception:
@@ -192,11 +192,11 @@ class NavigationMixin:
 
             try:
                 rv = getattr(self, '_right_view', None)
-                if isinstance(focused, Input) and rv and isinstance(rv, (tuple, list)) and len(rv) >= 1 and rv[0] == 'seek_settings':
+                if isinstance(focused, Input) and rv and isinstance(rv, (tuple, list)) and len(rv) >= 1 and rv[0] == 'settings':
                     key = getattr(event, 'key', None)
                     inputs = []
                     try:
-                        inputs = [getattr(self, 'seek_vol_down_input', None), getattr(self, 'seek_vol_up_input', None), getattr(self, 'seek_track_input', None), getattr(self, 'seek_episode_input', None)]
+                        inputs = [getattr(self, 'seek_vol_down_input', None), getattr(self, 'seek_vol_up_input', None), getattr(self, 'seek_track_input', None), getattr(self, 'seek_episode_input', None), getattr(self, 'lyrics_cache_input', None)]
                         inputs = [i for i in inputs if i is not None]
                     except Exception:
                         inputs = []
@@ -252,7 +252,7 @@ class NavigationMixin:
                         left_col = self.query_one('#left_col')
                         try:
                             rv = getattr(self, '_right_view', None)
-                            if left_col and _is_within(focused, 'left_col') and rv and isinstance(rv, (tuple, list)) and len(rv) >= 1 and rv[0] == 'seek_settings':
+                            if left_col and _is_within(focused, 'left_col') and rv and isinstance(rv, (tuple, list)) and len(rv) >= 1 and rv[0] == 'settings':
                                 rp = getattr(self, 'right_panel', None)
                                 if rp:
                                     # focus first Input child
@@ -309,7 +309,7 @@ class NavigationMixin:
                                     except Exception: self._last_right_focus = None
                             try:
                                 rv = getattr(self, '_right_view', None)
-                                if rv and isinstance(rv, (tuple, list)) and len(rv) >= 1 and rv[0] == 'seek_settings':
+                                if rv and isinstance(rv, (tuple, list)) and len(rv) >= 1 and rv[0] == 'settings':
                                     rp = getattr(self, 'right_panel', None)
                                     if rp:
                                         for ch in rp.children:

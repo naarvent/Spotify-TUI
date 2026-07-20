@@ -58,6 +58,15 @@ class CoreMixin:
         self._lyrics_track_id: Optional[str] = None
         self.lyrics_box: Optional[Static] = None
 
+        # Honour a persisted lyrics-cache size cap (bytes) if the user set one;
+        # otherwise the class default (_LYRICS_CACHE_MAX_BYTES) stands.
+        try:
+            _cap = config.LOCAL_CFG.get('lyrics_cache_max_bytes') if isinstance(config.LOCAL_CFG, dict) else None
+            if isinstance(_cap, int) and _cap > 0:
+                self._LYRICS_CACHE_MAX_BYTES = _cap
+        except Exception:
+            pass
+
         self._now_interval = None
         self._now_sync_interval = None
         self._now_tick_interval = None
@@ -603,37 +612,30 @@ class CoreMixin:
                 self._create_playlist_state = None
                 return
 
-            # Seek/volume settings wizard — four numeric fields, same parse+save.
+            # Settings wizard — four numeric seek/volume fields followed by the
+            # human-readable lyrics-cache size field. The numeric fields share one
+            # parse+save; the size field parses MB/GB and finalises the wizard.
             _seek_fields = [
                 ('seek_vol_down_input', 'seek_volume_down', 'volume down percent', 'seek_vol_up_input'),
                 ('seek_vol_up_input', 'seek_volume_up', 'volume up percent', 'seek_track_input'),
                 ('seek_track_input', 'seek_seconds_track', 'track jump seconds', 'seek_episode_input'),
-                ('seek_episode_input', 'seek_seconds_episode', 'episode jump seconds', None),
+                ('seek_episode_input', 'seek_seconds_episode', 'episode jump seconds', 'lyrics_cache_input'),
             ]
             for attr, cfg_key, label, next_attr in _seek_fields:
                 if getattr(self, attr, None) is not event.input:
                     continue
                 if not self._save_seek_setting(event.value or "", cfg_key, label):
                     return
-                if next_attr is not None:
-                    nxt = getattr(self, next_attr, None)
-                    if nxt is not None:
-                        try: nxt.focus()
-                        except Exception: pass
-                    return
-                # Last field: tidy up the inputs and bounce back to the menu.
-                for a, _k, _l, _n in _seek_fields:
-                    try: delattr(self, a)
+                nxt = getattr(self, next_attr, None) if next_attr else None
+                if nxt is not None:
+                    try: nxt.focus()
                     except Exception: pass
-                self._clear_right().update('[b]Settings saved![/b]')
+                return
 
-                def _return():
-                    try:
-                        time.sleep(1)
-                        self.call_from_thread(lambda: (self._clear_right().update(WELCOME), setattr(self, 'level', self.LVL_SECTIONS), self._focus_section_by_idx(0)))
-                    except Exception:
-                        pass
-                threading.Thread(target=_return, daemon=True).start()
+            if getattr(self, 'lyrics_cache_input', None) is event.input:
+                if not self._save_lyrics_cache_setting(event.value or ""):
+                    return
+                self._finish_settings()
                 return
 
             if getattr(self, 'confirm_delete_input', None) is event.input:
@@ -852,6 +854,56 @@ class CoreMixin:
         except Exception:
             logger.exception('Could not save %s', cfg_key)
         return True
+
+    def _save_lyrics_cache_setting(self, value: str) -> bool:
+        """Parse a human-readable lyrics-cache size ('200 MB', '1 GB') into bytes,
+        validate the range, persist it and apply it to the live cap. Shows a clear
+        error and returns False on invalid or out-of-range input."""
+        parsed = config.parse_size(value)
+        if parsed is None:
+            try:
+                self.right_panel.update('[b]Invalid size for lyrics cache.[/b] Use a number with an explicit unit, e.g. 200 MB or 1 GB.')
+            except Exception:
+                pass
+            return False
+        if parsed < config.LYRICS_CACHE_MIN_BYTES or parsed > config.LYRICS_CACHE_MAX_BYTES_LIMIT:
+            lo = config.format_size(config.LYRICS_CACHE_MIN_BYTES)
+            hi = config.format_size(config.LYRICS_CACHE_MAX_BYTES_LIMIT)
+            try:
+                self.right_panel.update(f'[b]Lyrics cache size out of range.[/b] Enter a value between {lo} and {hi}.')
+            except Exception:
+                pass
+            return False
+        try:
+            if not isinstance(config.LOCAL_CFG, dict):
+                config.LOCAL_CFG = {}
+            config.LOCAL_CFG['lyrics_cache_max_bytes'] = parsed
+            config.save_local_config(config.LOCAL_CFG)
+        except Exception:
+            logger.exception('Could not save lyrics_cache_max_bytes')
+        # Apply immediately so the running session honours the new cap without a
+        # restart (the persisted value is re-applied at startup in __init__).
+        try:
+            self._LYRICS_CACHE_MAX_BYTES = parsed
+        except Exception:
+            pass
+        return True
+
+    def _finish_settings(self) -> None:
+        """Tear down the settings-wizard inputs and bounce back to the menu."""
+        for a in ('seek_vol_down_input', 'seek_vol_up_input', 'seek_track_input',
+                  'seek_episode_input', 'lyrics_cache_input'):
+            try: delattr(self, a)
+            except Exception: pass
+        self._clear_right().update('[b]Settings saved![/b]')
+
+        def _return():
+            try:
+                time.sleep(1)
+                self.call_from_thread(lambda: (self._clear_right().update(WELCOME), setattr(self, 'level', self.LVL_SECTIONS), self._focus_section_by_idx(0)))
+            except Exception:
+                pass
+        threading.Thread(target=_return, daemon=True).start()
 
     def on_input_changed(self, event: Input.Changed) -> None:
         if event.input is self.search_input:

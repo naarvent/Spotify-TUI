@@ -9,6 +9,7 @@ CLIENT_ID`` for the mutable values or you will capture a stale copy.
 from __future__ import annotations
 
 import os
+import re
 import json
 import logging
 from logging.handlers import RotatingFileHandler
@@ -78,6 +79,59 @@ def save_local_config(cfg: dict) -> None:
 
 LOCAL_CFG = load_local_config()
 CONFIG_LOADED = bool(LOCAL_CFG)
+
+# --------------------------------------------------------------------------- #
+# Human-readable size parsing (lyrics cache size cap)
+#
+# The app stores the cap internally as a plain byte count (matching the existing
+# ``_LYRICS_CACHE_MAX_BYTES`` field), so the user-facing setting is parsed into
+# bytes on save and formatted back to a human-readable string on display. Units
+# are binary (1 MB = 1024*1024 bytes) to stay consistent with the current
+# byte-based cap. An explicit MB/GB suffix is REQUIRED — a bare number is
+# rejected so the unit is never ambiguous.
+# --------------------------------------------------------------------------- #
+_SIZE_UNITS = {"MB": 1024 * 1024, "GB": 1024 * 1024 * 1024}
+_SIZE_RE = re.compile(r"^\s*(\d+(?:\.\d+)?)\s*([A-Za-z]+)\s*$")
+
+LYRICS_CACHE_DEFAULT_BYTES = 2 * 1024 * 1024              # matches the in-app default
+LYRICS_CACHE_MIN_BYTES = 1 * 1024 * 1024                  # 1 MB floor
+LYRICS_CACHE_MAX_BYTES_LIMIT = 8 * 1024 * 1024 * 1024     # 8 GB ceiling
+
+def parse_size(text: str) -> "int | None":
+    """Parse a human-readable size like ``'200 MB'`` or ``'1 GB'`` into a byte
+    count. Requires an explicit MB/GB suffix (case-insensitive); a bare number,
+    an unsupported unit, a non-positive value or any other malformed input
+    returns ``None``."""
+    if not isinstance(text, str):
+        return None
+    m = _SIZE_RE.match(text)
+    if not m:
+        return None
+    value, unit = m.group(1), m.group(2).upper()
+    mult = _SIZE_UNITS.get(unit)
+    if mult is None:
+        return None
+    try:
+        n = float(value)
+    except (TypeError, ValueError):
+        return None
+    if n <= 0:
+        return None
+    return int(round(n * mult))
+
+def format_size(num_bytes: int) -> str:
+    """Format a byte count back into a human-readable ``'N MB'`` / ``'N GB'``
+    string, always with an explicit unit. Uses GB once the value is at least
+    1 GB, MB otherwise; drops a trailing ``.0`` for whole numbers."""
+    try:
+        n = int(num_bytes)
+    except (TypeError, ValueError):
+        n = 0
+    gb = n / (1024 * 1024 * 1024)
+    if gb >= 1:
+        return (f"{gb:.0f} GB" if gb == int(gb) else f"{gb:.1f} GB")
+    mb = n / (1024 * 1024)
+    return (f"{mb:.0f} MB" if mb == int(mb) else f"{mb:.1f} MB")
 
 # --------------------------------------------------------------------------- #
 # Spotify credentials (env vars take precedence over the local config file)

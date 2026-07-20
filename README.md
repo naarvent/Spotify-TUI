@@ -43,7 +43,7 @@ Search Spotify, browse your library and playlists, control playback, follow sync
 - **Unified saved-state indicators** using consistent heart symbols throughout the application.
 - **Playback control** with play, pause, next, previous, seek, volume, mute, repeat and shuffle.
 - **Synced lyrics** with current-line highlighting, background loading and persistent caching.
-- **Bounded lyrics cache** with automatic pruning by entry count and total file size.
+- **Bounded lyrics cache** with automatic pruning by entry count and a configurable total-size cap (set in Settings using human-readable sizes such as `200 MB` or `1 GB`).
 - **Queue** for viewing the current queue and adding selected tracks.
 - **Devices** for listing Spotify devices and transferring playback.
 - **Responsive tables** with automatic column sizing and no manual mouse-driven column resizing.
@@ -334,7 +334,7 @@ The search dashboard has two navigation levels.
 | `-` / `+` | Volume down or up |
 | `m` | Mute or unmute |
 | `Ctrl+Left` / `Ctrl+Right` | Seek backward or forward |
-| `<` | Open seek and volume settings |
+| `<` | Open settings (volume steps, seek jump times, lyrics cache size) |
 
 ### Library, Queue and Tools
 

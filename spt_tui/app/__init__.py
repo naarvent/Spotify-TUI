@@ -107,7 +107,7 @@ class SptPy(
         ("m", "toggle_mute", "Mute"),
         ("ctrl+left", "seek_back", "- s"),
         ("ctrl+right", "seek_fwd", "+ s"),
-        ("<", "prompt_seek_settings", "Seek Settings"),
+        ("<", "prompt_settings", "Settings"),
         ("d", "manage_devices", "Devices"),
         ("?", "help", "Help"),
         ("f1", "help", "Help"),
