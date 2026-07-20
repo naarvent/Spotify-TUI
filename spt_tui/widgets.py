@@ -3,7 +3,23 @@
 from __future__ import annotations
 
 from textual.containers import VerticalScroll
-from textual.widgets import DataTable
+from textual.widgets import DataTable, Static
+
+
+class ContentPanel(Static):
+    """The right-hand content panel.
+
+    It reports its own resize so the visible table can re-fit its columns to the
+    real panel width. App.on_resize is too early for that: while it runs, the
+    panel's content_size still holds its pre-resize value, so a fit done there
+    sizes the columns to the old width.
+    """
+
+    def on_resize(self, event) -> None:
+        try:
+            self.app._recompute_all_table_widths()
+        except Exception:
+            pass
 
 
 class SearchPanel(DataTable):
@@ -21,6 +37,15 @@ class SearchPanel(DataTable):
     * "content" mode: you're inside a panel's rows. Up/Down move the row cursor
       (DataTable's own bindings); Left OR Right step back out to panel selection;
       Enter / f / Escape bubble to the app (play/open, favourite, menu)."""
+
+    def on_resize(self, event) -> None:
+        # Same reason as ContentPanel: the panel's real width is only readable
+        # once it has been laid out, so it re-fits its own columns here rather
+        # than from the app's resize handler.
+        try:
+            self.app._refit_grid_panel(self)
+        except Exception:
+            pass
 
     _SELECT_NAV = {
         "left": "left", "right": "right", "up": "up", "down": "down",

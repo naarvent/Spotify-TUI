@@ -8,6 +8,7 @@ from typing import Dict, List, Optional
 
 from textual.widgets import DataTable
 from textual.css.query import NoMatches
+from textual.coordinate import Coordinate
 from rich.markup import escape as rich_escape
 from rich.text import Text
 
@@ -27,16 +28,16 @@ class TablesMixin:
     # Colour used to mark the row that is currently playing.
     PLAYING_STYLE = "bold #b388ff"
 
-    # Column profiles for tracks tables: (labels, fixed_widths, weights, fields).
-    # Title carries the highest weight so it takes the most of the free space;
-    # Artist and Album share the rest. Heart, Duration and Added stay compact.
+    # Column profiles for tracks tables: (labels, fields). Widths come from the
+    # field catalogue below, so the same column means the same thing in every
+    # table and the fitter can reason about it by name.
     _TRACKS_PROFILES = {
         "playlist": (["♥", "Title", "Artist", "Album", "Duration", "Added"],
-                     {0: 3, 4: 9, 5: 12}, {1: 1.4}, ["heart", "title", "artist", "album", "dur", "added"]),
+                     ["heart", "title", "artist", "album", "dur", "added"]),
         "recent":   (["♥", "Title", "Artist", "Album", "Duration", "Played"],
-                     {0: 3, 4: 9, 5: 12}, {1: 1.4}, ["heart", "title", "artist", "album", "dur", "added"]),
+                     ["heart", "title", "artist", "album", "dur", "added"]),
         "album":    (["♥", "Title", "Artist", "Duration"],
-                     {0: 3, 3: 9}, {1: 1.4}, ["heart", "title", "artist", "dur"]),
+                     ["heart", "title", "artist", "dur"]),
     }
 
     def _track_cells(self, r: Dict, liked: bool, playing: bool, fields):
@@ -84,21 +85,24 @@ class TablesMixin:
         """Update the content view's title, shown on #right's frame (streaming
         progress). No-op if the given content table is not the one on screen."""
         try:
-            if len(self.query(f"#{table_id}")) > 0:
-                self.right_panel.border_title = self._content_title(title)
+            tables = self.query(f"#{table_id}")
+            if len(tables) > 0:
+                table = tables.first()
+                table._view_title = title
+                self._refresh_table_title(table)
         except Exception:
             pass
 
     def _render_tracks_table(self, title: str, rows: List[Dict], liked_bools: Optional[List[bool]] = None, *, context_uri: Optional[str] = None, context_uris: Optional[List[str]] = None, profile: str = "playlist"):
         right = self._clear_right()
-        col_labels, fixed_widths, weights, fields = self._TRACKS_PROFILES.get(
+        col_labels, fields = self._TRACKS_PROFILES.get(
             profile, self._TRACKS_PROFILES["playlist"])
-        max_widths = {i: self._FLEX_MAX[f] for i, f in enumerate(fields) if f in self._FLEX_MAX}
         table = self._create_table_with_full_width(
-            col_labels, fixed_widths=fixed_widths, widget_id="tracks_table", weights=weights, max_widths=max_widths,
+            col_labels, fields, widget_id="tracks_table", fields_attr="_track_fields",
         )
         table._col_heart = 0
-        table._track_fields = fields
+        # The heart never gets dropped, so the surviving set still starts with it.
+        fields = getattr(table, "_track_fields", fields)
         table.row_to_uri = {}; table.row_to_title = {}; table.row_to_id = {}
         playing_id = getattr(self, "_now_internal_track_id", None)
         for i, r in enumerate(rows):
@@ -115,11 +119,60 @@ class TablesMixin:
         # The borderless table borrows #right's frame (single clean border, no
         # grey bleed): #right shows the title and drops its padding.
         self.right_panel.add_class("table-view")
-        self.right_panel.border_title = self._content_title(title)
+        table._view_title = title
+        self._refresh_table_title(table)
         right.mount(table)
         table.focus()
+        self._refit_after_mount(table)
         self.level = self.LVL_VIEW
         return table
+
+    def _append_track_rows(self, table: DataTable, new_rows: List[Dict]) -> None:
+        """Append a page of tracks to an already-rendered tracks table.
+
+        Progressive loaders call this once per fetched page. Going through
+        _repaint_rows_from_model instead would re-add every earlier row on each
+        page (O(n²) add_row calls on a long playlist) and clear/restore the
+        cursor each time; appending only touches the new rows.
+        """
+        if not new_rows:
+            return
+        for attr in ("row_to_uri", "row_to_title", "row_to_id"):
+            if not hasattr(table, attr):
+                setattr(table, attr, {})
+        liked_map = getattr(table, "_liked_map", None)
+        if liked_map is None:
+            liked_map = table._liked_map = {}
+        model = getattr(table, "_model_rows", None)
+        if model is None:
+            model = table._model_rows = []
+        start = len(model)
+        playing_id = getattr(self, "_now_internal_track_id", None)
+        fields = getattr(table, "_track_fields",
+                         ["heart", "title", "artist", "album", "dur", "added"])
+        for j, r in enumerate(new_rows):
+            i = start + j
+            liked = bool(liked_map.get(i, False))
+            playing = bool(r.get("id") and r.get("id") == playing_id)
+            try:
+                table.add_row(*self._track_cells(r, liked, playing, fields), key=i)
+            except Exception:
+                heart = Text("❤", style="bold red") if liked else Text("")
+                try:
+                    table.add_row(heart, r.get("title", ""), key=i)
+                except Exception:
+                    pass
+            table.row_to_uri[i] = r.get("uri")
+            table.row_to_title[i] = f"{r.get('title','')} {GLYPHS['sep']} {r.get('artist','')}"
+            if r.get("id"):
+                table.row_to_id[i] = r.get("id")
+            liked_map.setdefault(i, False)
+        model.extend(new_rows)
+        ctx = getattr(table, "_context_uris", None)
+        if ctx is not None:
+            ctx.extend(r.get("uri") for r in new_rows)
+        try: table.refresh()
+        except Exception: pass
 
     def _open_album_table(self, album_item: dict, push_stack: bool = True):
         try:
@@ -519,15 +572,31 @@ class TablesMixin:
             logger.exception('_revalidate_saved_column failed')
 
     def _set_heart_icon(self, table: DataTable, row_key, liked: bool):
+        """Repaint one row's heart in place.
+
+        Addressed by *coordinate*: `update_cell` takes a column **key**, and
+        this passed it the column index instead, so both the call and its
+        fallback raised and were swallowed — the function silently did nothing
+        and every in-place heart update (per-batch playlist hearts, the `f`
+        toggle, liked-column revalidation) left the row unchanged until some
+        later full repaint happened to fix it.
+        """
         if getattr(table, "id", "") == "search_table":
             return
         cell = Text("❤", style="bold red") if liked else Text("")
-        col = getattr(table, "_col_heart", 0)
+        col = int(getattr(table, "_col_heart", 0) or 0)
         try:
-            table.update_cell(row_key, col, cell)
+            row = table.get_row_index(row_key)
         except Exception:
-            try: table.update_cell(row_key, 0, cell)
-            except Exception: pass
+            # Rows are keyed by their position, so the key doubles as the index.
+            row = row_key if isinstance(row_key, int) else None
+        if row is None:
+            return
+        try:
+            table.update_cell_at(Coordinate(row, col), cell)
+        except Exception:
+            logger.debug("could not repaint the heart at row %s", row)
+            return
         try: table.refresh()
         except Exception: pass
 
@@ -603,6 +672,21 @@ class TablesMixin:
             self._restore_table_view(table, cur_coord, saved_y, len(rows))
             return
 
+        if getattr(table, "id", "") == "queue_table":
+            fields = getattr(table, "_queue_fields", None) or [
+                "num", "heart", "title", "artist", "album", "dur", "source"]
+            for i, r in enumerate(rows):
+                try:
+                    table.add_row(*self._queue_cells(r, i, fields), key=i)
+                except Exception:
+                    pass
+                table.row_to_uri[i] = r.get("uri")
+                table.row_to_title[i] = f"{r.get('title','')} {GLYPHS['sep']} {r.get('artist','')}"
+            try: table.refresh()
+            except Exception: pass
+            self._restore_table_view(table, cur_coord, saved_y, len(rows))
+            return
+
         if getattr(table, "_panel_key", None) == "songs":
             # Combined-search Songs panel: 2 columns (heart + "Title — Artist").
             # Kept in sync here so a favourite toggle / liked lookup repaints its
@@ -650,86 +734,169 @@ class TablesMixin:
         try: table.refresh()
         except Exception: pass
 
-    # Max width (by field name) for flexible columns, so Title/Artist/Album do
-    # not over-stretch on wide terminals — they get a considerable but bounded
-    # size and leave room for the rest.
-    _FLEX_MAX = {"title": 42, "artist": 28, "album": 26}
+    # --- Column catalogue -------------------------------------------------- #
+    # One definition per column, shared by every table (tracks, search, queue,
+    # devices), keyed by field name rather than by position.
 
-    def _column_widths(self, col_labels: list, fixed_widths: dict | None = None,
-                       weights: dict | None = None, max_widths: dict | None = None) -> list:
-        """Distribute the right panel's width across columns. Fixed columns take
-        their set width; the remainder is split among the flexible columns in
-        proportion to their weight (default 1.0), each clamped to an optional max
-        so Title can be wider than Artist/Album without over-stretching. The
-        rendered total (columns + the DataTable's per-column cell padding and its
-        border) never exceeds the content area, so no horizontal scrollbar appears
-        on reasonable sizes; leftover from capping stays unused (bounded width)."""
-        right = getattr(self, 'right_panel', None)
-        avail_w = 0
+    # Identity columns: their content has a known size, so they never stretch.
+    _FIXED_W = {"heart": 3, "saved": 3, "num": 3, "mark": 3, "type": 7,
+                "dur": 9, "added": 12, "device_type": 14}
+    # Everything else splits what is left. Title carries the most weight.
+    _FLEX_WEIGHT = {"title": 1.4}
+    _FLEX_DEFAULT_WEIGHT = 1.0
+    # Narrower than this a column shows nothing useful, so the fitter drops a
+    # column instead of squeezing them all.
+    _FLEX_MIN = {"title": 16, "artist": 12, "album": 12, "source": 12}
+    _FLEX_DEFAULT_MIN = 10
+    # Which columns may be dropped on a narrow terminal, least useful first.
+    # Anything absent here (heart, Title, Duration, Type) always survives.
+    _DROP_ORDER = ("source", "added", "album", "artist")
+
+    def _panel_width(self) -> int:
+        """Width available to a content table (the right panel's content area)."""
+        right = getattr(self, "right_panel", None)
+        w = 0
         if right is not None:
-            cs = getattr(right, 'content_size', None)
+            cs = getattr(right, "content_size", None)
             if cs is not None:
-                avail_w = int(getattr(cs, 'width', 0) or 0)
-            if not avail_w:
-                sz = getattr(right, 'size', None)
+                w = int(getattr(cs, "width", 0) or 0)
+            if not w:
+                sz = getattr(right, "size", None)
                 if sz is not None:
-                    avail_w = int(getattr(sz, 'width', 0) or 0)
-        if not avail_w:
+                    w = int(getattr(sz, "width", 0) or 0)
+        if not w:
             try:
-                avail_w = int(getattr(self, 'size').width or 80)
+                w = int(getattr(self, "size").width or 80)
             except Exception:
-                avail_w = 80
+                w = 80
+        return w
 
-        n = len(col_labels)
-        # A DataTable renders each column as width + 2*cell_padding (cell_padding
-        # defaults to 1), adds its own round border (2) and, once the row count
-        # overflows, a vertical scrollbar (~2). Reserve all of that so the set
-        # column widths always fit the visible area with no horizontal scrollbar.
-        overhead = 4 + 2 * n
-        avail = max(20, avail_w - overhead)
+    # Chrome around the columns: the round border (2) plus room for the vertical
+    # scrollbar (2), so a list growing past the viewport never pushes a
+    # horizontal one into view. The search-grid panels are borderless and pass
+    # their own value.
+    _CHROME = 4
+    _CHROME_BORDERLESS = 2
 
-        fixed = fixed_widths or {}
-        w = weights or {}
-        mx = max_widths or {}
-        fixed_total = sum(int(v) for v in fixed.values() if isinstance(v, int))
-        flexible_idxs = [i for i in range(n) if i not in fixed]
-        widths = [int(fixed[i]) if i in fixed else 0 for i in range(n)]
-        if flexible_idxs:
-            rem = max(0, avail - fixed_total)
-            total_weight = sum(float(w.get(i, 1.0)) for i in flexible_idxs) or 1.0
-            for i in flexible_idxs:
-                wd = max(6, int(rem * (float(w.get(i, 1.0)) / total_weight)))
-                cap = mx.get(i)
-                if cap is not None:
-                    wd = min(wd, int(cap))
-                widths[i] = wd
-            # Give rounding/uncapped leftover to the first flexible column up to
-            # its own cap; any remainder stays unused so wide terminals keep a
-            # bounded table instead of stretching Title/Artist/Album across the
-            # whole panel.
-            i0 = flexible_idxs[0]
-            leftover = avail - sum(widths)
-            if leftover > 0:
-                cap0 = mx.get(i0)
-                room = (int(cap0) - widths[i0]) if cap0 is not None else leftover
-                widths[i0] += max(0, min(leftover, room))
-            elif leftover < 0:
-                widths[i0] = max(6, widths[i0] + leftover)
+    def _fit_columns(self, fields: List[str], col_labels: List[str],
+                     panel_w: int | None = None, chrome: int | None = None):
+        """Fit a column set to the panel: drop what no longer fits, then hand
+        every remaining cell to the flexible columns.
+
+        Returns ``(kept_fields, kept_labels, widths)`` with
+        ``sum(widths) == panel_w - overhead``, so the table always reaches the
+        right edge — no gap, and never a horizontal scrollbar.
+        """
+        panel_w = int(panel_w if panel_w else self._panel_width())
+        chrome = self._CHROME if chrome is None else int(chrome)
+        keep = list(fields)
+        keep_labels = list(col_labels)
+        while True:
+            # A DataTable renders each column as width + 2*cell_padding
+            # (cell_padding defaults to 1), on top of the widget's own chrome.
+            avail = max(12, panel_w - (chrome + 2 * len(keep)))
+            fixed_total = sum(self._FIXED_W[f] for f in keep if f in self._FIXED_W)
+            flex = [f for f in keep if f not in self._FIXED_W]
+            rem = avail - fixed_total
+            need = sum(self._FLEX_MIN.get(f, self._FLEX_DEFAULT_MIN) for f in flex)
+            if flex and rem < need and len(keep) > 2:
+                drop = next((f for f in self._DROP_ORDER if f in keep), None)
+                if drop is not None:
+                    i = keep.index(drop)
+                    keep.pop(i); keep_labels.pop(i)
+                    continue
+            break
+        return keep, keep_labels, self._spread_widths(keep, flex, avail, rem)
+
+    def _spread_widths(self, keep: List[str], flex: List[str], avail: int, rem: int) -> List[int]:
+        """Give each flexible column its minimum, then split the rest by weight.
+        The rounding remainder goes to the heaviest column so the widths add up
+        to `avail` exactly."""
+        widths = [self._FIXED_W.get(f, 0) for f in keep]
+        if not flex:
+            return widths
+        rem = max(0, rem)
+        bases = [self._FLEX_MIN.get(f, self._FLEX_DEFAULT_MIN) for f in flex]
+        base_total = sum(bases)
+        if rem < base_total and base_total:
+            # Nothing left to drop and still no room (a terminal narrower than
+            # the app really supports): scale the minimums down. Overflowing
+            # would show a horizontal scrollbar, which is worse than a cramped
+            # column.
+            scale = rem / float(base_total)
+            bases = [max(1, int(b * scale)) for b in bases]
+            while sum(bases) > rem and max(bases) > 1:
+                bases[bases.index(max(bases))] -= 1
+            base_total = sum(bases)
+        extra = max(0, rem - base_total)
+        wts = [self._FLEX_WEIGHT.get(f, self._FLEX_DEFAULT_WEIGHT) for f in flex]
+        total_w = sum(wts) or 1.0
+        share = [int(extra * (wt / total_w)) for wt in wts]
+        share[wts.index(max(wts))] += extra - sum(share)
+        for f, b, s in zip(flex, bases, share):
+            widths[keep.index(f)] = b + s
         return widths
 
-    def _create_table_with_full_width(self, col_labels: list, fixed_widths: dict | None = None, widget_id: Optional[str] = None, weights: dict | None = None, max_widths: dict | None = None) -> DataTable:
+    def _hidden_columns_hint(self, table: DataTable) -> str:
+        """' +Album, Added' for the columns the narrow fit dropped, else ''.
+
+        Without it a column simply vanishes on a narrow terminal and there is no
+        way to tell it ever existed."""
+        spec = getattr(table, "_width_spec", None)
+        if not spec or len(spec) != 2:
+            return ""
+        col_labels, fields = spec
+        kept = set(getattr(table, "_fit_fields", []) or [])
+        hidden = [lbl for lbl, f in zip(col_labels, fields) if f not in kept]
+        return f"   (hidden: {', '.join(hidden)})" if hidden else ""
+
+    def _refresh_table_title(self, table: DataTable) -> None:
+        """Put the view's title on #right's frame, plus the hidden-column hint.
+        Re-run whenever the fit changes so the hint follows the terminal size."""
+        title = getattr(table, "_view_title", None)
+        if title is None:
+            return
         try:
-            widths = self._column_widths(col_labels, fixed_widths, weights, max_widths)
+            self.right_panel.border_title = (self._content_title(title)
+                                             + self._hidden_columns_hint(table))
+        except Exception:
+            logger.debug("refreshing the table title failed")
+
+    def _apply_columns(self, table: DataTable, keep_labels: List[str], widths: List[int]) -> None:
+        for lbl, wd in zip(keep_labels, widths):
+            try:
+                table.add_column(lbl, width=int(wd))
+            except Exception:
+                try: table.add_column(lbl)
+                except Exception: pass
+
+    def _refit_after_mount(self, table: DataTable) -> None:
+        """Re-fit a freshly mounted table once the layout has settled.
+
+        The right panel's content_size still holds its pre-mount value while the
+        table is being built (mounting it also drops the panel's padding), so the
+        first fit is a few cells short and would leave a gap on the right."""
+        try:
+            self.call_after_refresh(lambda: self._recompute_table_widths(table))
+        except Exception:
+            logger.exception("_refit_after_mount failed")
+
+    def _create_table_with_full_width(self, col_labels: list, fields: List[str],
+                                      widget_id: Optional[str] = None,
+                                      fields_attr: Optional[str] = None) -> DataTable:
+        try:
+            keep_fields, keep_labels, widths = self._fit_columns(fields, col_labels)
             table = DataTable(zebra_stripes=True, id=(widget_id or "table"))
             table.show_cursor = True; table.cursor_type = "row"
-            # Remember the profile so on_resize can recompute widths in place.
-            table._width_spec = (list(col_labels), dict(fixed_widths or {}), dict(weights or {}), dict(max_widths or {}))
-            for lbl, wd in zip(col_labels, widths):
-                try:
-                    table.add_column(lbl, width=int(wd))
-                except Exception:
-                    try: table.add_column(lbl)
-                    except Exception: pass
+            # Remember the *full* column set so a widening resize can bring a
+            # dropped column back without the caller being involved.
+            table._width_spec = (list(col_labels), list(fields))
+            table._fit_fields = list(keep_fields)
+            # Where the rendering code looks the surviving fields up.
+            table._fields_attr = fields_attr
+            if fields_attr:
+                setattr(table, fields_attr, list(keep_fields))
+            self._apply_columns(table, keep_labels, widths)
             return table
         except Exception:
             logger.exception("_create_table_with_full_width failed")
@@ -743,20 +910,24 @@ class TablesMixin:
                 raise
 
     def _recompute_table_widths(self, table) -> None:
-        """Recompute a table's column widths for the current panel size (on
-        resize) without rebuilding rows, preserving cursor and scroll. No-op if
-        the widths are unchanged."""
+        """Re-fit a table's columns to the current panel size (on resize),
+        preserving cursor and scroll. When the fit drops or restores a column the
+        header is rebuilt and the rows repainted from the model; otherwise only
+        the widths change. No-op if nothing changed."""
         spec = getattr(table, "_width_spec", None)
-        if not spec or len(spec) < 4:
+        if not spec or len(spec) != 2:
             return
-        col_labels, fixed, weights, max_widths = spec
+        col_labels, fields = spec
+        keep_fields, keep_labels, widths = self._fit_columns(fields, col_labels)
+        if list(keep_fields) != list(getattr(table, "_fit_fields", []) or []):
+            self._rebuild_columns(table, keep_fields, keep_labels, widths)
+            return
         try:
             cols = list(table.ordered_columns)
         except Exception:
             return
-        if len(cols) != len(col_labels):
+        if len(cols) != len(widths):
             return
-        widths = self._column_widths(col_labels, fixed, weights, max_widths)
         changed = False
         for col, wd in zip(cols, widths):
             try:
@@ -770,6 +941,43 @@ class TablesMixin:
             except Exception:
                 try: table.refresh()
                 except Exception: pass
+
+    def _recompute_all_table_widths(self) -> None:
+        """Re-fit every visible table (deferred resize handler, see on_resize)."""
+        try:
+            for t in self.query(DataTable):
+                self._recompute_table_widths(t)
+        except Exception:
+            logger.exception("table resize recompute failed")
+
+    def _rebuild_columns(self, table: DataTable, keep_fields: List[str],
+                         keep_labels: List[str], widths: List[int]) -> None:
+        """Swap a table's header for a different column set and repaint the rows.
+
+        clear(columns=True) drops rows and columns together, so the widget is
+        reused (no remount, no DuplicateIds). Cursor and scroll are captured
+        before the clear wipes them and restored after the repaint."""
+        try:
+            try:
+                cur_coord = getattr(table, "cursor_coordinate", None)
+            except Exception:
+                cur_coord = None
+            try:
+                saved_y = int(getattr(getattr(table, "scroll_offset", None), "y", 0) or 0)
+            except Exception:
+                saved_y = 0
+            table.clear(columns=True)
+            self._apply_columns(table, keep_labels, widths)
+            table._fit_fields = list(keep_fields)
+            attr = getattr(table, "_fields_attr", None)
+            if attr:
+                setattr(table, attr, list(keep_fields))
+            self._repaint_rows_from_model(table)
+            self._restore_table_view(table, cur_coord, saved_y,
+                                     len(getattr(table, "_model_rows", []) or []))
+            self._refresh_table_title(table)
+        except Exception:
+            logger.exception("_rebuild_columns failed")
 
     def _open_url_in_browser(self, url: str) -> bool:
         if not url:
@@ -861,9 +1069,9 @@ class TablesMixin:
             was_shuffle = bool(getattr(self, '_now_shuffle', False))
             idx = resolve_index(row_key)
 
-            def announce(msg):
+            def announce(msg, warn=False):
                 try:
-                    self.call_from_thread(lambda: self.right_panel.update(msg))
+                    self.call_from_thread(lambda: self._notify(msg, warn=warn))
                 except Exception:
                     pass
 
@@ -911,7 +1119,7 @@ class TablesMixin:
             threading.Thread(target=worker, daemon=True).start()
         except Exception as err:
             try:
-                self.right_panel.update(f"[b]Could not play:[/b] {rich_escape(str(err))}")
+                self._notify(f"[b]Could not play:[/b] {rich_escape(str(err, warn=True))}")
             except Exception:
                 pass
             logger.exception("_play_row failed")

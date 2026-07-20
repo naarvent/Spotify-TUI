@@ -26,7 +26,7 @@ from .. import config
 from ..config import logger, LOG_PATH
 from ..constants import WELCOME, WELCOME_SPOTIFY_ART, WELCOME_AUTHOR, LIBRARY_ITEMS
 from ..spotify_client import SpotifyClient
-from ..widgets import HelpScroll
+from ..widgets import HelpScroll, ContentPanel
 
 class CoreMixin:
     def __init__(self):
@@ -96,12 +96,16 @@ class CoreMixin:
         self._multi_add_selected_rows: set = set()
         self._pending_multi_add_uris: Optional[List[str]] = None
         self._help_on: bool = False
+        # Armed track removal awaiting confirmation, and the status line's
+        # pending clear timer (see _notify).
+        self._pending_remove_track: Optional[Dict] = None
+        self._status_timer = None
         # Welcome is what compose() shows first; on_resize keeps it responsive.
         self._welcome_on: bool = True
         self._welcome_variant: str = "large"
 
     def compose(self) -> ComposeResult:
-        self.right_panel = Static(Text(WELCOME), id="right")
+        self.right_panel = ContentPanel(Text(WELCOME), id="right")
 
         self.search_input = Input(placeholder="Search ...", id="search_input")
         try:
@@ -144,6 +148,12 @@ class CoreMixin:
                     yield self.np_bar_full
                 self.np_times = Static("--:--", id="np_times")
                 yield self.np_times
+
+        # Transient feedback, on the overlay layer (see the CSS): a message
+        # written into #right sits behind a mounted content table and is never
+        # seen, which is exactly when most messages fire.
+        self.status_line = Static("", id="status_line")
+        yield self.status_line
 
         yield Footer()
 
@@ -291,6 +301,8 @@ class CoreMixin:
                 except Exception:
                     logger.debug("stopping interval %s during teardown failed", attr)
                 setattr(self, attr, None)
+        # One-shot, but it fires into the widget tree just the same.
+        self._cancel_status_timer()
 
     def on_unmount(self) -> None:
         """Application teardown. Textual has already flagged the app as closing
@@ -298,6 +310,59 @@ class CoreMixin:
         and stop every timer so no worker paints into a torn-down app."""
         self._closing = True
         self._stop_all_intervals()
+
+    # How long a message stays up. Long enough to read, short enough not to sit
+    # over the now-playing bar.
+    STATUS_SECONDS = 4.0
+
+    def _notify(self, message: str, *, warn: bool = False, seconds: float | None = None,
+                sticky: bool = False) -> None:
+        """Show a transient message on the status line.
+
+        Feedback must never go through ``right_panel.update``: while a content
+        table is mounted the panel's own content is covered by it, so the
+        message is invisible — and that is precisely when most of these fire
+        ("no row selected", "track removed", …). Safe to call before the widget
+        exists (startup) and during teardown; it just does nothing then.
+        """
+        line = getattr(self, "status_line", None)
+        if line is None or getattr(self, "_closing", False):
+            return
+        try:
+            # A newer message supersedes the previous one, and its timer must be
+            # cancelled or it would clear the new message early.
+            self._cancel_status_timer()
+            line.update(message)
+            line.set_class(bool(warn), "-warn")
+            line.add_class("-shown")
+            if sticky:
+                # A mode indicator (multi-add): it stays until the mode ends.
+                return
+            secs = self.STATUS_SECONDS if seconds is None else float(seconds)
+            self._status_timer = self.set_timer(secs, self._clear_status_line)
+        except Exception:
+            logger.exception("could not show status message")
+
+    def _cancel_status_timer(self) -> None:
+        timer = getattr(self, "_status_timer", None)
+        if timer is not None:
+            try:
+                timer.stop()
+            except Exception:
+                logger.debug("stopping the status timer failed")
+            self._status_timer = None
+
+    def _clear_status_line(self) -> None:
+        self._status_timer = None
+        line = getattr(self, "status_line", None)
+        if line is None:
+            return
+        try:
+            line.remove_class("-shown")
+            line.remove_class("-warn")
+            line.update("")
+        except Exception:
+            logger.debug("clearing the status line failed")
 
     def _clear_right(self):
         right: Static = self.right_panel
@@ -398,18 +463,12 @@ class CoreMixin:
                 except Exception:
                     logger.exception("welcome resize repaint failed")
             return
-        # Otherwise a result table may be visible: recompute its column widths for
-        # the new panel width, preserving rows/cursor/scroll (no data rebuild).
-        # _recompute_table_widths is a no-op when the effective widths are unchanged.
-        try:
-            for t in self.query(DataTable):
-                self._recompute_table_widths(t)
-        except Exception:
-            logger.exception("table resize recompute failed")
+        # A visible result table re-fits its columns from ContentPanel.on_resize,
+        # not here: at this point the right panel's content_size still holds its
+        # pre-resize value, so the columns would be sized to the old width.
         # The combined-search 2x2 dashboard reflows (2x2 <-> stacked) and resizes
-        # its panel columns on its own; the loop above is a no-op for the panels
-        # (they carry no _width_spec). Defer to after the refresh so the right
-        # panel's content_size reflects the new size (it lags during on_resize).
+        # its panel columns on its own. Defer to after the refresh for the same
+        # content_size reason.
         try:
             if len(self.query("#search_grid")) > 0:
                 self.call_after_refresh(self._relayout_search_grid)
@@ -426,7 +485,7 @@ class CoreMixin:
                     csec = (getattr(self, 'client_secret_input', None).value or "").strip()
                     ruri = (getattr(self, 'redirect_input', None).value or "").strip()
                     if not cid or not csec or not ruri:
-                        self.right_panel.update("[b]All fields are required. Fill in all three and press Enter on the Redirect URI.[/b]")
+                        self._notify("[b]All fields are required. Fill in all three and press Enter on the Redirect URI.[/b]")
                         return
 
                     cfg = {"client_id": cid, "client_secret": csec, "redirect_uri": ruri}
@@ -461,11 +520,11 @@ class CoreMixin:
             if getattr(self, 'auth_input', None) is event.input:
                 raw = (event.value or "").strip()
                 if not raw:
-                    self.right_panel.update("[b]No URL pasted[/b]")
+                    self._notify("[b]No URL pasted[/b]", warn=True)
                     return
                 ok = self.spotify.finish_authorization(raw)
                 if ok:
-                    self.right_panel.update("[b]Authorization completed. Starting session...[/b]")
+                    self._notify("[b]Authorization completed. Starting session...[/b]")
                     try:
                         try:
                             if self._now_sync_interval is None:
@@ -491,13 +550,13 @@ class CoreMixin:
                         pass
                     return
                 else:
-                    self.right_panel.update("[b]Authorization failed; check the URL and try again.[/b]")
+                    self._notify("[b]Authorization failed; check the URL and try again.[/b]")
                     return
 
             if getattr(self, 'create_name_input', None) is event.input:
                 name = (event.value or "").strip()
                 if not name:
-                    self.right_panel.update("[b]Playlist name cannot be empty. Enter a name and press Enter.[/b]")
+                    self._notify("[b]Playlist name cannot be empty. Enter a name and press Enter.[/b]")
                     return
                 self._create_playlist_state = {"name": name}
                 right = self._clear_right()
@@ -646,7 +705,7 @@ class CoreMixin:
                 except Exception:
                     pass
                 if not pending:
-                    try: self.right_panel.update('[b]No pending delete request.[/b]')
+                    try: self._notify('[b]No pending delete request.[/b]', warn=True)
                     except Exception: pass
                     return
                 pl_id, pl_name = pending.get('id'), pending.get('name')
@@ -660,7 +719,7 @@ class CoreMixin:
                         self.confirm_delete_confirm_input.focus()
                         return
                     else:
-                        try: self.right_panel.update('[b]Name did not match; aborting delete.[/b]')
+                        try: self._notify('[b]Name did not match; aborting delete.[/b]', warn=True)
                         except Exception: pass
                 finally:
                     if not (pending.get('stage') == 'confirm'):
@@ -676,7 +735,7 @@ class CoreMixin:
                 except Exception:
                     pass
                 if not pending:
-                    try: self.right_panel.update('[b]No pending delete request.[/b]')
+                    try: self._notify('[b]No pending delete request.[/b]', warn=True)
                     except Exception: pass
                     return
                 pl_id, pl_name = pending.get('id'), pending.get('name')
@@ -702,11 +761,11 @@ class CoreMixin:
                                         try:
                                             self.call_from_thread(self.action_escape_to_menu)
                                         except Exception:
-                                            self.call_from_thread(lambda: self.right_panel.update(f"[b]Playlist deleted:[/b] {rich_escape(pname)}"))
+                                            self.call_from_thread(lambda: self._notify(f"[b]Playlist deleted:[/b] {rich_escape(pname)}"))
                                     except Exception:
                                         pass
                                 else:
-                                    try: self.call_from_thread(lambda: self.right_panel.update('[b]Could not delete playlist.[/b]'))
+                                    try: self.call_from_thread(lambda: self._notify('[b]Could not delete playlist.[/b]', warn=True))
                                     except Exception: pass
                             except Exception:
                                 logger.exception('Delete playlist worker failed')
@@ -717,16 +776,16 @@ class CoreMixin:
                                 try:
                                     self.action_escape_to_menu()
                                 except Exception:
-                                    try: self.right_panel.update('[b]Deletion cancelled.[/b]')
+                                    try: self._notify('[b]Deletion cancelled.[/b]')
                                     except Exception: pass
                             else:
                                 try:
                                     self.call_from_thread(self.action_escape_to_menu)
                                 except Exception:
-                                    try: self.right_panel.update('[b]Deletion cancelled.[/b]')
+                                    try: self._notify('[b]Deletion cancelled.[/b]')
                                     except Exception: pass
                         except Exception:
-                            try: self.right_panel.update('[b]Deletion cancelled.[/b]')
+                            try: self._notify('[b]Deletion cancelled.[/b]')
                             except Exception: pass
                 finally:
                     try: del self._pending_delete_playlist
@@ -738,7 +797,7 @@ class CoreMixin:
                 try:
                     raw = (event.value or "").strip()
                     if not raw:
-                        self.right_panel.update("[b]Empty input. Enter a playlist URI or ID.[/b]")
+                        self._notify("[b]Empty input. Enter a playlist URI or ID.[/b]")
                         return
 
                     def worker_import(vraw: str):
@@ -775,7 +834,7 @@ class CoreMixin:
                                     logger.exception("_add_import: could not resolve playlist %s", pl_id)
                                     err_msg = rich_escape(str(e))
                                     def paint_err():
-                                        self.right_panel.update(f"[b]Could not get playlist:[/b] {err_msg}")
+                                        self._notify(f"[b]Could not get playlist:[/b] {err_msg}", warn=True)
                                     try:
                                         self.call_from_thread(paint_err)
                                     except Exception:
@@ -809,12 +868,12 @@ class CoreMixin:
                                         except Exception:
                                             pass
                                         try:
-                                            self.call_from_thread(lambda: self.right_panel.update(f"[b]Playlist added to your library:[/b] {rich_escape(pname)}"))
+                                            self.call_from_thread(lambda: self._notify(f"[b]Playlist added to your library:[/b] {rich_escape(pname)}"))
                                         except Exception:
                                             pass
                                     else:
                                         try:
-                                            self.call_from_thread(lambda: self.right_panel.update('[b]Could not add playlist to your library.[/b]'))
+                                            self.call_from_thread(lambda: self._notify('[b]Could not add playlist to your library.[/b]', warn=True))
                                         except Exception:
                                             pass
                                 except Exception:
@@ -842,7 +901,7 @@ class CoreMixin:
             v = max(0, int(str(value).strip()))
         except (TypeError, ValueError):
             try:
-                self.right_panel.update(f'[b]Invalid number for {label}.[/b]')
+                self._notify(f'[b]Invalid number for {label}.[/b]', warn=True)
             except Exception:
                 pass
             return False
@@ -862,7 +921,7 @@ class CoreMixin:
         parsed = config.parse_size(value)
         if parsed is None:
             try:
-                self.right_panel.update('[b]Invalid size for lyrics cache.[/b] Use a number with an explicit unit, e.g. 200 MB or 1 GB.')
+                self._notify('[b]Invalid size for lyrics cache.[/b] Use a number with an explicit unit, e.g. 200 MB or 1 GB.', warn=True)
             except Exception:
                 pass
             return False
@@ -870,7 +929,7 @@ class CoreMixin:
             lo = config.format_size(config.LYRICS_CACHE_MIN_BYTES)
             hi = config.format_size(config.LYRICS_CACHE_MAX_BYTES_LIMIT)
             try:
-                self.right_panel.update(f'[b]Lyrics cache size out of range.[/b] Enter a value between {lo} and {hi}.')
+                self._notify(f'[b]Lyrics cache size out of range.[/b] Enter a value between {lo} and {hi}.')
             except Exception:
                 pass
             return False

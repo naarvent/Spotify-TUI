@@ -87,16 +87,20 @@ async def test_no_horizontal_scrollbar_reasonable_sizes():
                   not bool(getattr(st, "show_horizontal_scrollbar", False)), f"widths={col_widths(st)}")
 
 
-async def test_flex_columns_capped_on_wide_terminals():
+async def test_flex_columns_use_the_whole_panel():
+    # Columns used to stop at a cap (42/28/26) and leave the rest of the panel
+    # empty; they now take all of it. Full coverage lives in test_table_fill.
     app = TApp(Fake())
     async with app.run_test(size=(200, 40)) as pilot:
         await pilot.pause(); pause_intervals(app)
         t = app._render_tracks_table("[b]P[/b]", rows_n(3), [False] * 3, profile="playlist")
-        await pilot.pause()
+        for _ in range(3):
+            await pilot.pause()
         w = col_widths(t)   # [heart, title, artist, album, dur, added]
-        check("Title is bounded (does not over-stretch) on a wide terminal", 6 <= w[1] <= 42, f"title={w[1]}")
-        check("Artist is bounded on a wide terminal", 6 <= w[2] <= 28, f"artist={w[2]}")
-        check("Album is bounded on a wide terminal", 6 <= w[3] <= 26, f"album={w[3]}")
+        panel = content_w(app)
+        check("columns reach the right edge of a wide panel",
+              sum(w) + 4 + 2 * len(w) == panel, f"w={w} panel={panel}")
+        check("Title grows past the old 42 cap on a wide terminal", w[1] > 42, f"title={w[1]}")
 
 
 async def test_title_weighted_wider_than_artist():
@@ -119,13 +123,15 @@ async def test_recompute_preserves_cursor_and_scroll():
         t.move_cursor(row=25, animate=False)
         for _ in range(5): await pilot.pause()
         before_cursor, before_scroll, before_w = t.cursor_row, scroll_y(t), col_widths(t)
-        # Simulate a resize: force _column_widths to return different values.
-        orig = app._column_widths
-        app._column_widths = lambda labels, fixed=None, weights=None, max_widths=None: [x + 1 for x in orig(labels, fixed, weights, max_widths)]
+        # Simulate a resize: force the fitter to return different widths for the
+        # same column set.
+        orig = app._fit_columns
+        app._fit_columns = lambda fields, labels, panel_w=None: (
+            lambda r: (r[0], r[1], [x + 1 for x in r[2]]))(orig(fields, labels, panel_w))
         try:
             app._recompute_table_widths(t)
         finally:
-            app._column_widths = orig
+            app._fit_columns = orig
         for _ in range(5): await pilot.pause()
         after_w = col_widths(t)
         check("resize recompute changes column widths", after_w != before_w, f"{before_w} -> {after_w}")
@@ -173,7 +179,7 @@ async def test_column_profiles():
               col_labels(sp) == ["♥", "Type", "Name", "Owner"], f"cols={col_labels(sp)}")
 
 
-ALL = [test_no_horizontal_scrollbar_reasonable_sizes, test_flex_columns_capped_on_wide_terminals,
+ALL = [test_no_horizontal_scrollbar_reasonable_sizes, test_flex_columns_use_the_whole_panel,
        test_title_weighted_wider_than_artist, test_recompute_preserves_cursor_and_scroll,
        test_no_manual_resize_widget, test_column_profiles]
 
