@@ -346,10 +346,11 @@ The search dashboard has two navigation levels.
 | `Ctrl+C` | Open Queue |
 | `d` | Open Devices |
 | `Ctrl+L` | Toggle multi-add mode |
-| `Ctrl+Shift+P` | Add selected tracks to a playlist |
+| `Ctrl+Shift+P` or `Ctrl+P` | Add selected tracks to a playlist |
 | `Ctrl+T` | Import a playlist |
-| `Ctrl+D` | Delete or remove the selected item |
+| `Ctrl+D` | Delete or remove the selected item (press again to confirm a track removal, `Esc` to cancel) |
 | `Ctrl+R` | Refresh the active view |
+| `Ctrl+B` | Hide/show the left sidebar (gives its width to the content) |
 
 ### Help View
 
