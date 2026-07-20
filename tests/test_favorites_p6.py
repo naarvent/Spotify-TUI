@@ -109,6 +109,14 @@ async def stays_false(fn, timeout=0.6):
 def static_text(w):
     return str(getattr(w, "_Static__content", "") or "")
 
+def feedback(app):
+    """Transient feedback now goes to the status line, not the content panel:
+    written into #right it sat behind any mounted table and was never seen."""
+    try:
+        return static_text(app.query_one("#status_line"))
+    except Exception:
+        return ""
+
 def pause_bg_intervals(app):
     for attr in ("_now_sync_interval", "_now_tick_interval", "_now_interval",
                  "_devices_interval", "_queue_interval"):
@@ -166,12 +174,12 @@ async def test_failed_mutation_no_false_confirm():
         app.action_toggle_favorite()
         await poll(lambda: fake.save_entered.is_set(), timeout=4.0)
         # Give the worker time to (not) paint a confirmation.
-        shown_added = await poll(lambda: "Added to Liked Songs" in static_text(app.right_panel), timeout=0.6)
+        shown_added = await poll(lambda: "Added to Liked Songs" in feedback(app), timeout=0.6)
         check("failed mutation does NOT show a confirmed state",
-              not shown_added, f"panel={static_text(app.right_panel)!r}")
-        err = await poll(lambda: "Could not update" in static_text(app.right_panel), timeout=2.0)
+              not shown_added, f"status={feedback(app)!r}")
+        err = await poll(lambda: "Could not update" in feedback(app), timeout=2.0)
         check("failed mutation surfaces an error", bool(err),
-              f"panel={static_text(app.right_panel)!r}")
+              f"status={feedback(app)!r}")
         no_reval = await stays_false(lambda: fake.reval_count > base, timeout=0.4)
         check("failed mutation does not revalidate as saved", no_reval,
               f"reval_count={fake.reval_count} base={base}")

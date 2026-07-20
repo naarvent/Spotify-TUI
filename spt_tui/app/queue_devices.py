@@ -41,7 +41,7 @@ class QueueDevicesMixin:
                 rtype = getattr(focused, 'row_to_type', {}).get(row)
                 if rtype not in (None, 'track', 'single'):
                     try:
-                        self.right_panel.update('[b]Only tracks can be added to the queue from search results.[/b]')
+                        self._notify('[b]Only tracks can be added to the queue from search results.[/b]', warn=True)
                     except Exception:
                         pass
                     return
@@ -69,7 +69,7 @@ class QueueDevicesMixin:
                 except Exception as e:
                     err_msg = rich_escape(str(e))
                     try:
-                        self.call_from_thread(lambda: self.right_panel.update(f"[b]Could not add to queue:[/b] {err_msg}"))
+                        self.call_from_thread(lambda: self._notify(f"[b]Could not add to queue:[/b] {err_msg}", warn=True))
                     except Exception:
                         pass
                     logger.exception("queue_track failed")
@@ -88,14 +88,14 @@ class QueueDevicesMixin:
                 except Exception:
                     logger.exception("Could not record local queue item")
                 try:
-                    self.call_from_thread(lambda: self.right_panel.update(f"[b]Added to queue:[/b] {rich_escape(title)}"))
+                    self.call_from_thread(lambda: self._notify(f"[b]Added to queue:[/b] {rich_escape(title)}"))
                 except Exception:
                     pass
             threading.Thread(target=worker, daemon=True).start()
         except Exception as e:
             err_msg = rich_escape(str(e))
             try:
-                self.right_panel.update(f"[b]Could not add to queue:[/b] {err_msg}")
+                self._notify(f"[b]Could not add to queue:[/b] {err_msg}", warn=True)
             except Exception:
                 pass
             logger.exception("queue_track failed")
@@ -122,22 +122,22 @@ class QueueDevicesMixin:
                         except Exception:
                             continue
                     try:
-                        self.right_panel.update(f"[b]Selected {len(sel_all)} items.[/b]")
+                        self._notify(f"[b]Selected {len(sel_all)} items.[/b]")
                     except Exception:
                         pass
                 except Exception:
                     logger.exception('action_add_to_playlist (select-all) failed')
                 return
             if not isinstance(focused, DataTable):
-                self.right_panel.update("[b]Select a track or episode in the list first.[/b]")
+                self._notify("[b]Select a track or episode in the list first.[/b]")
                 return
             row = self._get_cursor_row(focused)
             if row is None:
-                self.right_panel.update("[b]No row selected. Move to a track and try again.[/b]")
+                self._notify("[b]No row selected. Move to a track and try again.[/b]", warn=True)
                 return
             uri = getattr(focused, 'row_to_uri', {}).get(row) or getattr(focused, 'row_to_id', {}).get(row)
             if not uri:
-                self.right_panel.update('[b]Could not determine URI for selected item.[/b]')
+                self._notify('[b]Could not determine URI for selected item.[/b]', warn=True)
                 return
             try:
                 s = str(uri)
@@ -177,13 +177,14 @@ class QueueDevicesMixin:
 
         table = self._create_table_with_full_width(
             ["#", "♥", "Title", "Artist", "Album", "Duration", "Source"],
-            fixed_widths={0: 3, 5: 9},
-            widget_id="queue_table",
+            ["num", "heart", "title", "artist", "album", "dur", "source"],
+            widget_id="queue_table", fields_attr="_queue_fields",
         )
         table.row_to_uri = {}; table.row_to_title = {}; table.row_to_id = {}
         right.mount(table)
         try: table.focus()
         except Exception: pass
+        self._refit_after_mount(table)
         self.level = self.LVL_VIEW
 
         try:
@@ -293,7 +294,8 @@ class QueueDevicesMixin:
             table = None
         if table is None:
             table = self._create_table_with_full_width(
-                ["", "Name", "Type"], fixed_widths={0: 3, 2: 14}, widget_id="devices_table")
+                ["", "Name", "Type"], ["mark", "title", "device_type"],
+                widget_id="devices_table", fields_attr="_device_fields")
             right.mount(Static("[b]Devices[/b] (Press Enter to transfer)", markup=True))
             right.mount(table)
         table.focus()
@@ -343,6 +345,22 @@ class QueueDevicesMixin:
             except Exception:
                 logger.exception("devices paint scheduling failed")
         threading.Thread(target=worker, daemon=True).start()
+
+    def _queue_cells(self, item: dict, index: int, fields):
+        """Build one queue row's cells for the surviving field list — the fitter
+        drops low-priority columns on a narrow terminal, so the cells have to
+        follow the header rather than a fixed order."""
+        heart = Text("❤", style="bold red") if bool(item.get('liked', False)) else Text("")
+        cell_map = {
+            "num": str(index + 1),
+            "heart": heart,
+            "title": item.get('title', ''),
+            "artist": item.get('artist', ''),
+            "album": item.get('album', ''),
+            "dur": item.get('dur', ''),
+            "source": item.get('source', ''),
+        }
+        return [cell_map[f] for f in fields]
 
     def _refresh_queue_table(self):
         def worker():
@@ -465,15 +483,17 @@ class QueueDevicesMixin:
                         table.row_to_uri = {}
                         table.row_to_title = {}
                         table.row_to_id = {}
+                        table._model_rows = list(q)
+                        fields = getattr(table, "_queue_fields", None) or [
+                            "num", "heart", "title", "artist", "album", "dur", "source"]
                         for i, item in enumerate(q):
-                            heart = Text("❤", style="bold red") if bool(item.get('liked', False)) else Text("")
                             try:
-                                table.add_row(str(i+1), heart, item.get('title',''), item.get('artist',''), item.get('album',''), item.get('dur',''), item.get('source',''), key=i)
+                                table.add_row(*self._queue_cells(item, i, fields), key=i)
                             except Exception:
                                 try:
-                                    table.add_row(str(i+1), heart, item.get('title',''), item.get('artist',''), item.get('album',''), item.get('dur',''), key=i)
+                                    table.add_row(str(i+1), item.get('title',''), key=i)
                                 except Exception:
-                                    table.add_row(str(i+1), heart, item.get('title',''), key=i)
+                                    pass
                             table.row_to_uri[i] = item.get('uri')
                             table.row_to_title[i] = f"{item.get('title','')} {GLYPHS['sep']} {item.get('artist','')}"
                         try: table.refresh()

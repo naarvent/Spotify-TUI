@@ -183,10 +183,13 @@ def test_queue_keeps_source():
     async def body():
         from textual.widgets import DataTable
         app = TApp(Fake())
-        async with app.run_test(size=(120, 20)) as pilot:
+        # Wide enough that the fitter keeps every queue column: Source is the
+        # first one dropped on a narrow panel (see test_table_fill).
+        async with app.run_test(size=(150, 20)) as pilot:
             await pilot.pause(); pause_intervals(app)
             app.action_open_queue()
-            await pilot.pause()
+            for _ in range(3):
+                await pilot.pause()
             qt = None
             for w in app.query(DataTable):
                 if getattr(w, "id", "") == "queue_table":

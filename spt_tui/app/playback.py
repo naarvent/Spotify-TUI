@@ -606,11 +606,11 @@ class PlaybackMixin:
         if vol == 0:
             target = 50
             self._now_volume = target
-            self.right_panel.update(f"[b]Volume restored to {target}%[/b]")
+            self._notify(f"[b]Volume restored to {target}%[/b]")
             self._run_playback_call(lambda: self.spotify.set_volume(target))
         else:
             self._now_volume = 0
-            self.right_panel.update("[b]Muted[/b]")
+            self._notify("[b]Muted[/b]")
             self._run_playback_call(lambda: self.spotify.set_volume(0))
 
     @staticmethod
@@ -685,7 +685,7 @@ class PlaybackMixin:
                 if not ok:
                     # P6: mutation failed -> never show a confirmed state.
                     try:
-                        self.call_from_thread(lambda: self.right_panel.update('[b]Could not update Liked Songs[/b]'))
+                        self.call_from_thread(lambda: self._notify('[b]Could not update Liked Songs[/b]', warn=True))
                     except Exception:
                         pass
                     return
@@ -700,7 +700,7 @@ class PlaybackMixin:
                             except Exception: pass
                         try: self._sync_liked_state_across_tables(tid, new_liked)
                         except Exception: pass
-                        self.right_panel.update(f"[b]{'Added to' if new_liked else 'Removed from'} Liked Songs[/b]")
+                        self._notify(f"[b]{'Added to' if new_liked else 'Removed from'} Liked Songs[/b]")
                     except Exception:
                         logger.exception('paint after toggle favorite failed')
                 try:
@@ -738,12 +738,12 @@ class PlaybackMixin:
                 if not ok:
                     # P6: mutation failed -> never show a confirmed state.
                     try:
-                        self.call_from_thread(lambda: self.right_panel.update(f"[b]Could not update {label}[/b]"))
+                        self.call_from_thread(lambda: self._notify(f"[b]Could not update {label}[/b]", warn=True))
                     except Exception:
                         pass
                     return
                 try:
-                    self.call_from_thread(lambda: self.right_panel.update(f"[b]{'Saved' if new else 'Removed from'} {label}[/b]"))
+                    self.call_from_thread(lambda: self._notify(f"[b]{'Saved' if new else 'Removed from'} {label}[/b]"))
                 except Exception:
                     pass
                 try:
@@ -781,12 +781,12 @@ class PlaybackMixin:
                 if not ok:
                     # P6: mutation failed -> never show a confirmed state.
                     try:
-                        self.call_from_thread(lambda: self.right_panel.update('[b]Could not update Artist follow[/b]'))
+                        self.call_from_thread(lambda: self._notify('[b]Could not update Artist follow[/b]', warn=True))
                     except Exception:
                         pass
                     return
                 try:
-                    self.call_from_thread(lambda: self.right_panel.update(f"[b]{'Followed' if new else 'Unfollowed'} Artist[/b]"))
+                    self.call_from_thread(lambda: self._notify(f"[b]{'Followed' if new else 'Unfollowed'} Artist[/b]"))
                 except Exception:
                     pass
                 try:
@@ -847,7 +847,7 @@ class PlaybackMixin:
                 r_type, r_id, r_uri = item.get('type'), item.get('id'), item.get('uri')
                 if not r_id and not r_uri:
                     try:
-                        self.call_from_thread(lambda: self.right_panel.update('[b]No item selected or playing[/b]'))
+                        self.call_from_thread(lambda: self._notify('[b]No item selected or playing[/b]', warn=True))
                     except Exception:
                         pass
                     return
@@ -865,7 +865,7 @@ class PlaybackMixin:
                 try: item_id = self.spotify._normalize_track_id(uri)
                 except Exception: pass
             if not item_id and not uri:
-                try: self.right_panel.update('[b]No item selected or playing[/b]')
+                try: self._notify('[b]No item selected or playing[/b]', warn=True)
                 except Exception: pass
                 return
 
@@ -877,11 +877,11 @@ class PlaybackMixin:
 
             if typ in ('track', 'single', ''):
                 if not rid:
-                    self.right_panel.update('[b]Could not determine track id[/b]'); return
+                    self._notify('[b]Could not determine track id[/b]', warn=True); return
                 self._toggle_track_favorite(rid, table, row)
             elif typ == 'album':
                 if not rid:
-                    self.right_panel.update('[b]Could not determine album id[/b]'); return
+                    self._notify('[b]Could not determine album id[/b]', warn=True); return
                 self._toggle_saved_item(sp, rid,
                     contains_name='current_user_saved_albums_contains',
                     add_names=['current_user_saved_albums_add', 'current_user_saved_albums_save'],
@@ -889,11 +889,11 @@ class PlaybackMixin:
                     label='Saved Albums', view_key='albums', refresh_fn=self._open_saved_albums, table=table)
             elif typ == 'artist':
                 if not rid:
-                    self.right_panel.update('[b]Could not determine artist id[/b]'); return
+                    self._notify('[b]Could not determine artist id[/b]', warn=True); return
                 self._toggle_artist_favorite(sp, rid, table=table)
             elif typ in ('podcast', 'show'):
                 if not rid:
-                    self.right_panel.update('[b]Could not determine show id[/b]'); return
+                    self._notify('[b]Could not determine show id[/b]', warn=True); return
                 self._toggle_saved_item(sp, rid,
                     contains_name='current_user_saved_shows_contains',
                     add_names=['current_user_saved_shows_add', 'current_user_saved_shows_save'],
@@ -901,14 +901,14 @@ class PlaybackMixin:
                     label='Saved Podcasts', view_key='podcasts', refresh_fn=self._open_saved_podcasts, table=table)
             elif typ == 'episode':
                 if not rid:
-                    self.right_panel.update('[b]Could not determine episode id[/b]'); return
+                    self._notify('[b]Could not determine episode id[/b]', warn=True); return
                 self._toggle_saved_item(sp, rid,
                     contains_name='current_user_saved_episodes_contains',
                     add_names=['current_user_saved_episodes_add', 'current_user_saved_episodes_save'],
                     del_names=['current_user_saved_episodes_delete', 'current_user_saved_episodes_remove'],
                     label='Saved Episodes', view_key='episodes', refresh_fn=self._open_saved_episodes, table=table)
             else:
-                try: self.right_panel.update('[b]Favorite action not supported for this item type[/b]')
+                try: self._notify('[b]Favorite action not supported for this item type[/b]')
                 except Exception: pass
                 return
             # P6: the search saved-column revalidation is now chained inside each
