@@ -19,7 +19,12 @@ from logging.handlers import RotatingFileHandler
 # --------------------------------------------------------------------------- #
 USER_HOME = os.path.expanduser("~")
 USER_DOCS = os.path.join(USER_HOME, "Documents")
-CACHE_DIR = os.path.join(USER_DOCS, "naarvent's projects", "Spotify_TUI")
+# SPT_TUI_CACHE_DIR redirects every cache/config/log path. The test runner points
+# each suite at its own temp directory with it: the suites drive a real app, so
+# without it they read and write the user's real token, playlist cache and log —
+# and running them in parallel would have them race over those files.
+CACHE_DIR = os.getenv("SPT_TUI_CACHE_DIR") or os.path.join(
+    USER_DOCS, "naarvent's projects", "Spotify_TUI")
 os.makedirs(CACHE_DIR, exist_ok=True)
 
 CACHE_PATH = os.path.join(CACHE_DIR, ".cache_spotify_token")
