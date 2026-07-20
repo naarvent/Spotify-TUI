@@ -8,8 +8,7 @@ import threading
 import webbrowser
 from typing import Dict, List
 
-from textual.widgets import Input, Static, ListItem, Label, DataTable
-from textual.css.query import NoMatches
+from textual.widgets import Input, Static, ListItem, Label
 from rich.markup import escape as rich_escape
 
 try:
@@ -293,6 +292,13 @@ class LibraryMixin:
         self._clear_right()
         self._safe_update_right("playlist", pl_id, token, f"[b]Loading playlist:[/b] {rich_escape(pl_name)} …")
 
+        if getattr(self, "_playlist_cache", None) is None:
+            self._playlist_cache = {}
+        cached = self._playlist_cache.get(pl_id)
+        # With a cache hit the rows go up at once and the worker only repaints at
+        # the end; streaming pages into an already-full table would double them.
+        progressive = cached is None
+
         # Only request the fields we actually render; big playlists return huge
         # track objects otherwise, which dominates the load time.
         FIELDS = ("items(added_at,track(id,uri,name,type,duration_ms,"
@@ -322,30 +328,67 @@ class LibraryMixin:
                     page_track_ids.append(track.get("id"))
             return page_rows, page_track_ids
 
+        # The table this open created, plus any pages that arrived before it was
+        # mounted. Looking the table up by id instead would, right after
+        # reopening, still find the *previous* playlist's table (Textual's
+        # remove() is async) and append the pages to a dying widget.
+        state = {"table": None, "pending": []}
+
+        def _mount(rows, liked):
+            """Render the table once the previous view's table is really gone.
+
+            `_clear_right` only *schedules* the old table's removal, so opening a
+            playlist while another is still loading could mount a second widget
+            with id "tracks_table" — DuplicateIds, which killed the new load.
+            Retry on the next frames instead, and flush whatever pages landed in
+            the meantime."""
+            def attempt(retries=4):
+                if not self._is_current_view("playlist", pl_id, token):
+                    return
+                try:
+                    still_there = len(self.query("#tracks_table")) > 0
+                except Exception:
+                    still_there = False
+                if still_there and retries > 0:
+                    self.call_after_refresh(lambda: attempt(retries - 1))
+                    return
+                state["table"] = self._render_tracks_table(
+                    title, rows, liked, context_uri=pl_uri,
+                    context_uris=[r["uri"] for r in rows], profile="playlist",
+                )
+                if state["pending"]:
+                    self._append_track_rows(state["table"], state["pending"])
+                    state["pending"] = []
+            attempt()
+
         def _paint_preview(rows):
+            self.call_from_thread(lambda: _mount(rows, None))
+
+        def _paint_page(page_rows):
+            # Append each page as it lands. Holding the rows back until the
+            # likes lookup finished made a big playlist look stuck on its first
+            # page until the hearts resolved.
             def do():
                 if not self._is_current_view("playlist", pl_id, token):
                     return
-                self._render_tracks_table(
-                    title, rows, None, context_uri=pl_uri,
-                    context_uris=[r["uri"] for r in rows], profile="playlist",
-                )
+                table = state["table"]
+                if table is None:
+                    # The preview is still waiting for the old table to go.
+                    state["pending"].extend(page_rows)
+                    return
+                self._append_track_rows(table, page_rows)
             self.call_from_thread(do)
 
         def _paint_final(rows, liked):
             def do():
                 if not self._is_current_view("playlist", pl_id, token):
                     return
-                try:
-                    table = self.query_one("#tracks_table", DataTable)
-                except NoMatches:
-                    table = None
+                table = state["table"]
                 if table is None:
-                    # No preview was shown (single-page playlist): fresh render.
-                    self._render_tracks_table(
-                        title, rows, liked, context_uri=pl_uri,
-                        context_uris=[r["uri"] for r in rows], profile="playlist",
-                    )
+                    # No preview was shown (single-page playlist), or it is still
+                    # waiting for the old table: render the full list instead.
+                    state["pending"] = []
+                    _mount(rows, liked)
                     return
                 # Update the preview table in place — mounting a second widget
                 # with id "tracks_table" would collide (remove() is async).
@@ -357,8 +400,39 @@ class LibraryMixin:
                 self._repaint_rows_from_model(table)
             self.call_from_thread(do)
 
+        def _paint_hearts(id_to_liked):
+            # Hearts land one API batch (50 ids) at a time; touch just those
+            # cells so a long playlist lights up progressively instead of
+            # staying blank until the last batch returns.
+            def do():
+                table = state["table"]
+                if table is None or not self._is_current_view("playlist", pl_id, token):
+                    return
+                liked_map = getattr(table, "_liked_map", None)
+                if liked_map is None:
+                    liked_map = table._liked_map = {}
+                for i, r in enumerate(getattr(table, "_model_rows", []) or []):
+                    val = id_to_liked.get(r.get("id"))
+                    if val is None or bool(liked_map.get(i, False)) == bool(val):
+                        continue
+                    liked_map[i] = bool(val)
+                    self._set_heart_icon(table, i, bool(val))
+            self.call_from_thread(do)
+
         def _set_title(text):
             self.call_from_thread(lambda: self._set_table_title("tracks_table", text))
+
+        def current():
+            # The user left, opened something else, or the app is closing: stop
+            # downloading. Without this a big playlist kept paging (and then ran
+            # the whole liked lookup) for a view nobody is looking at.
+            return (not getattr(self, "_closing", False)) and \
+                self._is_current_view("playlist", pl_id, token)
+
+        if cached:
+            cached_rows, cached_liked = cached
+            _mount(list(cached_rows), list(cached_liked))
+            self._set_table_title("tracks_table", f"{title}  [dim](refreshing…)[/dim]")
 
         def worker():
             try:
@@ -371,12 +445,14 @@ class LibraryMixin:
                 # Multi-page playlist: show the first page right away so the user
                 # isn't staring at "Loading…" while the rest streams in.
                 multipage = total > len(rows)
-                if multipage:
+                if multipage and progressive:
                     _paint_preview(list(rows))
                     _set_title(f"{title}  [dim](loading {len(rows)}/{total})[/dim]")
 
                 offset = 100
                 while offset < total:
+                    if not current():
+                        return
                     page = self.spotify.playlist_items(pl_id, limit=100, offset=offset, fields=FIELDS) or {}
                     page_rows, page_track_ids = _extract(page)
                     if not page_rows:
@@ -384,19 +460,74 @@ class LibraryMixin:
                     rows += page_rows
                     track_ids += page_track_ids
                     offset += 100
-                    _set_title(f"{title}  [dim](loading {min(len(rows), total)}/{total})[/dim]")
+                    if progressive:
+                        _paint_page(list(page_rows))
+                        _set_title(f"{title}  [dim](loading {min(len(rows), total)}/{total})[/dim]")
 
+                if not current():
+                    return
                 _set_title(f"{title}  [dim](checking likes…)[/dim]" if multipage else title)
-                liked_by_id = dict(zip(track_ids, self.spotify.check_saved_tracks(track_ids))) if track_ids else {}
+                liked_by_id = {}
+
+                def _on_liked_batch(start, vals):
+                    batch = dict(zip(track_ids[start:start + len(vals)], vals))
+                    liked_by_id.update(batch)
+                    if multipage or not progressive:
+                        _paint_hearts(batch)
+
+                if track_ids:
+                    self.spotify.check_saved_tracks(track_ids, on_batch=_on_liked_batch)
                 liked = [bool(liked_by_id.get(r.get("id"), False)) for r in rows]
             except Exception:
                 logger.exception("_open_playlist_table worker failed")
                 return
 
+            # Cache the finished list even if the user has since left: the work
+            # is done, and the next open should not repeat it.
+            self._cache_playlist(pl_id, rows, liked)
+
             # Final render: full track list with hearts resolved, clean title.
             _paint_final(rows, liked)
             _set_title(title)
         threading.Thread(target=worker, daemon=True).start()
+
+    # How many playlists keep their tracks in memory. Enough to make going back
+    # and forth instant without holding every big playlist of a long session.
+    _PLAYLIST_CACHE_MAX = 8
+
+    def _playlist_cache_lock(self) -> threading.Lock:
+        # Two playlists can finish loading at once, and read-modify-write on the
+        # dict (the eviction loop especially) is not atomic even under the GIL.
+        lock = getattr(self, "_pl_cache_lock", None)
+        if lock is None:
+            lock = self._pl_cache_lock = threading.Lock()
+        return lock
+
+    def _cache_playlist(self, pl_id: str, rows: List[Dict], liked: List[bool]) -> None:
+        if not pl_id:
+            return
+        with self._playlist_cache_lock():
+            if getattr(self, "_playlist_cache", None) is None:
+                self._playlist_cache = {}
+            cache = self._playlist_cache
+            # Re-insert so the dict order is least- to most-recently loaded.
+            cache.pop(pl_id, None)
+            cache[pl_id] = (list(rows), list(liked))
+            while len(cache) > self._PLAYLIST_CACHE_MAX:
+                try:
+                    cache.pop(next(iter(cache)))
+                except StopIteration:
+                    break
+
+    def _invalidate_playlist_cache(self, pl_id: str) -> None:
+        """Drop a playlist's cached tracks after it has been modified, so the
+        next open refetches instead of painting rows that no longer match."""
+        if not pl_id:
+            return
+        with self._playlist_cache_lock():
+            cache = getattr(self, "_playlist_cache", None)
+            if cache:
+                cache.pop(pl_id, None)
 
     def _open_saved_artists(self):
         # Unified with the other saved-list views via the shared streaming loader:
