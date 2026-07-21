@@ -346,7 +346,9 @@ The search dashboard has two navigation levels.
 | `Ctrl+C` | Open Queue |
 | `d` | Open Devices |
 | `Ctrl+L` | Toggle multi-add mode |
-| `Ctrl+Shift+P` or `Ctrl+P` | Add selected tracks to a playlist |
+| `Ctrl+O` | Multi-select review: select all items |
+| `Ctrl+A` | Multi-select review: add the selected items · Multi-add mode: select or deselect all rows |
+| `Ctrl+Shift+P` | Add to a playlist: the selected track/episode, or every track of a selected album, artist, playlist or podcast (large adds ask to confirm) |
 | `Ctrl+T` | Import a playlist |
 | `Ctrl+D` | Delete or remove the selected item (press again to confirm a track removal, `Esc` to cancel) |
 | `Ctrl+R` | Refresh the active view |

@@ -95,6 +95,7 @@ class CoreMixin:
         self._multi_add_table = None
         self._multi_add_selected_rows: set = set()
         self._pending_multi_add_uris: Optional[List[str]] = None
+        self._pending_container_add: Optional[dict] = None
         self._help_on: bool = False
         # Armed track removal awaiting confirmation, and the status line's
         # pending clear timer (see _notify).
@@ -1083,10 +1084,12 @@ class CoreMixin:
 
     [b]Library & Playlist / Queue Management[/b]
         - f: Toggle Favorite (Like / Unlike selected track)
-        - Ctrl+Shift+P: Add selected track(s) to a playlist
+        - Ctrl+Shift+P: Add to a playlist — the selected track/episode, or all tracks of a selected album/artist/playlist/podcast
         - Ctrl+D: Delete (playlist or remove item)
         - Ctrl+R: Refresh / reload content
         - Ctrl+C: Open Queue view
+        - Ctrl+T: Import playlists
+        - Ctrl+B: Hide / show the left sidebar
 
     [b]Multi-Add / Selection Mode[/b]
         - Ctrl+L: Toggle Multi-Add mode
@@ -1122,14 +1125,14 @@ class CoreMixin:
 
     [b]Devices & Settings[/b]
         - d: Open device manager (transfer playback)
-        - <: Open seek/volume settings
+        - <: Open settings (volume steps, seek jump times, lyrics cache size)
         - - / + : Volume down / up
 
     [b]Help & Misc[/b]
         - ?: Toggle this Help view
         - F1: Toggle this Help view
-        - Ctrl+A: Confirm selection (when prompted / in multi-add flows)
-        - Ctrl+O: Add all / confirm add-all action
+        - Ctrl+O: Select all items (multi-select review)
+        - Ctrl+A: Add the selected items (multi-select review); select/deselect all rows (Multi-Add mode)
         - Ctrl+Q: Quit application
         - Left / Right Arrows: Move focus between left column and right panel (and vice-versa)
         - Log file: {LOG_PATH}

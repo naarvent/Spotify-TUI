@@ -620,6 +620,18 @@ class NavigationMixin:
                 return
             if event.key == "enter":
                 focused = getattr(self, "focused", None)
+                # A big-container add first asks for confirmation on its own
+                # screen; Enter there means "yes, choose a playlist".
+                pend = getattr(self, "_pending_container_add", None)
+                rvc = getattr(self, "_right_view", None)
+                if pend and rvc and rvc[0] == "confirm_bulk_add":
+                    try: event.stop()
+                    except Exception: pass
+                    self._pending_container_add = None
+                    self._pending_multi_add_uris = pend.get("uris") or None
+                    self._pending_add_uri = None
+                    self._show_playlists_for_adding()
+                    return
                 try:
                     if isinstance(focused, ListView) and getattr(focused, "id", None) == "add_pl_list":
                         event.stop()
@@ -777,6 +789,11 @@ class NavigationMixin:
                 self._multi_add_table = None
                 self._multi_add_selected_rows.clear()
                 self._pending_multi_add_uris = None
+        except Exception:
+            pass
+        # A pending big-container add confirmation is abandoned by leaving.
+        try:
+            self._pending_container_add = None
         except Exception:
             pass
         try:

@@ -129,8 +129,4 @@ class SptPy(
         ("ctrl+shift+p", "add_to_playlist", "Add to Playlist"),
         ("ctrl+d", "delete", "Delete"),
         ("ctrl+b", "toggle_sidebar", "Sidebar"),
-        # Many terminals cannot tell ctrl+shift+p from ctrl+p, so the action
-        # also answers to a plain chord.
-        ("ctrl+p", "add_to_playlist", "Add to Playlist"),
-
     ]

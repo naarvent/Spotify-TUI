@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `Add to playlist` (`Ctrl+Shift+P`) now works on every row, not just plain
+  tracks. A track or episode row adds that one item; a container row selected
+  from a listing expands to every track/episode it holds and adds them all — an
+  album/single adds its tracks, a playlist adds its tracks, a podcast adds its
+  episodes, and an artist adds its whole discography (all albums and singles,
+  de-duplicated). Adding more than 25 tracks asks for confirmation first. Covered
+  by `tests/test_add_to_playlist.py`.
+
+### Changed
+
+- Removed the `Ctrl+P` alias for `Add to playlist`. Textual binds `Ctrl+P` to its
+  command palette as a priority binding (the `^p palette` footer entry), which
+  shadowed the alias so it never fired. The binding is `Ctrl+Shift+P` only.
+
 ### Fixed
 
 - Opening a cached playlist or library view now shows a brief "Loading…" beat
