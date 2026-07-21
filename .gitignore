@@ -50,6 +50,10 @@ ENV/
 # Claude Code local workspace (agent settings / session state — never publish)
 # ---------------------------------------------------------------------------
 .claude/
+.agents/
+
+# Local documentation and agent work products
+docs/
 
 # ---------------------------------------------------------------------------
 # Editor / OS
