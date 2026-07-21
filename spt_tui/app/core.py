@@ -1068,6 +1068,7 @@ class CoreMixin:
         - Esc: Return to main menu
         - Ctrl+Q: Quit
         - ↑ / ↓ : Move between sections and list items
+        - Tab / Shift+Tab : Cycle focus across Search, Help, Library, Playlists and the open content (without entering a section)
         - / : Focus search input
         - Enter: Open / Play selected item
 

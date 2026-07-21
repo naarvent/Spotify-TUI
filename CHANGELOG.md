@@ -16,6 +16,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   episodes, and an artist adds its whole discography (all albums and singles,
   de-duplicated). Adding more than 25 tracks asks for confirmation first. Covered
   by `tests/test_add_to_playlist.py`.
+- `Tab` / `Shift+Tab` cycle focus across the top-level stops — Search, Help,
+  Library, Playlists and the open content view — in visual order, without diving
+  into a section's content (the content stop is skipped when only the welcome
+  screen is up). This overrides Textual's default Tab-moves-focus-anywhere
+  behaviour, while form inputs keep their field-to-field Tab and the search grid
+  keeps cycling its four panels. Covered by `tests/test_tab_focus.py`.
 
 ### Changed
 

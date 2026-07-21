@@ -124,6 +124,57 @@ class NavigationMixin:
         except Exception:
             logger.exception("_focus_help_box failed")
 
+    # Tab order across the top-level focus stops, matching the visual layout:
+    # Search and Help on top, then Library and Playlists, then the open content.
+    _TAB_STOPS = ("search", "help", "lib", "pl", "content")
+
+    def _current_tab_stop(self) -> str:
+        if getattr(self, "_help_focused", False):
+            return "help"
+        # Focus somewhere inside the right-hand content panel?
+        try:
+            foc = getattr(self, "focused", None)
+            rp = getattr(self, "right_panel", None)
+            node = foc
+            while node is not None:
+                if node is rp:
+                    return "content"
+                node = getattr(node, "parent", None)
+        except Exception:
+            pass
+        if self.level in (self.LVL_SECTIONS, self.LVL_SECTION_CONTENT):
+            if 0 <= self.section_idx < len(self.section_order):
+                return self.section_order[self.section_idx]
+        return "search"
+
+    def _focus_tab_stop(self, stop: str) -> bool:
+        """Move focus to one stop without entering a section's content. Returns
+        False if the stop has nothing to focus (e.g. no content view is open)."""
+        try:
+            if stop == "help":
+                self._focus_help_box(); return True
+            if stop == "content":
+                return self._focus_right_view()
+            if stop in self.section_order:
+                self._focus_section_by_idx(self.section_order.index(stop))
+                return True
+        except Exception:
+            logger.exception("_focus_tab_stop(%r) failed", stop)
+        return False
+
+    def _cycle_tab(self, step: int) -> None:
+        stops = self._TAB_STOPS
+        try:
+            i = stops.index(self._current_tab_stop())
+        except ValueError:
+            i = 0
+        n = len(stops)
+        # Walk to the next focusable stop, skipping any that can't take focus
+        # (e.g. "content" when only the welcome screen is up).
+        for k in range(1, n + 1):
+            if self._focus_tab_stop(stops[(i + step * k) % n]):
+                return
+
     def action_cursor_up(self):
         try:
             focused = getattr(self, 'focused', None)
@@ -163,6 +214,20 @@ class NavigationMixin:
                     self._search_capture_next = False
 
             focused = getattr(self, "focused", None)
+
+            # Tab / Shift+Tab cycle focus across the top-level stops (Search,
+            # Help, Library, Playlists, main content) without diving into any
+            # section's content. A form Input keeps its normal Tab traversal, and
+            # the search grid's own panels consume Tab before this (widgets.py),
+            # so this never fires while cycling result panels.
+            if getattr(event, "key", "") in ("tab", "shift+tab", "backtab"):
+                if isinstance(focused, Input) and focused is not getattr(self, "search_input", None):
+                    return
+                step = -1 if event.key in ("shift+tab", "backtab") else 1
+                try: event.stop(); event.prevent_default()
+                except Exception: pass
+                self._cycle_tab(step)
+                return
 
             # RIGHT arrow behaviour:
             #  - inside an open view (LVL_VIEW): do nothing, never steal focus out.

@@ -291,6 +291,7 @@ These shortcuts reflect the application's current bindings.
 | Key | Action |
 | --- | --- |
 | `Up` / `Down` | Move through sections, lists or rows |
+| `Tab` / `Shift+Tab` | Cycle focus across Search, Help, Library, Playlists and the open content (without entering a section) |
 | `Left` / `Right` | Move between the menu and the active view |
 | `Enter` | Open, select or play the focused item |
 | `/` | Focus the search input |
