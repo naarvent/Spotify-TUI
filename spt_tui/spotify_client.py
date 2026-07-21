@@ -330,34 +330,56 @@ class SpotifyClient:
     def recently_played(self, limit=50):
         return self.ensure().current_user_recently_played(limit=limit)
 
-    def check_saved_tracks(self, ids: List[str]) -> List[bool]:
+    # Max ids per call to the saved-tracks endpoints. spotipy routes all three
+    # through `me/library` with the ids in the query string, and that endpoint
+    # answers `400 Too many uris requested` above 40 — measured against the live
+    # API: 40 succeeds, 41 does not. It used to be 50 here, so *every* batch was
+    # rejected and fell through to the per-id retry below: 51 requests instead of
+    # 1, ~612 for a 600-track playlist, and a logged traceback per batch.
+    SAVED_BATCH = 40
+
+    def check_saved_tracks(self, ids: List[str], on_batch=None) -> List[bool]:
         """Return one bool per id (aligned to `ids`). Never raises: a single
         bad id (local track, episode, unavailable) in a batch would otherwise
-        make the whole call fail — which zeroed the hearts on big playlists."""
+        make the whole call fail — which zeroed the hearts on big playlists.
+
+        The API takes 50 ids per call, so a long playlist means many sequential
+        calls. `on_batch(start_index, values)` is invoked as each batch lands, so
+        a caller can show those hearts instead of waiting for the last batch.
+        """
         out: List[bool] = []
-        for i in range(0, len(ids), 50):
-            batch = ids[i:i + 50]
+        for i in range(0, len(ids), self.SAVED_BATCH):
+            batch = ids[i:i + self.SAVED_BATCH]
+            vals: List[bool] = []
             try:
                 res = self.ensure().current_user_saved_tracks_contains(batch)
                 if res is None or len(res) != len(batch):
                     raise ValueError("unexpected saved_tracks_contains response")
-                out.extend(bool(x) for x in res)
-            except Exception:
-                logger.exception("check_saved_tracks: batch failed, retrying individually")
+                vals = [bool(x) for x in res]
+            except Exception as exc:
+                logger.warning("check_saved_tracks: batch of %d failed (%s), "
+                               "retrying one id at a time", len(batch),
+                               str(exc).split(" - ")[0])
                 for tid in batch:
                     try:
                         r = self.ensure().current_user_saved_tracks_contains([tid])
-                        out.append(bool(r[0]) if r else False)
+                        vals.append(bool(r[0]) if r else False)
                     except Exception:
-                        out.append(False)
+                        vals.append(False)
+            out.extend(vals)
+            if on_batch is not None:
+                try:
+                    on_batch(i, vals)
+                except Exception:
+                    logger.exception("check_saved_tracks: on_batch callback failed")
         return out
 
     def save_tracks(self, ids: List[str]) -> bool:
         """Return True only if the save actually went through (callers rely on
         this to avoid showing a confirmed state on failure)."""
         try:
-            for chunk in range(0, len(ids), 50):
-                self.ensure().current_user_saved_tracks_add(ids[chunk:chunk+50])
+            for chunk in range(0, len(ids), self.SAVED_BATCH):
+                self.ensure().current_user_saved_tracks_add(ids[chunk:chunk + self.SAVED_BATCH])
             return True
         except Exception:
             logger.exception("Error save_tracks")
@@ -365,8 +387,8 @@ class SpotifyClient:
 
     def remove_tracks(self, ids: List[str]) -> bool:
         try:
-            for chunk in range(0, len(ids), 50):
-                self.ensure().current_user_saved_tracks_delete(ids[chunk:chunk+50])
+            for chunk in range(0, len(ids), self.SAVED_BATCH):
+                self.ensure().current_user_saved_tracks_delete(ids[chunk:chunk + self.SAVED_BATCH])
             return True
         except Exception:
             logger.exception("Error remove_tracks")

@@ -28,7 +28,8 @@ class SptPy(
 ):
     TITLE = "spt - Spotify TUI (Python)"
     CSS = (
-        "Screen { layout: vertical; background: #0b1e24; color: #a9d5d9; }\n"
+        "Screen { layout: vertical; background: #0b1e24; color: #a9d5d9; "
+        "layers: base overlay; }\n"
         "#grid { layout: grid; grid-size: 2 3; grid-gutter: 0 0; "
         "grid-columns: 38 1fr; grid-rows: auto 1fr auto; height: 1fr; margin: 0; padding: 0; }\n"
         "#top_bar { column-span: 2; layout: horizontal; margin: 0; padding: 0; align-vertical: middle; }\n"
@@ -75,6 +76,14 @@ class SptPy(
         "border-title-color: #93e1e1; border-title-align: left; }\n"
         ".search-panel:focus-within { border: round #27e1c1; }\n"
         ".search-panel > DataTable, .search-panel > DataTable:focus { height: 1fr; border: none; background: transparent; overflow-x: hidden; }\n"
+        # Transient feedback. It lives on an overlay layer docked to the bottom
+        # so it shows *over* a content table: written into #right it would sit
+        # behind the table (a mounted child covers the panel's own content) and
+        # never be seen. Hidden until there is something to say.
+        "#status_line { layer: overlay; dock: bottom; width: 100%; height: 1; "
+        "padding: 0 1; background: #123; color: #d7f7ef; display: none; }\n"
+        "#status_line.-shown { display: block; }\n"
+        "#status_line.-warn { background: #4a2a12; color: #ffd9a8; }\n"
         "#now_wrap { column-span: 2; layout: vertical; border: round #1a3a40; margin: 0; padding: 0 1; height: 5; }\n"
         "#now_wrap.-playing { border: round #27e1c1; }\n"
         "#np_title { height: 1; padding: 0; margin: 0; text-align: left; }\n"
@@ -107,7 +116,7 @@ class SptPy(
         ("m", "toggle_mute", "Mute"),
         ("ctrl+left", "seek_back", "- s"),
         ("ctrl+right", "seek_fwd", "+ s"),
-        ("<", "prompt_seek_settings", "Seek Settings"),
+        ("<", "prompt_settings", "Settings"),
         ("d", "manage_devices", "Devices"),
         ("?", "help", "Help"),
         ("f1", "help", "Help"),
@@ -119,5 +128,5 @@ class SptPy(
         ("ctrl+l", "toggle_multi_add", "Multi-Add"),
         ("ctrl+shift+p", "add_to_playlist", "Add to Playlist"),
         ("ctrl+d", "delete", "Delete"),
-
+        ("ctrl+b", "toggle_sidebar", "Sidebar"),
     ]

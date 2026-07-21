@@ -41,7 +41,7 @@ class QueueDevicesMixin:
                 rtype = getattr(focused, 'row_to_type', {}).get(row)
                 if rtype not in (None, 'track', 'single'):
                     try:
-                        self.right_panel.update('[b]Only tracks can be added to the queue from search results.[/b]')
+                        self._notify('[b]Only tracks can be added to the queue from search results.[/b]', warn=True)
                     except Exception:
                         pass
                     return
@@ -69,7 +69,7 @@ class QueueDevicesMixin:
                 except Exception as e:
                     err_msg = rich_escape(str(e))
                     try:
-                        self.call_from_thread(lambda: self.right_panel.update(f"[b]Could not add to queue:[/b] {err_msg}"))
+                        self.call_from_thread(lambda: self._notify(f"[b]Could not add to queue:[/b] {err_msg}", warn=True))
                     except Exception:
                         pass
                     logger.exception("queue_track failed")
@@ -88,14 +88,14 @@ class QueueDevicesMixin:
                 except Exception:
                     logger.exception("Could not record local queue item")
                 try:
-                    self.call_from_thread(lambda: self.right_panel.update(f"[b]Added to queue:[/b] {rich_escape(title)}"))
+                    self.call_from_thread(lambda: self._notify(f"[b]Added to queue:[/b] {rich_escape(title)}"))
                 except Exception:
                     pass
             threading.Thread(target=worker, daemon=True).start()
         except Exception as e:
             err_msg = rich_escape(str(e))
             try:
-                self.right_panel.update(f"[b]Could not add to queue:[/b] {err_msg}")
+                self._notify(f"[b]Could not add to queue:[/b] {err_msg}", warn=True)
             except Exception:
                 pass
             logger.exception("queue_track failed")
@@ -122,43 +122,234 @@ class QueueDevicesMixin:
                         except Exception:
                             continue
                     try:
-                        self.right_panel.update(f"[b]Selected {len(sel_all)} items.[/b]")
+                        self._notify(f"[b]Selected {len(sel_all)} items.[/b]")
                     except Exception:
                         pass
                 except Exception:
                     logger.exception('action_add_to_playlist (select-all) failed')
                 return
             if not isinstance(focused, DataTable):
-                self.right_panel.update("[b]Select a track or episode in the list first.[/b]")
+                self._notify("[b]Select a track or episode in the list first.[/b]")
                 return
             row = self._get_cursor_row(focused)
             if row is None:
-                self.right_panel.update("[b]No row selected. Move to a track and try again.[/b]")
+                self._notify("[b]No row selected. Move to a track and try again.[/b]", warn=True)
                 return
-            uri = getattr(focused, 'row_to_uri', {}).get(row) or getattr(focused, 'row_to_id', {}).get(row)
-            if not uri:
-                self.right_panel.update('[b]Could not determine URI for selected item.[/b]')
-                return
-            try:
-                s = str(uri)
-                norm = None
-                if s.startswith('spotify:'):
-                    norm = s
-                elif 'open.spotify.com' in s:
-                    try:
-                        norm_id = s.split('/')[-1].split('?')[0]
-                        norm = f'spotify:track:{norm_id}'
-                    except Exception:
-                        norm = s
-                else:
-                    tid = self.spotify._normalize_track_id(s) or s
-                    norm = f'spotify:track:{tid}'
+            rtype, item_id, uri, name = self._row_add_target(focused, row)
+
+            # A single playable item adds straight away. This is the common case
+            # and also what happens when you are *inside* an album/playlist/artist
+            # looking at its individual track (or episode) rows.
+            if rtype in ("track", "episode"):
+                norm = self._as_add_uri(uri or item_id, rtype)
+                if not norm:
+                    self._notify('[b]Could not determine the URI for the selected item.[/b]', warn=True)
+                    return
+                self._pending_multi_add_uris = None
                 self._pending_add_uri = norm
-            except Exception:
-                self._pending_add_uri = uri
-            self._show_playlists_for_adding()
+                self._show_playlists_for_adding()
+                return
+
+            # A container row (album/single/playlist/artist/podcast) selected from
+            # a listing: gather every track/episode it holds and add them all.
+            if not item_id:
+                self._notify('[b]Could not identify the selected item.[/b]', warn=True)
+                return
+            self._gather_container_and_add(rtype, item_id, name)
         except Exception:
             logger.exception('action_add_to_playlist failed')
+
+    # A container with more than this many tracks asks for confirmation before
+    # the bulk add, so a stray Ctrl+Shift+P on a huge playlist or an artist's
+    # whole discography cannot silently dump hundreds of tracks into a playlist.
+    _BULK_ADD_CONFIRM_MIN = 25
+
+    def _row_add_target(self, table, row):
+        """(rtype, item_id, uri, name) for the row under the cursor.
+
+        A ``tracks_table`` has no ``row_to_type`` (its rows are always plain
+        tracks); the search / saved-library tables carry the type per row."""
+        rtype = (getattr(table, "row_to_type", {}) or {}).get(row) or "track"
+        item_id = (getattr(table, "row_to_id", {}) or {}).get(row)
+        uri = (getattr(table, "row_to_uri", {}) or {}).get(row)
+        obj = (getattr(table, "row_to_obj", {}) or {}).get(row) or {}
+        if not item_id:
+            item_id = obj.get("id")
+        model = getattr(table, "_model_rows", None)
+        name = ""
+        if model and 0 <= row < len(model):
+            name = (model[row] or {}).get("title", "") or ""
+        return rtype, item_id, uri, name
+
+    def _as_add_uri(self, raw, rtype="track"):
+        """Normalise a single item's URI for ``playlist_add_items``. Tracks and
+        episodes are the only kinds a playlist accepts."""
+        if not raw:
+            return None
+        s = str(raw)
+        if s.startswith("spotify:"):
+            return s
+        if "open.spotify.com" in s:
+            kind = "episode" if "/episode/" in s else "track"
+            try:
+                ident = s.split("/")[-1].split("?")[0]
+                return f"spotify:{kind}:{ident}"
+            except Exception:
+                return s
+        kind = "episode" if rtype == "episode" else "track"
+        ident = (self.spotify._normalize_track_id(s) or s)
+        return f"spotify:{kind}:{ident}"
+
+    def _gather_container_and_add(self, rtype, item_id, name):
+        """Fetch every track/episode a container holds (off the UI thread) and
+        then hand off to the playlist picker, confirming first when it is big."""
+        # Snapshot the view we launched from: an artist's whole discography is
+        # many calls, and a gather that finishes after the user has moved on must
+        # not pop a picker over an unrelated view.
+        rv = getattr(self, "_right_view", None)
+        origin = tuple(rv[:3]) if rv and len(rv) >= 3 else None
+        label = name or rtype
+        try:
+            self._notify(f"[b]Gathering tracks from[/b] {rich_escape(label)} …", seconds=20)
+        except Exception:
+            pass
+
+        def worker():
+            try:
+                uris = self._collect_container_uris(rtype, item_id)
+            except Exception:
+                logger.exception("gather container %s %s failed", rtype, item_id)
+                uris = None
+
+            def done():
+                cur = getattr(self, "_right_view", None)
+                cur3 = tuple(cur[:3]) if cur and len(cur) >= 3 else None
+                if origin is not None and cur3 != origin:
+                    return  # user navigated away while we were fetching
+                try: self._clear_status_line()
+                except Exception: pass
+                if uris is None:
+                    self._notify(f"[b]Could not gather tracks from[/b] {rich_escape(label)}.", warn=True)
+                    return
+                if not uris:
+                    self._notify(f"[b]Nothing to add from[/b] {rich_escape(label)}.", warn=True)
+                    return
+                self._pending_add_uri = None
+                if len(uris) > self._BULK_ADD_CONFIRM_MIN:
+                    self._confirm_bulk_add(uris, label)
+                else:
+                    self._pending_multi_add_uris = uris
+                    self._show_playlists_for_adding()
+
+            try:
+                self.call_from_thread(done)
+            except Exception:
+                if not getattr(self, "_closing", False):
+                    logger.exception("gather container done() failed")
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _collect_container_uris(self, rtype, item_id):
+        sp = self.spotify.ensure()
+        if rtype in ("album", "single"):
+            return self._album_track_uris(sp, item_id)
+        if rtype == "playlist":
+            return self._playlist_track_uris(item_id)
+        if rtype == "podcast":
+            return self._show_episode_uris(sp, item_id)
+        if rtype == "artist":
+            return self._artist_track_uris(sp, item_id)
+        return []
+
+    @staticmethod
+    def _album_track_uris(sp, album_id):
+        uris, offset = [], 0
+        while True:
+            pg = sp.album_tracks(album_id, limit=50, offset=offset) or {}
+            for t in pg.get("items", []) or []:
+                u = (t or {}).get("uri")
+                if u:
+                    uris.append(u)
+            if pg.get("next"):
+                offset += 50
+            else:
+                break
+        return uris
+
+    def _playlist_track_uris(self, playlist_id):
+        uris, offset = [], 0
+        while True:
+            pg = self.spotify.playlist_items(
+                playlist_id, limit=100, offset=offset,
+                fields="items(track(uri)),next") or {}
+            items = pg.get("items", []) or []
+            for it in items:
+                u = ((it or {}).get("track") or {}).get("uri")
+                if u:
+                    uris.append(u)
+            if pg.get("next") and items:
+                offset += 100
+            else:
+                break
+        return uris
+
+    @staticmethod
+    def _show_episode_uris(sp, show_id):
+        uris, offset = [], 0
+        while True:
+            pg = sp.show_episodes(show_id, limit=50, offset=offset) or {}
+            items = pg.get("items", []) or []
+            for e in items:
+                u = (e or {}).get("uri")
+                if u:
+                    uris.append(u)
+            if pg.get("next"):
+                offset += 50
+            else:
+                break
+        return uris
+
+    def _artist_track_uris(self, sp, artist_id):
+        """Every track across the artist's albums and singles (the full
+        discography the user asked for), de-duplicated."""
+        album_ids, seen = [], set()
+        for atype in ("album", "single"):
+            offset = 0
+            while True:
+                try:
+                    pg = sp.artist_albums(artist_id, album_type=atype, limit=50, offset=offset) or {}
+                except TypeError:
+                    pg = sp.artist_albums(artist_id, album_type=atype, limit=50) or {}
+                    for a in pg.get("items", []) or []:
+                        aid = (a or {}).get("id")
+                        if aid and aid not in seen:
+                            seen.add(aid); album_ids.append(aid)
+                    break
+                for a in pg.get("items", []) or []:
+                    aid = (a or {}).get("id")
+                    if aid and aid not in seen:
+                        seen.add(aid); album_ids.append(aid)
+                if pg.get("next"):
+                    offset += 50
+                else:
+                    break
+        uris, seen_u = [], set()
+        for aid in album_ids:
+            for u in self._album_track_uris(sp, aid):
+                if u and u not in seen_u:
+                    seen_u.add(u); uris.append(u)
+        return uris
+
+    def _confirm_bulk_add(self, uris, label):
+        """Make the user acknowledge the count before taking over the picker."""
+        self._pending_container_add = {"uris": list(uris), "label": label}
+        self._new_view_token("confirm_bulk_add", "")
+        right = self._clear_right()
+        right.update(
+            f"[b]Add {len(uris)} tracks from[/b] {rich_escape(label)}[b]?[/b]\n\n"
+            "Press [b]Enter[/b] to choose a playlist, or [b]Esc[/b] to cancel."
+        )
+        self.level = self.LVL_VIEW
 
     def action_open_queue(self):
         self._leave_lyrics_mode()
@@ -177,13 +368,14 @@ class QueueDevicesMixin:
 
         table = self._create_table_with_full_width(
             ["#", "♥", "Title", "Artist", "Album", "Duration", "Source"],
-            fixed_widths={0: 3, 5: 9},
-            widget_id="queue_table",
+            ["num", "heart", "title", "artist", "album", "dur", "source"],
+            widget_id="queue_table", fields_attr="_queue_fields",
         )
         table.row_to_uri = {}; table.row_to_title = {}; table.row_to_id = {}
         right.mount(table)
         try: table.focus()
         except Exception: pass
+        self._refit_after_mount(table)
         self.level = self.LVL_VIEW
 
         try:
@@ -293,7 +485,8 @@ class QueueDevicesMixin:
             table = None
         if table is None:
             table = self._create_table_with_full_width(
-                ["", "Name", "Type"], fixed_widths={0: 3, 2: 14}, widget_id="devices_table")
+                ["", "Name", "Type"], ["mark", "title", "device_type"],
+                widget_id="devices_table", fields_attr="_device_fields")
             right.mount(Static("[b]Devices[/b] (Press Enter to transfer)", markup=True))
             right.mount(table)
         table.focus()
@@ -343,6 +536,22 @@ class QueueDevicesMixin:
             except Exception:
                 logger.exception("devices paint scheduling failed")
         threading.Thread(target=worker, daemon=True).start()
+
+    def _queue_cells(self, item: dict, index: int, fields):
+        """Build one queue row's cells for the surviving field list — the fitter
+        drops low-priority columns on a narrow terminal, so the cells have to
+        follow the header rather than a fixed order."""
+        heart = Text("❤", style="bold red") if bool(item.get('liked', False)) else Text("")
+        cell_map = {
+            "num": str(index + 1),
+            "heart": heart,
+            "title": item.get('title', ''),
+            "artist": item.get('artist', ''),
+            "album": item.get('album', ''),
+            "dur": item.get('dur', ''),
+            "source": item.get('source', ''),
+        }
+        return [cell_map[f] for f in fields]
 
     def _refresh_queue_table(self):
         def worker():
@@ -465,15 +674,17 @@ class QueueDevicesMixin:
                         table.row_to_uri = {}
                         table.row_to_title = {}
                         table.row_to_id = {}
+                        table._model_rows = list(q)
+                        fields = getattr(table, "_queue_fields", None) or [
+                            "num", "heart", "title", "artist", "album", "dur", "source"]
                         for i, item in enumerate(q):
-                            heart = Text("❤", style="bold red") if bool(item.get('liked', False)) else Text("")
                             try:
-                                table.add_row(str(i+1), heart, item.get('title',''), item.get('artist',''), item.get('album',''), item.get('dur',''), item.get('source',''), key=i)
+                                table.add_row(*self._queue_cells(item, i, fields), key=i)
                             except Exception:
                                 try:
-                                    table.add_row(str(i+1), heart, item.get('title',''), item.get('artist',''), item.get('album',''), item.get('dur',''), key=i)
+                                    table.add_row(str(i+1), item.get('title',''), key=i)
                                 except Exception:
-                                    table.add_row(str(i+1), heart, item.get('title',''), key=i)
+                                    pass
                             table.row_to_uri[i] = item.get('uri')
                             table.row_to_title[i] = f"{item.get('title','')} {GLYPHS['sep']} {item.get('artist','')}"
                         try: table.refresh()

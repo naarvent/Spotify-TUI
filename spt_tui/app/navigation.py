@@ -6,6 +6,7 @@ import threading
 
 from textual.widgets import Input, Static, ListView, ListItem, Label, DataTable
 from textual.events import Key
+from textual.css.query import NoMatches
 from rich.markup import escape as rich_escape
 
 try:
@@ -123,11 +124,62 @@ class NavigationMixin:
         except Exception:
             logger.exception("_focus_help_box failed")
 
+    # Tab order across the top-level focus stops, matching the visual layout:
+    # Search and Help on top, then Library and Playlists, then the open content.
+    _TAB_STOPS = ("search", "help", "lib", "pl", "content")
+
+    def _current_tab_stop(self) -> str:
+        if getattr(self, "_help_focused", False):
+            return "help"
+        # Focus somewhere inside the right-hand content panel?
+        try:
+            foc = getattr(self, "focused", None)
+            rp = getattr(self, "right_panel", None)
+            node = foc
+            while node is not None:
+                if node is rp:
+                    return "content"
+                node = getattr(node, "parent", None)
+        except Exception:
+            pass
+        if self.level in (self.LVL_SECTIONS, self.LVL_SECTION_CONTENT):
+            if 0 <= self.section_idx < len(self.section_order):
+                return self.section_order[self.section_idx]
+        return "search"
+
+    def _focus_tab_stop(self, stop: str) -> bool:
+        """Move focus to one stop without entering a section's content. Returns
+        False if the stop has nothing to focus (e.g. no content view is open)."""
+        try:
+            if stop == "help":
+                self._focus_help_box(); return True
+            if stop == "content":
+                return self._focus_right_view()
+            if stop in self.section_order:
+                self._focus_section_by_idx(self.section_order.index(stop))
+                return True
+        except Exception:
+            logger.exception("_focus_tab_stop(%r) failed", stop)
+        return False
+
+    def _cycle_tab(self, step: int) -> None:
+        stops = self._TAB_STOPS
+        try:
+            i = stops.index(self._current_tab_stop())
+        except ValueError:
+            i = 0
+        n = len(stops)
+        # Walk to the next focusable stop, skipping any that can't take focus
+        # (e.g. "content" when only the welcome screen is up).
+        for k in range(1, n + 1):
+            if self._focus_tab_stop(stops[(i + step * k) % n]):
+                return
+
     def action_cursor_up(self):
         try:
             focused = getattr(self, 'focused', None)
             rv = getattr(self, '_right_view', None)
-            if isinstance(focused, Input) and rv and isinstance(rv, (tuple, list)) and len(rv) >= 1 and rv[0] == 'seek_settings':
+            if isinstance(focused, Input) and rv and isinstance(rv, (tuple, list)) and len(rv) >= 1 and rv[0] == 'settings':
                 return
             self._focus_section_by_idx((self.section_idx - 1) % len(self.section_order))
         except Exception:
@@ -137,7 +189,7 @@ class NavigationMixin:
         try:
             focused = getattr(self, 'focused', None)
             rv = getattr(self, '_right_view', None)
-            if isinstance(focused, Input) and rv and isinstance(rv, (tuple, list)) and len(rv) >= 1 and rv[0] == 'seek_settings':
+            if isinstance(focused, Input) and rv and isinstance(rv, (tuple, list)) and len(rv) >= 1 and rv[0] == 'settings':
                 return
             self._focus_section_by_idx((self.section_idx + 1) % len(self.section_order))
         except Exception:
@@ -162,6 +214,20 @@ class NavigationMixin:
                     self._search_capture_next = False
 
             focused = getattr(self, "focused", None)
+
+            # Tab / Shift+Tab cycle focus across the top-level stops (Search,
+            # Help, Library, Playlists, main content) without diving into any
+            # section's content. A form Input keeps its normal Tab traversal, and
+            # the search grid's own panels consume Tab before this (widgets.py),
+            # so this never fires while cycling result panels.
+            if getattr(event, "key", "") in ("tab", "shift+tab", "backtab"):
+                if isinstance(focused, Input) and focused is not getattr(self, "search_input", None):
+                    return
+                step = -1 if event.key in ("shift+tab", "backtab") else 1
+                try: event.stop(); event.prevent_default()
+                except Exception: pass
+                self._cycle_tab(step)
+                return
 
             # RIGHT arrow behaviour:
             #  - inside an open view (LVL_VIEW): do nothing, never steal focus out.
@@ -192,11 +258,11 @@ class NavigationMixin:
 
             try:
                 rv = getattr(self, '_right_view', None)
-                if isinstance(focused, Input) and rv and isinstance(rv, (tuple, list)) and len(rv) >= 1 and rv[0] == 'seek_settings':
+                if isinstance(focused, Input) and rv and isinstance(rv, (tuple, list)) and len(rv) >= 1 and rv[0] == 'settings':
                     key = getattr(event, 'key', None)
                     inputs = []
                     try:
-                        inputs = [getattr(self, 'seek_vol_down_input', None), getattr(self, 'seek_vol_up_input', None), getattr(self, 'seek_track_input', None), getattr(self, 'seek_episode_input', None)]
+                        inputs = [getattr(self, 'seek_vol_down_input', None), getattr(self, 'seek_vol_up_input', None), getattr(self, 'seek_track_input', None), getattr(self, 'seek_episode_input', None), getattr(self, 'lyrics_cache_input', None)]
                         inputs = [i for i in inputs if i is not None]
                     except Exception:
                         inputs = []
@@ -252,7 +318,7 @@ class NavigationMixin:
                         left_col = self.query_one('#left_col')
                         try:
                             rv = getattr(self, '_right_view', None)
-                            if left_col and _is_within(focused, 'left_col') and rv and isinstance(rv, (tuple, list)) and len(rv) >= 1 and rv[0] == 'seek_settings':
+                            if left_col and _is_within(focused, 'left_col') and rv and isinstance(rv, (tuple, list)) and len(rv) >= 1 and rv[0] == 'settings':
                                 rp = getattr(self, 'right_panel', None)
                                 if rp:
                                     # focus first Input child
@@ -309,7 +375,7 @@ class NavigationMixin:
                                     except Exception: self._last_right_focus = None
                             try:
                                 rv = getattr(self, '_right_view', None)
-                                if rv and isinstance(rv, (tuple, list)) and len(rv) >= 1 and rv[0] == 'seek_settings':
+                                if rv and isinstance(rv, (tuple, list)) and len(rv) >= 1 and rv[0] == 'settings':
                                     rp = getattr(self, 'right_panel', None)
                                     if rp:
                                         for ch in rp.children:
@@ -453,7 +519,7 @@ class NavigationMixin:
                         pass
                     focused = getattr(self, 'multi_review_list', None)
                     if not focused:
-                        try: self.right_panel.update('[b]No items to add.[/b]')
+                        try: self._notify('[b]No items to add.[/b]', warn=True)
                         except Exception: pass
                         return
                     sel_all = set()
@@ -481,7 +547,7 @@ class NavigationMixin:
                     except Exception:
                         logger.exception('Failed updating multi-review labels for select-all')
                     try:
-                        self.right_panel.update(f"[b]Selected {len(sel_all)} items.[/b]")
+                        self._notify(f"[b]Selected {len(sel_all)} items.[/b]")
                     except Exception:
                         pass
                     return
@@ -494,7 +560,7 @@ class NavigationMixin:
                     sel = getattr(self, '_multi_review_selected', set())
                     focused = getattr(self, 'multi_review_list', None)
                     if not focused:
-                        try: self.right_panel.update('[b]No items to add.[/b]')
+                        try: self._notify('[b]No items to add.[/b]', warn=True)
                         except Exception: pass
                         return
                     uris = []
@@ -507,7 +573,7 @@ class NavigationMixin:
                         except Exception:
                             continue
                     if not uris:
-                        try: self.right_panel.update('[b]No items selected to add.[/b]')
+                        try: self._notify('[b]No items selected to add.[/b]', warn=True)
                         except Exception: pass
                         return
                     self._pending_multi_add_uris = uris
@@ -518,7 +584,7 @@ class NavigationMixin:
                 if event.key == "a" and getattr(event, 'ctrl', False):
                     table = getattr(self, '_multi_add_table', None) or (focused if isinstance(focused, DataTable) else None)
                     if table is None:
-                        try: self.right_panel.update('[b]No table selected for multi-add.[/b]')
+                        try: self._notify('[b]No table selected for multi-add.[/b]', warn=True)
                         except Exception: pass
                         return
                     try:
@@ -528,7 +594,7 @@ class NavigationMixin:
                     except Exception:
                         candidates = []
                     if not candidates:
-                        try: self.right_panel.update('[b]No selectable rows found in table.[/b]')
+                        try: self._notify('[b]No selectable rows found in table.[/b]', warn=True)
                         except Exception: pass
                         return
                     all_sel = all((r in self._multi_add_selected_rows) for r in candidates)
@@ -540,7 +606,7 @@ class NavigationMixin:
                     for r in list(self._multi_add_selected_rows)[:10]:
                         titles.append(getattr(table, 'row_to_title', {}).get(r, ''))
                     try:
-                        self.right_panel.update(f"[b]Multi-add mode:[/b] {len(self._multi_add_selected_rows)} selected\n[dim]{' | '.join(titles)}[/dim]\nPress Ctrl+Enter to choose playlist, Esc to cancel.")
+                        self._notify(f"[b]Multi-add:[/b] {len(self._multi_add_selected_rows)} selected  [dim]{' | '.join(titles)}[/dim]  Ctrl+Enter to choose playlist, Esc to cancel.", sticky=True)
                     except Exception:
                         pass
                     return
@@ -549,7 +615,7 @@ class NavigationMixin:
                     if getattr(event, 'ctrl', False):
                         table = getattr(self, '_multi_add_table', None)
                         if table is None:
-                            try: self.right_panel.update('[b]No table selected for multi-add.[/b]')
+                            try: self._notify('[b]No table selected for multi-add.[/b]', warn=True)
                             except Exception: pass
                             return
                         uris = []
@@ -557,7 +623,7 @@ class NavigationMixin:
                             u = getattr(table, 'row_to_uri', {}).get(r) or getattr(table, 'row_to_id', {}).get(r)
                             if u: uris.append(u)
                         if not uris:
-                            try: self.right_panel.update('[b]No tracks selected to add.[/b]')
+                            try: self._notify('[b]No tracks selected to add.[/b]', warn=True)
                             except Exception: pass
                             return
                         self._pending_multi_add_uris = uris
@@ -569,7 +635,7 @@ class NavigationMixin:
                         table = focused
                         row = self._get_cursor_row(table)
                         if row is None:
-                            try: self.right_panel.update('[b]No row selected. Move to a track and press Enter to select.[/b]')
+                            try: self._notify('[b]No row selected. Move to a track and press Enter to select.[/b]', warn=True)
                             except Exception: pass
                             return
                         if getattr(self, '_multi_add_table', None) is None:
@@ -584,7 +650,7 @@ class NavigationMixin:
                         for r in list(self._multi_add_selected_rows)[:10]:
                             titles.append(getattr(table, 'row_to_title', {}).get(r, ''))
                         try:
-                            self.right_panel.update(f"[b]Multi-add mode:[/b] {len(self._multi_add_selected_rows)} selected\n[dim]{' | '.join(titles)}[/dim]\nPress Ctrl+Enter to choose playlist, Esc to cancel.")
+                            self._notify(f"[b]Multi-add:[/b] {len(self._multi_add_selected_rows)} selected  [dim]{' | '.join(titles)}[/dim]  Ctrl+Enter to choose playlist, Esc to cancel.", sticky=True)
                         except Exception:
                             pass
                         return
@@ -619,6 +685,18 @@ class NavigationMixin:
                 return
             if event.key == "enter":
                 focused = getattr(self, "focused", None)
+                # A big-container add first asks for confirmation on its own
+                # screen; Enter there means "yes, choose a playlist".
+                pend = getattr(self, "_pending_container_add", None)
+                rvc = getattr(self, "_right_view", None)
+                if pend and rvc and rvc[0] == "confirm_bulk_add":
+                    try: event.stop()
+                    except Exception: pass
+                    self._pending_container_add = None
+                    self._pending_multi_add_uris = pend.get("uris") or None
+                    self._pending_add_uri = None
+                    self._show_playlists_for_adding()
+                    return
                 try:
                     if isinstance(focused, ListView) and getattr(focused, "id", None) == "add_pl_list":
                         event.stop()
@@ -655,6 +733,8 @@ class NavigationMixin:
                                         except Exception:
                                             pass
                                 if ok:
+                                    # The cached tracks no longer match the playlist.
+                                    self._invalidate_playlist_cache(pl_id)
                                     try:
                                         right.update(f"[b]Added to playlist:[/b] {rich_escape(pl_name)}")
                                     except Exception:
@@ -673,6 +753,7 @@ class NavigationMixin:
                                 self._pending_multi_add_uris = None
                                 try:
                                     self._multi_add_mode = False
+                                    self._clear_status_line()
                                     self._multi_add_table = None
                                     self._multi_add_selected_rows.clear()
                                 except Exception:
@@ -691,7 +772,41 @@ class NavigationMixin:
         except Exception:
             logger.exception("on_key error")
 
+    def action_toggle_sidebar(self) -> None:
+        """Hide/show the left column, giving its 38 fixed columns to the content.
+
+        The CSS for the collapsed state already existed and `_welcome_dims` read
+        the class, but nothing ever set it, so the sidebar could not be hidden.
+        """
+        try:
+            grid = self.query_one("#grid")
+            left = self.query_one("#left_col")
+        except NoMatches:
+            return
+        collapsed = not grid.has_class("left-collapsed")
+        grid.set_class(collapsed, "left-collapsed")
+        left.set_class(collapsed, "left-collapsed")
+        if collapsed:
+            # Focus cannot stay on a hidden widget.
+            try:
+                self._focus_right_view()
+            except Exception:
+                logger.debug("focusing the content panel after collapsing failed")
+        self._notify("[b]Sidebar hidden[/b]  press again to show it" if collapsed
+                     else "[b]Sidebar shown[/b]")
+        if getattr(self, "_welcome_on", False):
+            # The welcome art is sized to the panel, so re-render it at the new
+            # width; tables re-fit themselves from ContentPanel.on_resize.
+            try:
+                self.call_after_refresh(self._paint_welcome)
+            except Exception:
+                logger.debug("repainting the welcome after collapsing failed")
+
     def action_escape_to_menu(self) -> None:
+        # Escape backs out of an armed removal instead of leaving the view.
+        if getattr(self, "_pending_remove_track", None):
+            self._cancel_remove_track()
+            return
         try:
             self.right_panel.remove_class("lyrics-mode")
         except Exception: pass
@@ -735,9 +850,15 @@ class NavigationMixin:
         try:
             if getattr(self, '_multi_add_mode', False):
                 self._multi_add_mode = False
+                self._clear_status_line()
                 self._multi_add_table = None
                 self._multi_add_selected_rows.clear()
                 self._pending_multi_add_uris = None
+        except Exception:
+            pass
+        # A pending big-container add confirmation is abandoned by leaving.
+        try:
+            self._pending_container_add = None
         except Exception:
             pass
         try:
@@ -847,6 +968,7 @@ class NavigationMixin:
         try:
             if getattr(self, '_multi_add_mode', False):
                 self._multi_add_mode = False
+                self._clear_status_line()
                 self._multi_add_table = None
                 self._multi_add_selected_rows.clear()
                 self._pending_multi_add_uris = None
@@ -856,7 +978,7 @@ class NavigationMixin:
 
             focused = getattr(self, 'focused', None)
             if not isinstance(focused, DataTable):
-                try: self.right_panel.update('[b]Focus a track table (search/playlist/liked) and press Ctrl+L to open multi-review.[/b]')
+                try: self._notify('[b]Focus a track table (search/playlist/liked) and press Ctrl+L to open multi-review.[/b]')
                 except Exception: pass
                 return
 
@@ -951,6 +1073,10 @@ class NavigationMixin:
 
     def action_delete(self) -> None:
         try:
+            # A removal is armed: this second press is the confirmation.
+            if getattr(self, "_pending_remove_track", None):
+                self._apply_pending_remove_track()
+                return
             focused = getattr(self, 'focused', None)
             if isinstance(focused, ListView) and getattr(focused, 'id', '') == 'pl_list' and focused.index is not None:
                 li: ListItem = focused.children[focused.index]
@@ -958,7 +1084,7 @@ class NavigationMixin:
                 pl_name = pdata.get('name') or ''
                 pl_id = pdata.get('id')
                 if not pl_id:
-                    try: self.right_panel.update('[b]Could not determine playlist id to delete.[/b]')
+                    try: self._notify('[b]Could not determine playlist id to delete.[/b]', warn=True)
                     except Exception: pass
                     return
                 self._new_view_token('confirm_delete', pl_id)
@@ -975,7 +1101,7 @@ class NavigationMixin:
             if isinstance(focused, DataTable) and getattr(focused, 'id', '') == 'tracks_table':
                 row = self._get_cursor_row(focused)
                 if row is None:
-                    try: self.right_panel.update('[b]No track selected to delete.[/b]')
+                    try: self._notify('[b]No track selected to delete.[/b]', warn=True)
                     except Exception: pass
                     return
                 rv = getattr(self, '_right_view', None)
@@ -983,64 +1109,103 @@ class NavigationMixin:
                 if rv and len(rv) >= 3 and rv[0] == 'playlist':
                     pl_id = rv[1]; pdata = rv[3]
                 if not pl_id:
-                    try: self.right_panel.update('[b]Not viewing a playlist; cannot delete track here.[/b]')
+                    try: self._notify('[b]Not viewing a playlist; cannot delete track here.[/b]')
                     except Exception: pass
                     return
                 uri = getattr(focused, 'row_to_uri', {}).get(row) or getattr(focused, 'row_to_id', {}).get(row)
                 if not uri:
-                    try: self.right_panel.update('[b]Could not determine track URI to remove.[/b]')
+                    try: self._notify('[b]Could not determine track URI to remove.[/b]', warn=True)
                     except Exception: pass
                     return
 
-                def _worker_remove(pid, track_uri, pdata_local):
-                    try:
-                        sp = self.spotify.ensure()
-                        tid = self.spotify._normalize_track_id(track_uri) or track_uri
-                        candidates = [track_uri, f'spotify:track:{tid}', f'spotify:episode:{tid}']
-                        removed = False
-                        methods = [
-                            'playlist_remove_all_occurrences_of_items',
-                            'playlist_remove_specific_occurrences_of_items',
-                            'playlist_remove_items',
-                            'playlist_remove_tracks',
-                        ]
-                        for mname in methods:
-                            try:
-                                if hasattr(sp, mname):
-                                    func = getattr(sp, mname)
-                                    func(pid, [candidates[0]])
-                                    removed = True; break
-                            except Exception:
-                                try:
-                                    func(pid, [candidates[1]])
-                                    removed = True; break
-                                except Exception:
-                                    pass
-                        if removed:
-                            try:
-                                if pdata_local:
-                                    self.call_from_thread(lambda: threading.Thread(target=lambda: self._open_playlist_table(pdata_local), daemon=True).start())
-                                else:
-                                    try: threading.Thread(target=lambda: self._load_playlists(force=True), daemon=True).start()
-                                    except Exception: pass
-                                self.call_from_thread(lambda: self.right_panel.update('[b]Track removed from playlist.[/b]'))
-                            except Exception:
-                                pass
-                        else:
-                            try: self.call_from_thread(lambda: self.right_panel.update('[b]Could not remove track from playlist.[/b]'))
-                            except Exception: pass
-                    except Exception:
-                        logger.exception('Error removing track from playlist')
-
-                threading.Thread(target=_worker_remove, args=(pl_id, uri, pdata), daemon=True).start()
+                title = getattr(focused, 'row_to_title', {}).get(row, '') or 'this track'
+                self._confirm_remove_track(pl_id, uri, title, pdata)
                 return
 
             try:
-                self.right_panel.update('[b]Delete action not applicable in current context.[/b]')
+                self._notify('[b]Delete action not applicable in current context.[/b]')
             except Exception:
                 pass
         except Exception:
             logger.exception('action_delete failed')
+
+    def _confirm_remove_track(self, pl_id: str, track_uri: str, title: str, pdata=None) -> None:
+        """Arm a removal and ask first.
+
+        Deleting a whole playlist makes you type its name, but removing a track
+        used to fire on the keypress — the small destructive action had less of a
+        safety net than the big one.
+        """
+        self._pending_remove_track = {"playlist": pl_id, "uri": track_uri,
+                                      "title": title, "pdata": pdata}
+        self._notify(f"[b]Remove[/b] {rich_escape(str(title))} [b]from the playlist?[/b]  "
+                     "Ctrl+D again to confirm, Esc to cancel.", warn=True, sticky=True)
+
+    def _cancel_remove_track(self) -> None:
+        if getattr(self, "_pending_remove_track", None) is None:
+            return
+        self._pending_remove_track = None
+        self._notify("[b]Removal cancelled.[/b]")
+
+    def _apply_pending_remove_track(self) -> None:
+        pending = getattr(self, "_pending_remove_track", None)
+        if not pending:
+            return
+        self._pending_remove_track = None
+        self._clear_status_line()
+        self._remove_track_from_playlist(pending["playlist"], pending["uri"],
+                                         pending.get("pdata"))
+
+    def _remove_track_from_playlist(self, pl_id: str, track_uri: str, pdata=None) -> None:
+        """Remove one track from a playlist, off-thread, then reopen the view.
+
+        spotipy renamed this call across versions, so the known names are tried
+        in turn, each with the plain URI and then a normalised one.
+        """
+        def worker():
+            try:
+                sp = self.spotify.ensure()
+                tid = self.spotify._normalize_track_id(track_uri) or track_uri
+                candidates = [track_uri, f'spotify:track:{tid}', f'spotify:episode:{tid}']
+                removed = False
+                methods = [
+                    'playlist_remove_all_occurrences_of_items',
+                    'playlist_remove_specific_occurrences_of_items',
+                    'playlist_remove_items',
+                    'playlist_remove_tracks',
+                ]
+                for mname in methods:
+                    try:
+                        if hasattr(sp, mname):
+                            func = getattr(sp, mname)
+                            func(pl_id, [candidates[0]])
+                            removed = True; break
+                    except Exception:
+                        try:
+                            func(pl_id, [candidates[1]])
+                            removed = True; break
+                        except Exception:
+                            pass
+                if removed:
+                    # Before the reopen below, or it would paint the cached rows
+                    # and the deleted track would flash back on screen.
+                    self._invalidate_playlist_cache(pl_id)
+                    try:
+                        if pdata:
+                            self.call_from_thread(lambda: threading.Thread(target=lambda: self._open_playlist_table(pdata), daemon=True).start())
+                        else:
+                            try: threading.Thread(target=lambda: self._load_playlists(force=True), daemon=True).start()
+                            except Exception: pass
+                        self.call_from_thread(lambda: self._notify('[b]Track removed from playlist.[/b]'))
+                    except Exception:
+                        pass
+                else:
+                    try: self.call_from_thread(lambda: self._notify('[b]Could not remove track from playlist.[/b]', warn=True))
+                    except Exception: pass
+            except Exception:
+                logger.exception('Error removing track from playlist')
+
+        threading.Thread(target=worker, daemon=True).start()
 
     def _get_cursor_row(self, table: DataTable):
         row = getattr(table, "cursor_row", None)

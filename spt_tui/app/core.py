@@ -26,7 +26,7 @@ from .. import config
 from ..config import logger, LOG_PATH
 from ..constants import WELCOME, WELCOME_SPOTIFY_ART, WELCOME_AUTHOR, LIBRARY_ITEMS
 from ..spotify_client import SpotifyClient
-from ..widgets import HelpScroll
+from ..widgets import HelpScroll, ContentPanel
 
 class CoreMixin:
     def __init__(self):
@@ -58,6 +58,15 @@ class CoreMixin:
         self._lyrics_track_id: Optional[str] = None
         self.lyrics_box: Optional[Static] = None
 
+        # Honour a persisted lyrics-cache size cap (bytes) if the user set one;
+        # otherwise the class default (_LYRICS_CACHE_MAX_BYTES) stands.
+        try:
+            _cap = config.LOCAL_CFG.get('lyrics_cache_max_bytes') if isinstance(config.LOCAL_CFG, dict) else None
+            if isinstance(_cap, int) and _cap > 0:
+                self._LYRICS_CACHE_MAX_BYTES = _cap
+        except Exception:
+            pass
+
         self._now_interval = None
         self._now_sync_interval = None
         self._now_tick_interval = None
@@ -86,13 +95,18 @@ class CoreMixin:
         self._multi_add_table = None
         self._multi_add_selected_rows: set = set()
         self._pending_multi_add_uris: Optional[List[str]] = None
+        self._pending_container_add: Optional[dict] = None
         self._help_on: bool = False
+        # Armed track removal awaiting confirmation, and the status line's
+        # pending clear timer (see _notify).
+        self._pending_remove_track: Optional[Dict] = None
+        self._status_timer = None
         # Welcome is what compose() shows first; on_resize keeps it responsive.
         self._welcome_on: bool = True
         self._welcome_variant: str = "large"
 
     def compose(self) -> ComposeResult:
-        self.right_panel = Static(Text(WELCOME), id="right")
+        self.right_panel = ContentPanel(Text(WELCOME), id="right")
 
         self.search_input = Input(placeholder="Search ...", id="search_input")
         try:
@@ -135,6 +149,12 @@ class CoreMixin:
                     yield self.np_bar_full
                 self.np_times = Static("--:--", id="np_times")
                 yield self.np_times
+
+        # Transient feedback, on the overlay layer (see the CSS): a message
+        # written into #right sits behind a mounted content table and is never
+        # seen, which is exactly when most messages fire.
+        self.status_line = Static("", id="status_line")
+        yield self.status_line
 
         yield Footer()
 
@@ -282,6 +302,8 @@ class CoreMixin:
                 except Exception:
                     logger.debug("stopping interval %s during teardown failed", attr)
                 setattr(self, attr, None)
+        # One-shot, but it fires into the widget tree just the same.
+        self._cancel_status_timer()
 
     def on_unmount(self) -> None:
         """Application teardown. Textual has already flagged the app as closing
@@ -289,6 +311,59 @@ class CoreMixin:
         and stop every timer so no worker paints into a torn-down app."""
         self._closing = True
         self._stop_all_intervals()
+
+    # How long a message stays up. Long enough to read, short enough not to sit
+    # over the now-playing bar.
+    STATUS_SECONDS = 4.0
+
+    def _notify(self, message: str, *, warn: bool = False, seconds: float | None = None,
+                sticky: bool = False) -> None:
+        """Show a transient message on the status line.
+
+        Feedback must never go through ``right_panel.update``: while a content
+        table is mounted the panel's own content is covered by it, so the
+        message is invisible — and that is precisely when most of these fire
+        ("no row selected", "track removed", …). Safe to call before the widget
+        exists (startup) and during teardown; it just does nothing then.
+        """
+        line = getattr(self, "status_line", None)
+        if line is None or getattr(self, "_closing", False):
+            return
+        try:
+            # A newer message supersedes the previous one, and its timer must be
+            # cancelled or it would clear the new message early.
+            self._cancel_status_timer()
+            line.update(message)
+            line.set_class(bool(warn), "-warn")
+            line.add_class("-shown")
+            if sticky:
+                # A mode indicator (multi-add): it stays until the mode ends.
+                return
+            secs = self.STATUS_SECONDS if seconds is None else float(seconds)
+            self._status_timer = self.set_timer(secs, self._clear_status_line)
+        except Exception:
+            logger.exception("could not show status message")
+
+    def _cancel_status_timer(self) -> None:
+        timer = getattr(self, "_status_timer", None)
+        if timer is not None:
+            try:
+                timer.stop()
+            except Exception:
+                logger.debug("stopping the status timer failed")
+            self._status_timer = None
+
+    def _clear_status_line(self) -> None:
+        self._status_timer = None
+        line = getattr(self, "status_line", None)
+        if line is None:
+            return
+        try:
+            line.remove_class("-shown")
+            line.remove_class("-warn")
+            line.update("")
+        except Exception:
+            logger.debug("clearing the status line failed")
 
     def _clear_right(self):
         right: Static = self.right_panel
@@ -389,18 +464,12 @@ class CoreMixin:
                 except Exception:
                     logger.exception("welcome resize repaint failed")
             return
-        # Otherwise a result table may be visible: recompute its column widths for
-        # the new panel width, preserving rows/cursor/scroll (no data rebuild).
-        # _recompute_table_widths is a no-op when the effective widths are unchanged.
-        try:
-            for t in self.query(DataTable):
-                self._recompute_table_widths(t)
-        except Exception:
-            logger.exception("table resize recompute failed")
+        # A visible result table re-fits its columns from ContentPanel.on_resize,
+        # not here: at this point the right panel's content_size still holds its
+        # pre-resize value, so the columns would be sized to the old width.
         # The combined-search 2x2 dashboard reflows (2x2 <-> stacked) and resizes
-        # its panel columns on its own; the loop above is a no-op for the panels
-        # (they carry no _width_spec). Defer to after the refresh so the right
-        # panel's content_size reflects the new size (it lags during on_resize).
+        # its panel columns on its own. Defer to after the refresh for the same
+        # content_size reason.
         try:
             if len(self.query("#search_grid")) > 0:
                 self.call_after_refresh(self._relayout_search_grid)
@@ -417,7 +486,7 @@ class CoreMixin:
                     csec = (getattr(self, 'client_secret_input', None).value or "").strip()
                     ruri = (getattr(self, 'redirect_input', None).value or "").strip()
                     if not cid or not csec or not ruri:
-                        self.right_panel.update("[b]All fields are required. Fill in all three and press Enter on the Redirect URI.[/b]")
+                        self._notify("[b]All fields are required. Fill in all three and press Enter on the Redirect URI.[/b]")
                         return
 
                     cfg = {"client_id": cid, "client_secret": csec, "redirect_uri": ruri}
@@ -452,11 +521,11 @@ class CoreMixin:
             if getattr(self, 'auth_input', None) is event.input:
                 raw = (event.value or "").strip()
                 if not raw:
-                    self.right_panel.update("[b]No URL pasted[/b]")
+                    self._notify("[b]No URL pasted[/b]", warn=True)
                     return
                 ok = self.spotify.finish_authorization(raw)
                 if ok:
-                    self.right_panel.update("[b]Authorization completed. Starting session...[/b]")
+                    self._notify("[b]Authorization completed. Starting session...[/b]")
                     try:
                         try:
                             if self._now_sync_interval is None:
@@ -482,13 +551,13 @@ class CoreMixin:
                         pass
                     return
                 else:
-                    self.right_panel.update("[b]Authorization failed; check the URL and try again.[/b]")
+                    self._notify("[b]Authorization failed; check the URL and try again.[/b]")
                     return
 
             if getattr(self, 'create_name_input', None) is event.input:
                 name = (event.value or "").strip()
                 if not name:
-                    self.right_panel.update("[b]Playlist name cannot be empty. Enter a name and press Enter.[/b]")
+                    self._notify("[b]Playlist name cannot be empty. Enter a name and press Enter.[/b]")
                     return
                 self._create_playlist_state = {"name": name}
                 right = self._clear_right()
@@ -603,37 +672,30 @@ class CoreMixin:
                 self._create_playlist_state = None
                 return
 
-            # Seek/volume settings wizard — four numeric fields, same parse+save.
+            # Settings wizard — four numeric seek/volume fields followed by the
+            # human-readable lyrics-cache size field. The numeric fields share one
+            # parse+save; the size field parses MB/GB and finalises the wizard.
             _seek_fields = [
                 ('seek_vol_down_input', 'seek_volume_down', 'volume down percent', 'seek_vol_up_input'),
                 ('seek_vol_up_input', 'seek_volume_up', 'volume up percent', 'seek_track_input'),
                 ('seek_track_input', 'seek_seconds_track', 'track jump seconds', 'seek_episode_input'),
-                ('seek_episode_input', 'seek_seconds_episode', 'episode jump seconds', None),
+                ('seek_episode_input', 'seek_seconds_episode', 'episode jump seconds', 'lyrics_cache_input'),
             ]
             for attr, cfg_key, label, next_attr in _seek_fields:
                 if getattr(self, attr, None) is not event.input:
                     continue
                 if not self._save_seek_setting(event.value or "", cfg_key, label):
                     return
-                if next_attr is not None:
-                    nxt = getattr(self, next_attr, None)
-                    if nxt is not None:
-                        try: nxt.focus()
-                        except Exception: pass
-                    return
-                # Last field: tidy up the inputs and bounce back to the menu.
-                for a, _k, _l, _n in _seek_fields:
-                    try: delattr(self, a)
+                nxt = getattr(self, next_attr, None) if next_attr else None
+                if nxt is not None:
+                    try: nxt.focus()
                     except Exception: pass
-                self._clear_right().update('[b]Settings saved![/b]')
+                return
 
-                def _return():
-                    try:
-                        time.sleep(1)
-                        self.call_from_thread(lambda: (self._clear_right().update(WELCOME), setattr(self, 'level', self.LVL_SECTIONS), self._focus_section_by_idx(0)))
-                    except Exception:
-                        pass
-                threading.Thread(target=_return, daemon=True).start()
+            if getattr(self, 'lyrics_cache_input', None) is event.input:
+                if not self._save_lyrics_cache_setting(event.value or ""):
+                    return
+                self._finish_settings()
                 return
 
             if getattr(self, 'confirm_delete_input', None) is event.input:
@@ -644,7 +706,7 @@ class CoreMixin:
                 except Exception:
                     pass
                 if not pending:
-                    try: self.right_panel.update('[b]No pending delete request.[/b]')
+                    try: self._notify('[b]No pending delete request.[/b]', warn=True)
                     except Exception: pass
                     return
                 pl_id, pl_name = pending.get('id'), pending.get('name')
@@ -658,7 +720,7 @@ class CoreMixin:
                         self.confirm_delete_confirm_input.focus()
                         return
                     else:
-                        try: self.right_panel.update('[b]Name did not match; aborting delete.[/b]')
+                        try: self._notify('[b]Name did not match; aborting delete.[/b]', warn=True)
                         except Exception: pass
                 finally:
                     if not (pending.get('stage') == 'confirm'):
@@ -674,7 +736,7 @@ class CoreMixin:
                 except Exception:
                     pass
                 if not pending:
-                    try: self.right_panel.update('[b]No pending delete request.[/b]')
+                    try: self._notify('[b]No pending delete request.[/b]', warn=True)
                     except Exception: pass
                     return
                 pl_id, pl_name = pending.get('id'), pending.get('name')
@@ -700,11 +762,11 @@ class CoreMixin:
                                         try:
                                             self.call_from_thread(self.action_escape_to_menu)
                                         except Exception:
-                                            self.call_from_thread(lambda: self.right_panel.update(f"[b]Playlist deleted:[/b] {rich_escape(pname)}"))
+                                            self.call_from_thread(lambda: self._notify(f"[b]Playlist deleted:[/b] {rich_escape(pname)}"))
                                     except Exception:
                                         pass
                                 else:
-                                    try: self.call_from_thread(lambda: self.right_panel.update('[b]Could not delete playlist.[/b]'))
+                                    try: self.call_from_thread(lambda: self._notify('[b]Could not delete playlist.[/b]', warn=True))
                                     except Exception: pass
                             except Exception:
                                 logger.exception('Delete playlist worker failed')
@@ -715,16 +777,16 @@ class CoreMixin:
                                 try:
                                     self.action_escape_to_menu()
                                 except Exception:
-                                    try: self.right_panel.update('[b]Deletion cancelled.[/b]')
+                                    try: self._notify('[b]Deletion cancelled.[/b]')
                                     except Exception: pass
                             else:
                                 try:
                                     self.call_from_thread(self.action_escape_to_menu)
                                 except Exception:
-                                    try: self.right_panel.update('[b]Deletion cancelled.[/b]')
+                                    try: self._notify('[b]Deletion cancelled.[/b]')
                                     except Exception: pass
                         except Exception:
-                            try: self.right_panel.update('[b]Deletion cancelled.[/b]')
+                            try: self._notify('[b]Deletion cancelled.[/b]')
                             except Exception: pass
                 finally:
                     try: del self._pending_delete_playlist
@@ -736,7 +798,7 @@ class CoreMixin:
                 try:
                     raw = (event.value or "").strip()
                     if not raw:
-                        self.right_panel.update("[b]Empty input. Enter a playlist URI or ID.[/b]")
+                        self._notify("[b]Empty input. Enter a playlist URI or ID.[/b]")
                         return
 
                     def worker_import(vraw: str):
@@ -773,7 +835,7 @@ class CoreMixin:
                                     logger.exception("_add_import: could not resolve playlist %s", pl_id)
                                     err_msg = rich_escape(str(e))
                                     def paint_err():
-                                        self.right_panel.update(f"[b]Could not get playlist:[/b] {err_msg}")
+                                        self._notify(f"[b]Could not get playlist:[/b] {err_msg}", warn=True)
                                     try:
                                         self.call_from_thread(paint_err)
                                     except Exception:
@@ -807,12 +869,12 @@ class CoreMixin:
                                         except Exception:
                                             pass
                                         try:
-                                            self.call_from_thread(lambda: self.right_panel.update(f"[b]Playlist added to your library:[/b] {rich_escape(pname)}"))
+                                            self.call_from_thread(lambda: self._notify(f"[b]Playlist added to your library:[/b] {rich_escape(pname)}"))
                                         except Exception:
                                             pass
                                     else:
                                         try:
-                                            self.call_from_thread(lambda: self.right_panel.update('[b]Could not add playlist to your library.[/b]'))
+                                            self.call_from_thread(lambda: self._notify('[b]Could not add playlist to your library.[/b]', warn=True))
                                         except Exception:
                                             pass
                                 except Exception:
@@ -840,7 +902,7 @@ class CoreMixin:
             v = max(0, int(str(value).strip()))
         except (TypeError, ValueError):
             try:
-                self.right_panel.update(f'[b]Invalid number for {label}.[/b]')
+                self._notify(f'[b]Invalid number for {label}.[/b]', warn=True)
             except Exception:
                 pass
             return False
@@ -852,6 +914,56 @@ class CoreMixin:
         except Exception:
             logger.exception('Could not save %s', cfg_key)
         return True
+
+    def _save_lyrics_cache_setting(self, value: str) -> bool:
+        """Parse a human-readable lyrics-cache size ('200 MB', '1 GB') into bytes,
+        validate the range, persist it and apply it to the live cap. Shows a clear
+        error and returns False on invalid or out-of-range input."""
+        parsed = config.parse_size(value)
+        if parsed is None:
+            try:
+                self._notify('[b]Invalid size for lyrics cache.[/b] Use a number with an explicit unit, e.g. 200 MB or 1 GB.', warn=True)
+            except Exception:
+                pass
+            return False
+        if parsed < config.LYRICS_CACHE_MIN_BYTES or parsed > config.LYRICS_CACHE_MAX_BYTES_LIMIT:
+            lo = config.format_size(config.LYRICS_CACHE_MIN_BYTES)
+            hi = config.format_size(config.LYRICS_CACHE_MAX_BYTES_LIMIT)
+            try:
+                self._notify(f'[b]Lyrics cache size out of range.[/b] Enter a value between {lo} and {hi}.')
+            except Exception:
+                pass
+            return False
+        try:
+            if not isinstance(config.LOCAL_CFG, dict):
+                config.LOCAL_CFG = {}
+            config.LOCAL_CFG['lyrics_cache_max_bytes'] = parsed
+            config.save_local_config(config.LOCAL_CFG)
+        except Exception:
+            logger.exception('Could not save lyrics_cache_max_bytes')
+        # Apply immediately so the running session honours the new cap without a
+        # restart (the persisted value is re-applied at startup in __init__).
+        try:
+            self._LYRICS_CACHE_MAX_BYTES = parsed
+        except Exception:
+            pass
+        return True
+
+    def _finish_settings(self) -> None:
+        """Tear down the settings-wizard inputs and bounce back to the menu."""
+        for a in ('seek_vol_down_input', 'seek_vol_up_input', 'seek_track_input',
+                  'seek_episode_input', 'lyrics_cache_input'):
+            try: delattr(self, a)
+            except Exception: pass
+        self._clear_right().update('[b]Settings saved![/b]')
+
+        def _return():
+            try:
+                time.sleep(1)
+                self.call_from_thread(lambda: (self._clear_right().update(WELCOME), setattr(self, 'level', self.LVL_SECTIONS), self._focus_section_by_idx(0)))
+            except Exception:
+                pass
+        threading.Thread(target=_return, daemon=True).start()
 
     def on_input_changed(self, event: Input.Changed) -> None:
         if event.input is self.search_input:
@@ -956,6 +1068,7 @@ class CoreMixin:
         - Esc: Return to main menu
         - Ctrl+Q: Quit
         - ↑ / ↓ : Move between sections and list items
+        - Tab / Shift+Tab : Cycle focus across Search, Help, Library, Playlists and the open content (without entering a section)
         - / : Focus search input
         - Enter: Open / Play selected item
 
@@ -972,10 +1085,12 @@ class CoreMixin:
 
     [b]Library & Playlist / Queue Management[/b]
         - f: Toggle Favorite (Like / Unlike selected track)
-        - Ctrl+Shift+P: Add selected track(s) to a playlist
+        - Ctrl+Shift+P: Add to a playlist — the selected track/episode, or all tracks of a selected album/artist/playlist/podcast
         - Ctrl+D: Delete (playlist or remove item)
         - Ctrl+R: Refresh / reload content
         - Ctrl+C: Open Queue view
+        - Ctrl+T: Import playlists
+        - Ctrl+B: Hide / show the left sidebar
 
     [b]Multi-Add / Selection Mode[/b]
         - Ctrl+L: Toggle Multi-Add mode
@@ -1011,14 +1126,14 @@ class CoreMixin:
 
     [b]Devices & Settings[/b]
         - d: Open device manager (transfer playback)
-        - <: Open seek/volume settings
+        - <: Open settings (volume steps, seek jump times, lyrics cache size)
         - - / + : Volume down / up
 
     [b]Help & Misc[/b]
         - ?: Toggle this Help view
         - F1: Toggle this Help view
-        - Ctrl+A: Confirm selection (when prompted / in multi-add flows)
-        - Ctrl+O: Add all / confirm add-all action
+        - Ctrl+O: Select all items (multi-select review)
+        - Ctrl+A: Add the selected items (multi-select review); select/deselect all rows (Multi-Add mode)
         - Ctrl+Q: Quit application
         - Left / Right Arrows: Move focus between left column and right panel (and vice-versa)
         - Log file: {LOG_PATH}

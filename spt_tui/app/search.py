@@ -528,25 +528,22 @@ class SearchMixin:
     _TYPE_LABELS = {"track": "TRK", "album": "ALB", "artist": "ART", "playlist": "PLY",
                     "single": "SNG", "episode": "EPS", "podcast": "PDC"}
 
-    # Column layouts for the shared search_table. Each entry is
-    # (labels, fixed_widths, fields). `fields` maps 1:1 to the cells built by
-    # _search_cells; flexible columns (not in fixed_widths) share the rest.
-    # Column profiles for the shared search_table: (labels, fixed_widths, fields,
-    # weights). Source is dropped from every content table (only the Queue keeps
-    # it). Name/Title carries the highest weight so it takes the most free space.
+    # Column layouts for the shared search_table: (labels, fields). `fields` maps
+    # 1:1 to the cells built by _search_cells, and their widths come from the
+    # shared catalogue in TablesMixin. Source is dropped from every content table
+    # (only the Queue keeps it).
     # First column shows the saved/liked/followed state as a heart (its exact
     # semantics stay per-type: liked track, saved album, followed artist, saved
     # show/episode — see _revalidate_saved_column). The glyph is unified, the
     # endpoints are not.
     _SEARCH_LAYOUTS = {
         "full": (["♥", "Type", "Title", "Artist/Owner", "Album", "Duration"],
-                 {0: 3, 1: 7, 5: 9},
-                 ["saved", "type", "title", "artist", "album", "dur"], {2: 1.4}),
-        "artists": (["♥", "Type", "Name"], {0: 3, 1: 7}, ["saved", "type", "title"], {}),
-        "podcasts": (["♥", "Type", "Name", "Owner"], {0: 3, 1: 7}, ["saved", "type", "title", "artist"], {2: 1.4}),
+                 ["saved", "type", "title", "artist", "album", "dur"]),
+        "artists": (["♥", "Type", "Name"], ["saved", "type", "title"]),
+        "podcasts": (["♥", "Type", "Name", "Owner"], ["saved", "type", "title", "artist"]),
         # Search albums / playlists have no meaningful Duration.
-        "albums": (["♥", "Type", "Name", "Artist"], {0: 3, 1: 7}, ["saved", "type", "title", "artist"], {2: 1.4}),
-        "playlists": (["♥", "Type", "Name", "Owner"], {0: 3, 1: 7}, ["saved", "type", "title", "artist"], {2: 1.4}),
+        "albums": (["♥", "Type", "Name", "Artist"], ["saved", "type", "title", "artist"]),
+        "playlists": (["♥", "Type", "Name", "Owner"], ["saved", "type", "title", "artist"]),
     }
 
     def _search_cells(self, r: Dict, fields: List[str]):
@@ -569,8 +566,7 @@ class SearchMixin:
         # widget with the same id in the same callback raises DuplicateIds (seen
         # in the log on saved-view reopen and back-to-back searches). The id is
         # also a behaviour discriminator elsewhere, so it must stay stable.
-        col_labels, fixed_widths, fields, weights = self._SEARCH_LAYOUTS.get(layout, self._SEARCH_LAYOUTS["full"])
-        max_widths = {i: self._FLEX_MAX[f] for i, f in enumerate(fields) if f in self._FLEX_MAX}
+        col_labels, fields = self._SEARCH_LAYOUTS.get(layout, self._SEARCH_LAYOUTS["full"])
         try:
             table = self.query_one("#search_table", DataTable)
         except NoMatches:
@@ -582,24 +578,25 @@ class SearchMixin:
                 # current size); clear(columns=True) drops both rows and columns,
                 # so a layout change reuses the widget without a remount.
                 table.clear(columns=True)
-                table._width_spec = (list(col_labels), dict(fixed_widths), dict(weights), dict(max_widths))
-                for lbl, w in zip(col_labels, self._column_widths(col_labels, fixed_widths, weights, max_widths)):
-                    try: table.add_column(lbl, width=int(w))
-                    except Exception:
-                        try: table.add_column(lbl)
-                        except Exception: pass
+                keep_fields, keep_labels, widths = self._fit_columns(fields, col_labels)
+                table._width_spec = (list(col_labels), list(fields))
+                table._fit_fields = list(keep_fields)
+                table._fields_attr = "_search_fields"
+                fields = keep_fields
+                self._apply_columns(table, keep_labels, widths)
             except Exception:
                 reused = False
                 table = None
         if not reused:
             right = self._clear_right()
             table = self._create_table_with_full_width(
-                col_labels, fixed_widths=fixed_widths, widget_id="search_table", weights=weights, max_widths=max_widths,
+                col_labels, fields, widget_id="search_table", fields_attr="_search_fields",
             )
+            fields = getattr(table, "_search_fields", fields)
         table.row_to_uri = {}; table.row_to_title = {}; table.row_to_id = {}; table.row_to_type = {}; table.row_to_obj = {}
         table._col_saved = 0
         table._saved_check_done = False
-        table._search_fields = fields
+        table._search_fields = list(fields)
         for i, r in enumerate(rows):
             table.add_row(*self._search_cells(r, fields), key=i)
             table.row_to_uri[i] = r.get("uri")
@@ -615,6 +612,7 @@ class SearchMixin:
         if not reused:
             right.mount(table)
         table.focus()
+        self._refit_after_mount(table)
         self.level = self.LVL_VIEW
         try:
             if check_saved and not getattr(table, '_saved_check_done', False):
@@ -721,6 +719,61 @@ class SearchMixin:
         # Leave room for the panel border + the DataTable's cell padding.
         return max(8, panel_w - 4)
 
+    # Grid panels are borderless and carry one flexible column (plus the heart on
+    # Songs), so they go through the same fitter as the full-width tables.
+    def _grid_panel_columns(self, panel_key: str):
+        if panel_key == "songs":
+            return ["heart", "title"], ["♥", "Songs"]
+        return ["title"], [panel_key.capitalize()]
+
+    def _grid_panel_width(self, table, stacked: bool | None = None) -> int:
+        w = 0
+        for attr in ("content_size", "size"):
+            sz = getattr(table, attr, None)
+            w = int(getattr(sz, "width", 0) or 0) if sz is not None else 0
+            if w:
+                break
+        if not w:
+            # Not laid out yet (first render): approximate from the grid, and let
+            # the deferred relayout correct it once the panels have a size.
+            if stacked is None:
+                stacked = self._grid_is_stacked()
+            w = self._grid_col_width(stacked) + 4
+        return w
+
+    def _fit_grid_panel(self, table, panel_key: str, stacked: bool | None = None):
+        """Column widths for one grid panel, fitted to the quadrant it occupies."""
+        fields, labels = self._grid_panel_columns(panel_key)
+        return self._fit_columns(fields, labels,
+                                 panel_w=self._grid_panel_width(table, stacked),
+                                 chrome=self._CHROME_BORDERLESS)
+
+    def _refit_grid_panel(self, table) -> None:
+        """Re-fit one panel's columns to its current width. Called by the panel
+        itself on resize (mount, terminal resize, 2x2 <-> stacked reflow)."""
+        panel_key = (getattr(table, "id", "") or "").replace("_table", "")
+        if not panel_key:
+            return
+        try:
+            cols = list(table.ordered_columns)
+        except Exception:
+            return
+        _, _, widths = self._fit_grid_panel(table, panel_key)
+        if len(cols) != len(widths):
+            return
+        changed = False
+        for col, wd in zip(cols, widths):
+            try:
+                if int(getattr(col, "width", -1)) != int(wd):
+                    col.width = int(wd); changed = True
+            except Exception:
+                pass
+        if changed:
+            try:
+                table.refresh(layout=True)
+            except Exception:
+                pass
+
     def _grid_song_line(self, r: Dict) -> str:
         title = r.get("title", "") or ""
         artist = r.get("artist", "") or ""
@@ -736,7 +789,7 @@ class SearchMixin:
         # DataTable, never producing a horizontal scrollbar.
         return title
 
-    def _fill_grid_panel(self, table, panel_key: str, rows: List[Dict], cw: int) -> None:
+    def _fill_grid_panel(self, table, panel_key: str, rows: List[Dict]) -> None:
         """(Re)build one panel's columns and rows. Reused in place on a repeated
         search / resize so no widget is remounted (no DuplicateIds)."""
         try:
@@ -749,12 +802,10 @@ class SearchMixin:
         except Exception:
             pass
         is_songs = (panel_key == "songs")
+        _, keep_labels, widths = self._fit_grid_panel(table, panel_key)
+        self._apply_columns(table, keep_labels, widths)
         if is_songs:
-            table.add_column("♥", width=3)
-            table.add_column("Songs", width=max(6, cw - 3))
             table._col_heart = 0
-        else:
-            table.add_column(panel_key.capitalize(), width=max(6, cw))
         table.row_to_uri = {}; table.row_to_id = {}; table.row_to_title = {}
         table.row_to_type = {}; table.row_to_obj = {}
         table._model_rows = rows
@@ -779,7 +830,6 @@ class SearchMixin:
         rows_by = {"songs": track_rows, "artists": artist_rows,
                    "albums": album_rows, "playlists": playlist_rows}
         stacked = self._grid_is_stacked()
-        cw = self._grid_col_width(stacked)
         try:
             grid = self.query_one("#search_grid", Container)
         except NoMatches:
@@ -793,7 +843,7 @@ class SearchMixin:
                 tbl.show_cursor = False
                 tbl.cursor_type = "row"
                 tbl.show_header = False
-                self._fill_grid_panel(tbl, pk, rows_by[pk], cw)
+                self._fill_grid_panel(tbl, pk, rows_by[pk])
                 try: tbl._search_token = my_search_token
                 except Exception: pass
                 panel = Container(tbl, id=f"panel_{pk}", classes="search-panel")
@@ -809,7 +859,7 @@ class SearchMixin:
             for pk, _ in self._GRID_SPECS:
                 t = self._grid_panel_table(pk)
                 if t is not None:
-                    self._fill_grid_panel(t, pk, rows_by[pk], cw)
+                    self._fill_grid_panel(t, pk, rows_by[pk])
                     try: t._search_token = my_search_token
                     except Exception: pass
 
@@ -825,6 +875,9 @@ class SearchMixin:
         # a fast liked lookup could otherwise apply() before .parent is set and
         # get dropped). call_after_refresh runs once the DOM has settled.
         def _post():
+            # The panels only get their real width once mounted, so the first
+            # fit used an approximation: re-fit now that they have a size.
+            self._relayout_search_grid()
             self._grid_initial_focus()
             songs = self._grid_panel_table("songs")
             if songs is not None:
@@ -993,27 +1046,8 @@ class SearchMixin:
             return
         stacked = self._grid_is_stacked()
         grid.set_class(stacked, "-stacked")
-        cw = self._grid_col_width(stacked)
         for pk, _ in self._GRID_SPECS:
             t = self._grid_panel_table(pk)
             if t is None:
                 continue
-            try:
-                cols = list(t.ordered_columns)
-            except Exception:
-                continue
-            if pk == "songs" and len(cols) >= 2:
-                try:
-                    cols[0].width = 3
-                    cols[1].width = max(6, cw - 3)
-                except Exception:
-                    pass
-            elif cols:
-                try:
-                    cols[-1].width = max(6, cw)
-                except Exception:
-                    pass
-            try:
-                t.refresh(layout=True)
-            except Exception:
-                pass
+            self._refit_grid_panel(t)

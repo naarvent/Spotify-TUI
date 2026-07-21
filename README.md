@@ -43,7 +43,7 @@ Search Spotify, browse your library and playlists, control playback, follow sync
 - **Unified saved-state indicators** using consistent heart symbols throughout the application.
 - **Playback control** with play, pause, next, previous, seek, volume, mute, repeat and shuffle.
 - **Synced lyrics** with current-line highlighting, background loading and persistent caching.
-- **Bounded lyrics cache** with automatic pruning by entry count and total file size.
+- **Bounded lyrics cache** with automatic pruning by entry count and a configurable total-size cap (set in Settings using human-readable sizes such as `200 MB` or `1 GB`).
 - **Queue** for viewing the current queue and adding selected tracks.
 - **Devices** for listing Spotify devices and transferring playback.
 - **Responsive tables** with automatic column sizing and no manual mouse-driven column resizing.
@@ -291,6 +291,7 @@ These shortcuts reflect the application's current bindings.
 | Key | Action |
 | --- | --- |
 | `Up` / `Down` | Move through sections, lists or rows |
+| `Tab` / `Shift+Tab` | Cycle focus across Search, Help, Library, Playlists and the open content (without entering a section) |
 | `Left` / `Right` | Move between the menu and the active view |
 | `Enter` | Open, select or play the focused item |
 | `/` | Focus the search input |
@@ -334,7 +335,7 @@ The search dashboard has two navigation levels.
 | `-` / `+` | Volume down or up |
 | `m` | Mute or unmute |
 | `Ctrl+Left` / `Ctrl+Right` | Seek backward or forward |
-| `<` | Open seek and volume settings |
+| `<` | Open settings (volume steps, seek jump times, lyrics cache size) |
 
 ### Library, Queue and Tools
 
@@ -346,10 +347,13 @@ The search dashboard has two navigation levels.
 | `Ctrl+C` | Open Queue |
 | `d` | Open Devices |
 | `Ctrl+L` | Toggle multi-add mode |
-| `Ctrl+Shift+P` | Add selected tracks to a playlist |
+| `Ctrl+O` | Multi-select review: select all items |
+| `Ctrl+A` | Multi-select review: add the selected items · Multi-add mode: select or deselect all rows |
+| `Ctrl+Shift+P` | Add to a playlist: the selected track/episode, or every track of a selected album, artist, playlist or podcast (large adds ask to confirm) |
 | `Ctrl+T` | Import a playlist |
-| `Ctrl+D` | Delete or remove the selected item |
+| `Ctrl+D` | Delete or remove the selected item (press again to confirm a track removal, `Esc` to cancel) |
 | `Ctrl+R` | Refresh the active view |
+| `Ctrl+B` | Hide/show the left sidebar (gives its width to the content) |
 
 ### Help View
 
