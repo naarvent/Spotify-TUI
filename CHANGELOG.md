@@ -5,6 +5,18 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- Opening a cached playlist or library view now shows a brief "Loading…" beat
+  before the cached rows appear. A cache hit painted the rows in the same
+  UI-thread frame that wrote the loading line, so Textual never rendered that
+  line and the open looked like nothing had happened. Both cache-hit paths now
+  defer the cached paint by 0.25 s (`_CACHE_LOADING_MIN_S`), guarded so a fast
+  background refresh or leaving the view never double-mounts or paints a stale
+  table. Cold loads are unchanged — network latency already showed the line.
+
 ## [v0.2.1] - 2026-07-20
 
 ### Added

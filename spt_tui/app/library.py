@@ -431,8 +431,18 @@ class LibraryMixin:
 
         if cached:
             cached_rows, cached_liked = cached
-            _mount(list(cached_rows), list(cached_liked))
-            self._set_table_title("tracks_table", f"{title}  [dim](refreshing…)[/dim]")
+            # Painting cached rows synchronously here happens in the same UI-thread
+            # callstack that just wrote "Loading playlist…", so Textual never paints
+            # that frame and the open looks like nothing happened. Defer the cached
+            # paint by a short beat so the loading line is actually visible first.
+            # Guarded: skip if a fast background refresh already mounted the table,
+            # or if the user left the view before the timer fired.
+            def _paint_cached():
+                if state["table"] is not None or not current():
+                    return
+                _mount(list(cached_rows), list(cached_liked))
+                self._set_table_title("tracks_table", f"{title}  [dim](refreshing…)[/dim]")
+            self.set_timer(self._CACHE_LOADING_MIN_S, _paint_cached)
 
         def worker():
             try:
@@ -494,6 +504,12 @@ class LibraryMixin:
     # How many playlists keep their tracks in memory. Enough to make going back
     # and forth instant without holding every big playlist of a long session.
     _PLAYLIST_CACHE_MAX = 8
+
+    # A cache hit paints instantly, which reads as "nothing happened". Hold the
+    # "Loading…" line up for this long before swapping in the cached rows, so
+    # opening a playlist / library view always has a short visual acknowledgement.
+    # Cold loads show loading naturally (network latency) and are untouched.
+    _CACHE_LOADING_MIN_S = 0.25
 
     def _playlist_cache_lock(self) -> threading.Lock:
         # Two playlists can finish loading at once, and read-modify-write on the
@@ -633,8 +649,17 @@ class LibraryMixin:
             right = self._clear_right()
             right.update(loading_msg)
             if cached:
-                state["table"] = render_first(list(cached))
-                set_status(f"{title}  [dim](refreshing…)[/dim]")
+                # Same as the playlist path: rendering the cached rows in this
+                # callstack overwrites loading_msg before Textual paints it, so a
+                # cache hit reads as no response. Defer the cached paint a short
+                # beat; guard against a fast refresh finishing first or the user
+                # leaving the view.
+                def _paint_cached():
+                    if state["table"] is not None or not current():
+                        return
+                    state["table"] = render_first(list(cached))
+                    set_status(f"{title}  [dim](refreshing…)[/dim]")
+                self.set_timer(self._CACHE_LOADING_MIN_S, _paint_cached)
 
         def worker():
             try:
