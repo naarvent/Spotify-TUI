@@ -206,12 +206,28 @@ async def test_applying_without_a_pending_removal_is_harmless():
         check("no stray API call", fake.removed == [], f"{fake.removed}")
 
 
+async def test_changing_view_cancels_an_armed_track_removal():
+    fake = Fake(); app = TApp(fake)
+    async with app.run_test(size=(140, 30)) as pilot:
+        await pilot.pause(); pause_intervals(app)
+        pdata = {"id": "pl1", "name": "L", "uri": "spotify:playlist:pl1"}
+        app._new_view_token("playlist", "pl1")
+        app._confirm_remove_track("pl1", "spotify:track:i3", "track 3", pdata)
+        app._new_view_token("search", "other query")
+        app._apply_pending_remove_track()
+        await pilot.pause()
+        check("view change clears the pending removal",
+              getattr(app, "_pending_remove_track", None) is None)
+        check("stale confirmation cannot remove a track", fake.removed == [], f"{fake.removed}")
+
+
 ALL = [test_sidebar_collapses_and_gives_its_width_to_the_panel,
        test_table_refits_when_the_sidebar_collapses,
        test_dropped_columns_are_named_in_the_title, test_no_hint_when_everything_fits,
        test_hint_disappears_when_the_terminal_widens,
        test_removing_a_track_asks_first, test_confirming_removes_and_cancelling_does_not,
-       test_applying_without_a_pending_removal_is_harmless]
+       test_applying_without_a_pending_removal_is_harmless,
+       test_changing_view_cancels_an_armed_track_removal]
 
 async def main():
     for fn in ALL:

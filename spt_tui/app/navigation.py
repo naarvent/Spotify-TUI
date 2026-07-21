@@ -23,7 +23,14 @@ from ..constants import WELCOME
 
 class NavigationMixin:
     def _new_view_token(self, kind: str, ident: str = "") -> int:
-
+        # A destructive confirmation belongs to the view where it was armed.
+        # Do not carry it into a search, another playlist, or any other view.
+        if getattr(self, "_pending_remove_track", None):
+            self._pending_remove_track = None
+            try:
+                self._clear_status_line()
+            except Exception:
+                pass
         prev = getattr(self, "_right_view", None)
         if prev:
             try:
@@ -1136,8 +1143,10 @@ class NavigationMixin:
         used to fire on the keypress — the small destructive action had less of a
         safety net than the big one.
         """
+        rv = getattr(self, "_right_view", None)
         self._pending_remove_track = {"playlist": pl_id, "uri": track_uri,
-                                      "title": title, "pdata": pdata}
+                                      "title": title, "pdata": pdata,
+                                      "view": tuple(rv[:3]) if rv else None}
         self._notify(f"[b]Remove[/b] {rich_escape(str(title))} [b]from the playlist?[/b]  "
                      "Ctrl+D again to confirm, Esc to cancel.", warn=True, sticky=True)
 
@@ -1150,6 +1159,12 @@ class NavigationMixin:
     def _apply_pending_remove_track(self) -> None:
         pending = getattr(self, "_pending_remove_track", None)
         if not pending:
+            return
+        origin = pending.get("view")
+        current = getattr(self, "_right_view", None)
+        if origin is not None and (not current or tuple(current[:3]) != origin):
+            self._pending_remove_track = None
+            self._clear_status_line()
             return
         self._pending_remove_track = None
         self._clear_status_line()

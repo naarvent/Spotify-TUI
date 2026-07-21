@@ -1,12 +1,12 @@
 # Spotify-TUI
 
-[![Version](https://img.shields.io/badge/version-0.2.0-blue.svg)](https://github.com/naarvent/Spotify-TUI/releases) [![Python](https://img.shields.io/badge/python-3.9%2B-blue.svg)](https://www.python.org/) [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE) [![Textual](https://img.shields.io/badge/Textual-8.x-5a4fcf.svg)](https://github.com/Textualize/textual)
+[![Version](https://img.shields.io/badge/version-0.2.1-blue.svg)](https://github.com/naarvent/Spotify-TUI/releases) [![Python](https://img.shields.io/badge/python-3.9%2B-blue.svg)](https://www.python.org/) [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE) [![Textual](https://img.shields.io/badge/Textual-8.x-5a4fcf.svg)](https://github.com/Textualize/textual)
 
 A fast keyboard-driven Spotify client for the terminal, built with [Textual](https://github.com/Textualize/textual).
 
 Search Spotify, browse your library and playlists, control playback, follow synced lyrics, manage your queue and devices, all from the keyboard.
 
-**Status:** `v0.2.0` (early release). The application includes a responsive multi-panel search dashboard, reliable library loading, automatic table sizing, synchronized lyrics and an extensive regression test suite. APIs and behaviour may still change before `1.0`.
+**Status:** `v0.2.1` (early release). The application includes responsive search and tables, reliable cached library and playlist loading, synchronized lyrics, visible action feedback and an extensive offline regression suite. APIs and behaviour may still change before `1.0`.
 
 <p align="center">
   <img alt="Spotify-TUI interface" src="https://github.com/user-attachments/assets/35ab7ab0-43a7-43f3-b8b6-056d45521255" />
@@ -17,7 +17,8 @@ Search Spotify, browse your library and playlists, control playback, follow sync
 ## Contents
 
 - [Features](#features)
-- [What's New in v0.2.0](#whats-new-in-v020)
+- [What's New in v0.2.1](#whats-new-in-v021)
+- [Previous Release: v0.2.0](#previous-release-v020)
 - [Requirements](#requirements)
 - [Installation](#installation)
 - [Spotify Setup](#spotify-setup)
@@ -45,7 +46,10 @@ Search Spotify, browse your library and playlists, control playback, follow sync
 - **Synced lyrics** with current-line highlighting, background loading and persistent caching.
 - **Bounded lyrics cache** with automatic pruning by entry count and a configurable total-size cap (set in Settings using human-readable sizes such as `200 MB` or `1 GB`).
 - **Queue** for viewing the current queue and adding selected tracks.
+- **Add to playlist** for tracks, episodes and complete albums, artists, playlists or podcasts, with confirmation for large additions.
 - **Devices** for listing Spotify devices and transferring playback.
+- **Visible action feedback** through a status line above the active content.
+- **Collapsible sidebar** to give more room to the content area when needed.
 - **Responsive tables** with automatic column sizing and no manual mouse-driven column resizing.
 - **Context-aware refresh** that updates the active view instead of repeating stale searches.
 - **Keyboard-driven navigation** throughout the interface.
@@ -53,7 +57,37 @@ Search Spotify, browse your library and playlists, control playback, follow sync
 - **Responsive welcome screen** with layouts adapted to the available terminal size.
 - **Offline regression suites** covering navigation, search, library loading, playback, lyrics, caching and responsive layouts.
 
-## What's New in v0.2.0
+## What's New in v0.2.1
+
+v0.2.1 focuses on making everyday playlist work faster, safer and clearer.
+
+### Playlist Workflow
+
+- Add a selected track or episode to a playlist with `Ctrl+Shift+P`.
+- Add every track or episode from a selected album, artist, playlist or podcast; large additions ask for confirmation.
+- Playlist pages stream into the table as they load, while liked-state hearts fill in progressively.
+- Reopened playlists use an in-session cache for immediate rendering and refresh safely in the background.
+- Removing a playlist track requires a second `Ctrl+D`; the confirmation is cancelled when leaving that playlist.
+
+### Interface and Navigation
+
+- A dedicated status line makes feedback visible above tables instead of hiding it behind them.
+- `Ctrl+B` hides or restores the sidebar, assigning its width to the active content panel.
+- `Tab` and `Shift+Tab` cycle predictably between the principal navigation stops.
+- Tables use the available panel width; on narrow terminals, low-priority columns are hidden in a predictable order and identified in the table title.
+
+### Reliability and Testing
+
+- Spotify liked-track checks are batched within the API limit, making long playlists much quicker to load.
+- Test runs use isolated cache directories, avoiding access to local tokens, logs and playlist caches.
+- `tests/run_all.py` can execute suites in parallel and supports filtering, worker-count and timeout options.
+- `tests/check_live_api.py` provides an optional read-only verification against the real Spotify API.
+
+For the full release record, see [CHANGELOG.md](CHANGELOG.md).
+
+## Previous Release: v0.2.0
+
+The v0.2.0 notes are retained below as reference for the previous major application update.
 
 ### Multi-panel Search
 
@@ -378,6 +412,14 @@ Run a single suite:
 python tests/test_spotify_client.py
 ```
 
+Run the complete suite (parallel by default):
+
+```bash
+python tests/run_all.py
+```
+
+Use `python tests/run_all.py --help` for worker-count, name-filter, timeout and verbose options. The optional `tests/check_live_api.py` performs read-only checks against Spotify's live API and requires configured credentials; it is not included in the offline suite.
+
 Run all suites on Linux or macOS:
 
 ```bash
@@ -490,6 +532,7 @@ Spotify-TUI uses multiple cache strategies depending on the type of data.
 ### Playlists
 
 - Stored on disk.
+- The eight most recently opened playlist contents are also cached for the current session.
 - Painted immediately during startup.
 - Refreshed in the background.
 - Written atomically.
@@ -533,6 +576,8 @@ Spotify-TUI uses multiple cache strategies depending on the type of data.
 ```text
 ~/Documents/naarvent's projects/Spotify_TUI/
 ```
+
+Set `SPT_TUI_CACHE_DIR` to use a different directory, which is useful for isolated test runs or separate local environments.
 
 The directory may contain:
 

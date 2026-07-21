@@ -31,6 +31,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- A track-removal confirmation is now tied to the playlist view where it was
+  requested. Opening a search or another view clears the pending confirmation,
+  and a final view-token check prevents a stale second `Ctrl+D` from removing a
+  track after navigation. Covered by `tests/test_ui_affordances.py`.
 - Opening a cached playlist or library view now shows a brief "Loading…" beat
   before the cached rows appear. A cache hit painted the rows in the same
   UI-thread frame that wrote the loading line, so Textual never rendered that
