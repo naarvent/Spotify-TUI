@@ -106,3 +106,43 @@ class LocalPlayer:
             # (login=False) reuse the cached credentials.json in --cache.
             argv.append("--enable-oauth")
         return argv
+
+    def is_running(self) -> bool:
+        p = self._proc
+        return p is not None and p.poll() is None
+
+    def _spawn(self, *, login: bool) -> bool:
+        binary = self.binary_path()
+        if binary is None:
+            return False
+        try:
+            os.makedirs(self._librespot_cache, exist_ok=True)
+        except Exception:
+            logger.exception("LocalPlayer: could not create cache dir")
+        argv = self._build_argv(binary, login=login)
+        try:
+            with self._lock:
+                self._proc = self._popen(
+                    argv, stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT, text=True)
+            return True
+        except Exception:
+            logger.exception("LocalPlayer: could not spawn librespot")
+            self._proc = None
+            return False
+
+    def stop(self) -> None:
+        with self._lock:
+            p = self._proc
+            self._proc = None
+        if p is None:
+            return
+        try:
+            if p.poll() is None:
+                p.terminate()
+                try:
+                    p.wait(timeout=5)
+                except Exception:
+                    p.kill()
+        except Exception:
+            logger.exception("LocalPlayer: error stopping librespot")

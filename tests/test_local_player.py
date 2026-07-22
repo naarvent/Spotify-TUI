@@ -165,9 +165,104 @@ def test_build_argv():
         _clean_env(); config.LOCAL_CFG = old
 
 
+class FakeProc:
+    def __init__(self, argv, lines=None, write_creds_path=None):
+        self.argv = argv
+        self._lines = list(lines or [])
+        self._write_creds_path = write_creds_path
+        self._alive = True
+        self.terminated = False
+        self.killed = False
+        self.stdout = self
+        if write_creds_path:  # simulate librespot caching credentials on login
+            os.makedirs(os.path.dirname(write_creds_path), exist_ok=True)
+            open(write_creds_path, "w").close()
+    def poll(self):
+        return None if self._alive else 0
+    def readline(self):
+        return self._lines.pop(0) if self._lines else ""
+    def terminate(self):
+        self.terminated = True; self._alive = False
+    def kill(self):
+        self.killed = True; self._alive = False
+    def wait(self, timeout=None):
+        self._alive = False
+        return 0
+
+
+class FakePopen:
+    """Callable replacement for subprocess.Popen. Records the last spawn."""
+    def __init__(self, lines=None, creds_for_login=None):
+        self.lines = lines
+        self.creds_for_login = creds_for_login   # cache path written when --enable-oauth present
+        self.spawns = []
+        self.last = None
+    def __call__(self, argv, **kw):
+        login = "--enable-oauth" in argv
+        creds = self.creds_for_login if (login and self.creds_for_login) else None
+        proc = FakeProc(argv, lines=(self.lines if login else None), write_creds_path=creds)
+        self.spawns.append(argv); self.last = proc
+        return proc
+
+
+def test_spawn_and_is_running():
+    _clean_env()
+    old = config.LOCAL_CFG; config.LOCAL_CFG = {}
+    try:
+        tmp = tempfile.mkdtemp(prefix="lp_")
+        fake_bin = os.path.join(tmp, "b"); open(fake_bin, "w").close()
+        os.environ["SPT_LIBRESPOT_PATH"] = fake_bin
+        fp = FakePopen()
+        lp = LocalPlayer(FakeSpotify(), cache_dir=tmp, popen=fp)
+        check("not running before spawn", lp.is_running() is False)
+        ok = lp._spawn(login=False)
+        check("spawn returns True", ok is True)
+        check("running after spawn", lp.is_running() is True)
+        check("headless argv, no oauth", "--enable-oauth" not in fp.last.argv)
+        shutil.rmtree(tmp, ignore_errors=True)
+    finally:
+        _clean_env(); config.LOCAL_CFG = old
+
+
+def test_stop_terminates():
+    _clean_env()
+    old = config.LOCAL_CFG; config.LOCAL_CFG = {}
+    try:
+        tmp = tempfile.mkdtemp(prefix="lp_")
+        fake_bin = os.path.join(tmp, "b"); open(fake_bin, "w").close()
+        os.environ["SPT_LIBRESPOT_PATH"] = fake_bin
+        fp = FakePopen()
+        lp = LocalPlayer(FakeSpotify(), cache_dir=tmp, popen=fp)
+        lp._spawn(login=False)
+        proc = fp.last
+        lp.stop()
+        check("stop terminates process", proc.terminated is True)
+        check("not running after stop", lp.is_running() is False)
+        lp.stop()  # idempotent, must not raise
+        check("stop is idempotent", True)
+        shutil.rmtree(tmp, ignore_errors=True)
+    finally:
+        _clean_env(); config.LOCAL_CFG = old
+
+
+def test_spawn_no_binary():
+    _clean_env()
+    old = config.LOCAL_CFG; config.LOCAL_CFG = {}
+    orig_which = lp_mod.shutil.which
+    try:
+        tmp = tempfile.mkdtemp(prefix="lp_")
+        lp_mod.shutil.which = lambda name: None
+        lp = LocalPlayer(FakeSpotify(), cache_dir=tmp, popen=FakePopen())
+        check("spawn with no binary -> False", lp._spawn(login=False) is False)
+        shutil.rmtree(tmp, ignore_errors=True)
+    finally:
+        lp_mod.shutil.which = orig_which
+        _clean_env(); config.LOCAL_CFG = old
+
+
 ALL = [test_cfg_defaults, test_cfg_env_precedence, test_discovery_override_first,
        test_discovery_bundled_then_path, test_discovery_none_disables, test_disabled_flag,
-       test_is_authenticated, test_build_argv]
+       test_is_authenticated, test_build_argv, test_spawn_and_is_running, test_stop_terminates, test_spawn_no_binary]
 
 def main():
     for fn in ALL:
