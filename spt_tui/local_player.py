@@ -54,6 +54,9 @@ class LocalPlayer:
     # Bound wait for the interactive OAuth to complete (browser round-trip).
     OAUTH_WAIT_SECONDS = 120.0
 
+    # Bound wait for librespot to register as a Connect device after spawn.
+    DEVICE_WAIT_SECONDS = 12.0
+
     def __init__(self, spotify, *, cache_dir: Optional[str] = None,
                  popen: Callable = subprocess.Popen,
                  open_url: Optional[Callable[[str], None]] = None,
@@ -225,3 +228,42 @@ class LocalPlayer:
         if self.is_authenticated():
             return self._spawn(login=False)
         return self.authenticate()
+
+    def _wait_for_local_device(self) -> Optional[str]:
+        deadline = self._now() + self.DEVICE_WAIT_SECONDS
+        while self._now() < deadline:
+            try:
+                for d in self._spotify.devices():
+                    if d.get("name") == self._name:
+                        return d.get("id")
+            except Exception:
+                logger.exception("LocalPlayer: devices() during device wait failed")
+            self._sleep(0.5)
+        return None
+
+    def maybe_autostart(self) -> None:
+        """Startup entry point (call on a daemon thread). Politely: spawn only
+        with cached credentials, and never steal an active foreign session."""
+        if not self.is_available() or not self._autostart:
+            return
+        if not self.is_authenticated():
+            # Do not pop a browser on every launch; the Devices view offers a
+            # manual start row that runs OAuth on explicit selection.
+            return
+        if not self.start():
+            return
+        dev_id = self._wait_for_local_device()
+        if dev_id is None:
+            logger.warning("LocalPlayer: local device did not register in time")
+            return
+        try:
+            pb = self._spotify.get_playback() or {}
+        except Exception:
+            logger.exception("LocalPlayer: get_playback during autostart failed")
+            pb = {}
+        if pb.get("is_playing"):
+            return  # something is playing elsewhere — stay available, do not transfer
+        try:
+            self._spotify.transfer(dev_id, force_play=False)
+        except Exception:
+            logger.exception("LocalPlayer: polite transfer to local device failed")

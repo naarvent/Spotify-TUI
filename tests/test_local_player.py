@@ -443,6 +443,101 @@ def test_start_delegates_to_authenticate_when_unauth():
         _clean_env(); config.LOCAL_CFG = old
 
 
+def _authed_player(tmp, spotify, **kw):
+    """Helper: an available, already-authenticated LocalPlayer over a temp dir."""
+    fake_bin = os.path.join(tmp, "b"); open(fake_bin, "w").close()
+    os.environ["SPT_LIBRESPOT_PATH"] = fake_bin
+    os.makedirs(os.path.join(tmp, "librespot"), exist_ok=True)
+    open(os.path.join(tmp, "librespot", "credentials.json"), "w").close()
+    return LocalPlayer(spotify, cache_dir=tmp, popen=FakePopen(),
+                       now=kw.get("now", time.time), sleep=lambda s: None)
+
+
+def test_autostart_transfers_when_idle():
+    _clean_env()
+    old = config.LOCAL_CFG; config.LOCAL_CFG = {}
+    try:
+        tmp = tempfile.mkdtemp(prefix="lp_")
+        sp = FakeSpotify(devices=[{"id": "LOCAL1", "name": "SPT-TUI Local", "is_active": False}],
+                         playback={"is_playing": False})
+        lp = _authed_player(tmp, sp)
+        lp.maybe_autostart()
+        check("idle: transferred to local", sp.transfers == [("LOCAL1", False)], repr(sp.transfers))
+        shutil.rmtree(tmp, ignore_errors=True)
+    finally:
+        _clean_env(); config.LOCAL_CFG = old
+
+
+def test_autostart_does_not_steal():
+    _clean_env()
+    old = config.LOCAL_CFG; config.LOCAL_CFG = {}
+    try:
+        tmp = tempfile.mkdtemp(prefix="lp_")
+        sp = FakeSpotify(devices=[{"id": "LOCAL1", "name": "SPT-TUI Local", "is_active": False},
+                                  {"id": "PHONE", "name": "Phone", "is_active": True}],
+                         playback={"is_playing": True})
+        lp = _authed_player(tmp, sp)
+        lp.maybe_autostart()
+        check("playing elsewhere: NO transfer", sp.transfers == [], repr(sp.transfers))
+        check("local player still running", lp.is_running() is True)
+        shutil.rmtree(tmp, ignore_errors=True)
+    finally:
+        _clean_env(); config.LOCAL_CFG = old
+
+
+def test_autostart_device_never_appears():
+    _clean_env()
+    old = config.LOCAL_CFG; config.LOCAL_CFG = {}
+    try:
+        tmp = tempfile.mkdtemp(prefix="lp_")
+        # No device with our name ever shows up; the bounded wait must give up.
+        sp = FakeSpotify(devices=[{"id": "PHONE", "name": "Phone", "is_active": True}],
+                         playback={"is_playing": False})
+        clock = [1000.0]
+        lp = _authed_player(tmp, sp, now=lambda: clock[0])
+        # advance the clock past DEVICE_WAIT_SECONDS on each sleep
+        lp._sleep = lambda s: clock.__setitem__(0, clock[0] + 5.0)
+        lp.maybe_autostart()
+        check("no device: no transfer, no crash", sp.transfers == [], repr(sp.transfers))
+        shutil.rmtree(tmp, ignore_errors=True)
+    finally:
+        _clean_env(); config.LOCAL_CFG = old
+
+
+def test_autostart_skipped_when_not_authenticated():
+    _clean_env()
+    old = config.LOCAL_CFG; config.LOCAL_CFG = {}
+    try:
+        tmp = tempfile.mkdtemp(prefix="lp_")
+        fake_bin = os.path.join(tmp, "b"); open(fake_bin, "w").close()
+        os.environ["SPT_LIBRESPOT_PATH"] = fake_bin  # available but NOT authenticated
+        fp = FakePopen()
+        sp = FakeSpotify()
+        lp = LocalPlayer(sp, cache_dir=tmp, popen=fp, sleep=lambda s: None)
+        lp.maybe_autostart()
+        check("no creds: no spawn on autostart", fp.spawns == [], repr(fp.spawns))
+        check("no creds: no transfer", sp.transfers == [])
+        shutil.rmtree(tmp, ignore_errors=True)
+    finally:
+        _clean_env(); config.LOCAL_CFG = old
+
+
+def test_autostart_disabled_flag():
+    _clean_env()
+    old = config.LOCAL_CFG; config.LOCAL_CFG = {}
+    try:
+        tmp = tempfile.mkdtemp(prefix="lp_")
+        os.environ["SPT_LOCAL_AUTOSTART"] = "false"
+        sp = FakeSpotify(devices=[{"id": "LOCAL1", "name": "SPT-TUI Local"}],
+                         playback={"is_playing": False})
+        lp = _authed_player(tmp, sp)
+        lp.maybe_autostart()
+        check("autostart disabled: no transfer", sp.transfers == [], repr(sp.transfers))
+        shutil.rmtree(tmp, ignore_errors=True)
+    finally:
+        _clean_env(); config.LOCAL_CFG = old
+
+
 ALL = [test_cfg_defaults, test_cfg_env_precedence, test_discovery_override_first,
        test_discovery_bundled_then_path, test_discovery_none_disables, test_disabled_flag,
        test_is_authenticated, test_build_argv, test_spawn_and_is_running, test_stop_terminates, test_spawn_no_binary,
@@ -451,6 +546,10 @@ ALL = [test_cfg_defaults, test_cfg_env_precedence, test_discovery_override_first
 
 ALL += [test_authenticate_times_out_bounded, test_start_returns_true_when_running,
         test_start_delegates_to_authenticate_when_unauth]
+
+ALL += [test_autostart_transfers_when_idle, test_autostart_does_not_steal,
+        test_autostart_device_never_appears, test_autostart_skipped_when_not_authenticated,
+        test_autostart_disabled_flag]
 
 def main():
     for fn in ALL:
