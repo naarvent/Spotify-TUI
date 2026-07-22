@@ -71,6 +71,7 @@ class LocalPlayer:
         self._sleep = sleep
         self._proc = None
         self._lock = threading.RLock()
+        self._starting = False
 
         self._enabled = _cfg_bool("local_player_enabled", "SPT_LOCAL_PLAYER", True)
         self._path_override = _cfg_str("librespot_path", "SPT_LIBRESPOT_PATH", None)
@@ -221,13 +222,34 @@ class LocalPlayer:
         return self.is_authenticated()
 
     def start(self) -> bool:
-        """Ensure librespot is running. If authenticated, spawn headless; else
-        run the one-time OAuth (which leaves librespot running as the device)."""
-        if self.is_running():
-            return True
-        if self.is_authenticated():
-            return self._spawn(login=False)
-        return self.authenticate()
+        """Ensure librespot is running. Serialized: only one start may be in
+        flight, so the autostart thread and an explicit device selection can
+        never spawn two librespots sharing the same name and cache dir."""
+        with self._lock:
+            if self.is_running():
+                return True
+            in_flight = self._starting
+            if not in_flight:
+                self._starting = True
+        if in_flight:
+            # Another start is already running; wait (bounded) for its outcome
+            # instead of spawning a second process.
+            deadline = self._now() + self.OAUTH_WAIT_SECONDS
+            while self._now() < deadline:
+                if self.is_running():
+                    return True
+                with self._lock:
+                    if not self._starting:
+                        break
+                self._sleep(0.1)
+            return self.is_running()
+        try:
+            if self.is_authenticated():
+                return self._spawn(login=False)
+            return self.authenticate()
+        finally:
+            with self._lock:
+                self._starting = False
 
     def _wait_for_local_device(self) -> Optional[str]:
         deadline = self._now() + self.DEVICE_WAIT_SECONDS

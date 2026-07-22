@@ -742,6 +742,56 @@ def test_start_local_autostart_thread():
 ALL += [test_on_unmount_stops_player, test_start_local_autostart_thread]
 
 
+def test_start_in_flight_does_not_double_spawn():
+    _clean_env()
+    old = config.LOCAL_CFG; config.LOCAL_CFG = {}
+    try:
+        tmp = tempfile.mkdtemp(prefix="lp_")
+        fake_bin = os.path.join(tmp, "b"); open(fake_bin, "w").close()
+        os.environ["SPT_LIBRESPOT_PATH"] = fake_bin
+        os.makedirs(os.path.join(tmp, "librespot"), exist_ok=True)
+        open(os.path.join(tmp, "librespot", "credentials.json"), "w").close()
+        fp = FakePopen()
+        lp = LocalPlayer(FakeSpotify(), cache_dir=tmp, popen=fp)
+        lp._starting = True                      # pretend another start is in flight
+        lp._sleep = lambda s: setattr(lp, "_starting", False)  # it finishes, without spawning
+        ok = lp.start()
+        check("in-flight start does not spawn again", fp.spawns == [], repr(fp.spawns))
+        check("start() reflects the other start's outcome", ok is False, repr(ok))
+        shutil.rmtree(tmp, ignore_errors=True)
+    finally:
+        _clean_env(); config.LOCAL_CFG = old
+
+
+def test_concurrent_start_spawns_once():
+    _clean_env()
+    old = config.LOCAL_CFG; config.LOCAL_CFG = {}
+    try:
+        tmp = tempfile.mkdtemp(prefix="lp_")
+        fake_bin = os.path.join(tmp, "b"); open(fake_bin, "w").close()
+        os.environ["SPT_LIBRESPOT_PATH"] = fake_bin
+        os.makedirs(os.path.join(tmp, "librespot"), exist_ok=True)
+        open(os.path.join(tmp, "librespot", "credentials.json"), "w").close()
+
+        class SlowPopen(FakePopen):
+            def __call__(self, argv, **kw):
+                time.sleep(0.05)          # widen the race window
+                return FakePopen.__call__(self, argv, **kw)
+
+        fp = SlowPopen()
+        lp = LocalPlayer(FakeSpotify(), cache_dir=tmp, popen=fp, sleep=lambda s: None)
+        threads = [threading.Thread(target=lp.start) for _ in range(2)]
+        for t in threads: t.start()
+        for t in threads: t.join(timeout=5)
+        check("concurrent start spawns exactly once", len(fp.spawns) == 1, str(len(fp.spawns)))
+        shutil.rmtree(tmp, ignore_errors=True)
+    finally:
+        _clean_env(); config.LOCAL_CFG = old
+
+
+ALL += [test_start_in_flight_does_not_double_spawn, test_concurrent_start_spawns_once]
+
+
 def main():
     for fn in ALL:
         try:
