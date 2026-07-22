@@ -583,6 +583,23 @@ Config keys (in `spt_config.json`) / environment variables:
 | `local_player_autostart` | `SPT_LOCAL_AUTOSTART` | `true` |
 | `local_player_name` | `SPT_LOCAL_NAME` | `SPT-TUI Local` |
 
+There is no official librespot binary for Windows, so build it yourself with
+`cargo install librespot --locked` (the `--locked` matters: without it a newer
+transitive dependency breaks the build). Do not run an unvetted prebuilt
+binary — it handles your Spotify credentials.
+
+**If the local player does not start**, the failure now appears on the status
+line and every line librespot prints is in the log. The usual cause is:
+
+```
+Failed to bind server to 127.0.0.1:5588 (os error 10048)
+```
+
+librespot binds `127.0.0.1:5588` for its OAuth redirect, and only one instance
+can hold it. Another librespot — typically an earlier one still waiting for you
+to finish authorizing — is already there. Quit the app (which stops its
+librespot), confirm nothing holds the port, and try once more.
+
 Shipping the binary and a one-click installer is tracked separately (Sub-project B).
 
 ## Limitations
