@@ -787,6 +787,67 @@ def test_resolve_device_id_unknown_key():
 ALL += [test_resolve_device_id_handles_rowkey_object, test_resolve_device_id_unknown_key]
 
 
+class FailingLP:
+    """Local player whose librespot dies on startup (e.g. its OAuth callback
+    port is already bound), reporting the reason via `last_error`."""
+    def __init__(self, last_error=None):
+        self.last_error = last_error
+        self.calls = 0
+    @property
+    def device_name(self):
+        return "SPT-TUI Local"
+    def is_available(self):
+        return True
+    def is_running(self):
+        return False
+    def start_and_activate(self):
+        self.calls += 1
+        return None
+
+
+def _notify_recorder(obj):
+    """Capture _notify calls and run call_from_thread inline."""
+    seen = []
+    obj._notify = lambda msg, **kw: seen.append((msg, kw))
+    obj.call_from_thread = lambda fn, *a, **kw: fn(*a, **kw)
+    return seen
+
+
+def test_local_player_failure_is_reported():
+    obj = CoreMixin.__new__(CoreMixin)
+    obj.local_player = FailingLP(last_error="ERROR librespot] Failed to bind server to 127.0.0.1:5588")
+    seen = _notify_recorder(obj)
+    CoreMixin._activate_local_player(obj)
+    check("failure produced a status message", len(seen) == 1, repr(seen))
+    check("message is a warning", seen and seen[0][1].get("warn") is True, repr(seen))
+    check("message carries librespot's reason",
+          seen and "5588" in seen[0][0], repr(seen))
+
+
+def test_local_player_failure_without_detail():
+    obj = CoreMixin.__new__(CoreMixin)
+    obj.local_player = FailingLP(last_error=None)
+    seen = _notify_recorder(obj)
+    CoreMixin._activate_local_player(obj)
+    check("still reports when librespot said nothing", len(seen) == 1, repr(seen))
+    check("falls back to pointing at the log",
+          seen and "log" in seen[0][0].lower(), repr(seen))
+
+
+def test_local_player_success_is_silent():
+    obj = CoreMixin.__new__(CoreMixin)
+    lp = FailingLP()
+    lp.start_and_activate = lambda: "LOCAL1"
+    obj.local_player = lp
+    seen = _notify_recorder(obj)
+    CoreMixin._activate_local_player(obj)
+    check("success shows no error message", seen == [], repr(seen))
+
+
+ALL += [test_local_player_failure_is_reported, test_local_player_failure_without_detail,
+        test_local_player_success_is_silent]
+
+
 def test_start_in_flight_does_not_double_spawn():
     _clean_env()
     old = config.LOCAL_CFG; config.LOCAL_CFG = {}

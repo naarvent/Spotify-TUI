@@ -72,6 +72,8 @@ class LocalPlayer:
         self._proc = None
         self._lock = threading.RLock()
         self._starting = False
+        # Last error line librespot printed, so a caller can surface it.
+        self.last_error: Optional[str] = None
 
         self._enabled = _cfg_bool("local_player_enabled", "SPT_LOCAL_PLAYER", True)
         self._path_override = _cfg_str("librespot_path", "SPT_LIBRESPOT_PATH", None)
@@ -195,6 +197,15 @@ class LocalPlayer:
                 if out is not None:
                     for ln in iter(out.readline, ""):
                         line_q.put(ln)
+                        # librespot's own diagnostics are the only explanation we
+                        # get when it dies on startup (a busy OAuth callback port,
+                        # a missing audio backend); dropping them made those
+                        # failures look like "nothing happened".
+                        text = ln.rstrip()
+                        if text:
+                            logger.info("librespot: %s", text)
+                            if "ERROR" in text:
+                                self.last_error = text
             except Exception:
                 logger.exception("LocalPlayer: librespot stdout reader failed")
 

@@ -1233,6 +1233,31 @@ class CoreMixin:
                 return mapping.get(row)
         return None
 
+    def _activate_local_player(self) -> None:
+        """Start the local player, reporting failure on the status line.
+
+        librespot can die the moment it starts — its OAuth callback port already
+        taken, no usable audio backend — and staying silent about that makes the
+        Devices row look like it simply does nothing.
+        """
+        lp = getattr(self, "local_player", None)
+        if lp is None:
+            return
+        try:
+            dev_id = lp.start_and_activate()
+        except Exception:
+            logger.exception("local player activation failed")
+            dev_id = None
+        if dev_id:
+            return
+        detail = getattr(lp, "last_error", None)
+        msg = "[b]Local player did not start.[/b] "
+        msg += rich_escape(detail) if detail else "See the log for librespot's output."
+        try:
+            self.call_from_thread(self._notify, msg, warn=True)
+        except Exception:
+            logger.warning("could not report the local player failure: %s", detail)
+
     def _select_device(self, dev_id) -> None:
         """Route a Devices-view selection. The synthetic sentinel row starts and
         activates the local librespot player; any real id transfers to it."""
@@ -1241,7 +1266,7 @@ class CoreMixin:
         if dev_id == LOCAL_START_SENTINEL:
             lp = getattr(self, "local_player", None)
             if lp is not None:
-                threading.Thread(target=lp.start_and_activate, daemon=True).start()
+                threading.Thread(target=self._activate_local_player, daemon=True).start()
             return
         threading.Thread(
             target=lambda: self.spotify.transfer(dev_id, force_play=True), daemon=True).start()
