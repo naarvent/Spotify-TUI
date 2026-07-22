@@ -50,6 +50,9 @@ class LocalPlayer:
     # login; its presence means we can start headless (no browser).
     CREDENTIALS_FILE = "credentials.json"
 
+    # Bound wait for the interactive OAuth to complete (browser round-trip).
+    OAUTH_WAIT_SECONDS = 120.0
+
     def __init__(self, spotify, *, cache_dir: Optional[str] = None,
                  popen: Callable = subprocess.Popen,
                  open_url: Optional[Callable[[str], None]] = None,
@@ -155,3 +158,49 @@ class LocalPlayer:
                         logger.exception("LocalPlayer: librespot did not exit after kill")
         except Exception:
             logger.exception("LocalPlayer: error stopping librespot")
+
+    def _extract_url(self, line: str) -> Optional[str]:
+        s = (line or "").strip()
+        i = s.find("https://")
+        if i == -1:
+            return None
+        return s[i:].split()[0]
+
+    def authenticate(self) -> bool:
+        """Run librespot's OAuth once and return True when credentials are
+        cached. Reads librespot's stdout for the auth URL, opens it in the
+        browser, and waits (bounded) for credentials.json to appear."""
+        if self.is_authenticated():
+            return True
+        if not self._spawn(login=True):
+            return False
+        proc = self._proc
+        deadline = self._now() + self.OAUTH_WAIT_SECONDS
+        opened = False
+        try:
+            while self._now() < deadline and proc is not None and proc.poll() is None:
+                line = proc.stdout.readline() if proc.stdout else ""
+                if line and not opened:
+                    url = self._extract_url(line)
+                    if url:
+                        try:
+                            self._open_url(url)
+                        except Exception:
+                            logger.exception("LocalPlayer: opening auth url failed")
+                        opened = True
+                if self.is_authenticated():
+                    return True
+                if not line:
+                    self._sleep(0.1)
+        except Exception:
+            logger.exception("LocalPlayer.authenticate failed")
+        return self.is_authenticated()
+
+    def start(self) -> bool:
+        """Ensure librespot is running. If authenticated, spawn headless; else
+        run the one-time OAuth (which leaves librespot running as the device)."""
+        if self.is_running():
+            return True
+        if self.is_authenticated():
+            return self._spawn(login=False)
+        return self.authenticate()

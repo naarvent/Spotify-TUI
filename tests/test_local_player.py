@@ -304,10 +304,84 @@ def test_spawn_popen_raises_returns_false():
         _clean_env(); config.LOCAL_CFG = old
 
 
+def test_extract_url():
+    _clean_env()
+    old = config.LOCAL_CFG; config.LOCAL_CFG = {}
+    try:
+        tmp = tempfile.mkdtemp(prefix="lp_")
+        lp = LocalPlayer(FakeSpotify(), cache_dir=tmp)
+        u = lp._extract_url("Please browse to https://accounts.spotify.com/authorize?x=1 now")
+        check("extracts url", u == "https://accounts.spotify.com/authorize?x=1", repr(u))
+        check("no url -> None", lp._extract_url("nothing here") is None)
+        shutil.rmtree(tmp, ignore_errors=True)
+    finally:
+        _clean_env(); config.LOCAL_CFG = old
+
+
+def test_authenticate_opens_url_and_caches():
+    _clean_env()
+    old = config.LOCAL_CFG; config.LOCAL_CFG = {}
+    try:
+        tmp = tempfile.mkdtemp(prefix="lp_")
+        fake_bin = os.path.join(tmp, "b"); open(fake_bin, "w").close()
+        os.environ["SPT_LIBRESPOT_PATH"] = fake_bin
+        creds = os.path.join(tmp, "librespot", "credentials.json")
+        fp = FakePopen(lines=["go to https://accounts.spotify.com/authorize?y=2\n"],
+                       creds_for_login=creds)
+        opened = []
+        lp = LocalPlayer(FakeSpotify(), cache_dir=tmp, popen=fp,
+                         open_url=lambda u: opened.append(u), sleep=lambda s: None)
+        ok = lp.authenticate()
+        check("authenticate returns True", ok is True)
+        check("browser opened with auth url",
+              opened == ["https://accounts.spotify.com/authorize?y=2"], repr(opened))
+        check("login spawn used oauth", "--enable-oauth" in fp.last.argv)
+        shutil.rmtree(tmp, ignore_errors=True)
+    finally:
+        _clean_env(); config.LOCAL_CFG = old
+
+
+def test_authenticate_short_circuits_when_cached():
+    _clean_env()
+    old = config.LOCAL_CFG; config.LOCAL_CFG = {}
+    try:
+        tmp = tempfile.mkdtemp(prefix="lp_")
+        fake_bin = os.path.join(tmp, "b"); open(fake_bin, "w").close()
+        os.environ["SPT_LIBRESPOT_PATH"] = fake_bin
+        os.makedirs(os.path.join(tmp, "librespot"), exist_ok=True)
+        open(os.path.join(tmp, "librespot", "credentials.json"), "w").close()
+        fp = FakePopen()
+        lp = LocalPlayer(FakeSpotify(), cache_dir=tmp, popen=fp)
+        check("already-auth authenticate True", lp.authenticate() is True)
+        check("no spawn when already authenticated", fp.spawns == [], repr(fp.spawns))
+        shutil.rmtree(tmp, ignore_errors=True)
+    finally:
+        _clean_env(); config.LOCAL_CFG = old
+
+
+def test_start_headless_when_authenticated():
+    _clean_env()
+    old = config.LOCAL_CFG; config.LOCAL_CFG = {}
+    try:
+        tmp = tempfile.mkdtemp(prefix="lp_")
+        fake_bin = os.path.join(tmp, "b"); open(fake_bin, "w").close()
+        os.environ["SPT_LIBRESPOT_PATH"] = fake_bin
+        os.makedirs(os.path.join(tmp, "librespot"), exist_ok=True)
+        open(os.path.join(tmp, "librespot", "credentials.json"), "w").close()
+        fp = FakePopen()
+        lp = LocalPlayer(FakeSpotify(), cache_dir=tmp, popen=fp)
+        check("start returns True", lp.start() is True)
+        check("headless spawn (no oauth)", "--enable-oauth" not in fp.last.argv)
+        shutil.rmtree(tmp, ignore_errors=True)
+    finally:
+        _clean_env(); config.LOCAL_CFG = old
+
+
 ALL = [test_cfg_defaults, test_cfg_env_precedence, test_discovery_override_first,
        test_discovery_bundled_then_path, test_discovery_none_disables, test_disabled_flag,
        test_is_authenticated, test_build_argv, test_spawn_and_is_running, test_stop_terminates, test_spawn_no_binary,
-       test_stop_reaps_after_kill, test_spawn_popen_raises_returns_false]
+       test_stop_reaps_after_kill, test_spawn_popen_raises_returns_false, test_extract_url, test_authenticate_opens_url_and_caches,
+       test_authenticate_short_circuits_when_cached, test_start_headless_when_authenticated]
 
 def main():
     for fn in ALL:
