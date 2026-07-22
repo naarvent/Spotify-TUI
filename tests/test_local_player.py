@@ -174,13 +174,17 @@ class FakeProc:
         self.terminated = False
         self.killed = False
         self.stdout = self
-        if write_creds_path:  # simulate librespot caching credentials on login
-            os.makedirs(os.path.dirname(write_creds_path), exist_ok=True)
-            open(write_creds_path, "w").close()
     def poll(self):
         return None if self._alive else 0
     def readline(self):
-        return self._lines.pop(0) if self._lines else ""
+        if self._lines:
+            return self._lines.pop(0)
+        # EOF: simulate librespot having cached credentials by now.
+        if self._write_creds_path:
+            os.makedirs(os.path.dirname(self._write_creds_path), exist_ok=True)
+            open(self._write_creds_path, "w").close()
+            self._write_creds_path = None
+        return ""
     def terminate(self):
         self.terminated = True; self._alive = False
     def kill(self):
@@ -377,11 +381,76 @@ def test_start_headless_when_authenticated():
         _clean_env(); config.LOCAL_CFG = old
 
 
+def test_authenticate_times_out_bounded():
+    _clean_env()
+    old = config.LOCAL_CFG; config.LOCAL_CFG = {}
+    try:
+        tmp = tempfile.mkdtemp(prefix="lp_")
+        fake_bin = os.path.join(tmp, "b"); open(fake_bin, "w").close()
+        os.environ["SPT_LIBRESPOT_PATH"] = fake_bin
+        clock = [1000.0]; calls = {"sleep": 0}
+        def fake_sleep(s):
+            calls["sleep"] += 1; clock[0] += 30.0   # cross the 120s deadline fast
+        # login-mode fake proc that emits nothing and never caches creds, stays alive
+        fp = FakePopen(lines=[], creds_for_login=None)
+        lp = LocalPlayer(FakeSpotify(), cache_dir=tmp, popen=fp,
+                         now=lambda: clock[0], sleep=fake_sleep)
+        ok = lp.authenticate()
+        check("timeout -> False", ok is False)
+        check("bounded: gave up via deadline", calls["sleep"] >= 1, str(calls["sleep"]))
+        shutil.rmtree(tmp, ignore_errors=True)
+    finally:
+        _clean_env(); config.LOCAL_CFG = old
+
+
+def test_start_returns_true_when_running():
+    _clean_env()
+    old = config.LOCAL_CFG; config.LOCAL_CFG = {}
+    try:
+        tmp = tempfile.mkdtemp(prefix="lp_")
+        fake_bin = os.path.join(tmp, "b"); open(fake_bin, "w").close()
+        os.environ["SPT_LIBRESPOT_PATH"] = fake_bin
+        os.makedirs(os.path.join(tmp, "librespot"), exist_ok=True)
+        open(os.path.join(tmp, "librespot", "credentials.json"), "w").close()
+        fp = FakePopen()
+        lp = LocalPlayer(FakeSpotify(), cache_dir=tmp, popen=fp)
+        lp._spawn(login=False)                # now running
+        n_before = len(fp.spawns)
+        check("start() True when already running", lp.start() is True)
+        check("no extra spawn when running", len(fp.spawns) == n_before, str(fp.spawns))
+        shutil.rmtree(tmp, ignore_errors=True)
+    finally:
+        _clean_env(); config.LOCAL_CFG = old
+
+
+def test_start_delegates_to_authenticate_when_unauth():
+    _clean_env()
+    old = config.LOCAL_CFG; config.LOCAL_CFG = {}
+    try:
+        tmp = tempfile.mkdtemp(prefix="lp_")
+        fake_bin = os.path.join(tmp, "b"); open(fake_bin, "w").close()
+        os.environ["SPT_LIBRESPOT_PATH"] = fake_bin
+        creds = os.path.join(tmp, "librespot", "credentials.json")
+        fp = FakePopen(lines=["auth https://accounts.spotify.com/authorize?z=3\n"],
+                       creds_for_login=creds)
+        lp = LocalPlayer(FakeSpotify(), cache_dir=tmp, popen=fp,
+                         open_url=lambda u: None, sleep=lambda s: None)
+        ok = lp.start()
+        check("start() authenticates when unauth", ok is True)
+        check("start() used oauth login", "--enable-oauth" in fp.last.argv)
+        shutil.rmtree(tmp, ignore_errors=True)
+    finally:
+        _clean_env(); config.LOCAL_CFG = old
+
+
 ALL = [test_cfg_defaults, test_cfg_env_precedence, test_discovery_override_first,
        test_discovery_bundled_then_path, test_discovery_none_disables, test_disabled_flag,
        test_is_authenticated, test_build_argv, test_spawn_and_is_running, test_stop_terminates, test_spawn_no_binary,
        test_stop_reaps_after_kill, test_spawn_popen_raises_returns_false, test_extract_url, test_authenticate_opens_url_and_caches,
        test_authenticate_short_circuits_when_cached, test_start_headless_when_authenticated]
+
+ALL += [test_authenticate_times_out_bounded, test_start_returns_true_when_running,
+        test_start_delegates_to_authenticate_when_unauth]
 
 def main():
     for fn in ALL:

@@ -17,6 +17,7 @@ import time
 import shutil
 import subprocess
 import threading
+import queue
 from typing import Callable, List, Optional
 
 from . import config
@@ -168,19 +169,42 @@ class LocalPlayer:
 
     def authenticate(self) -> bool:
         """Run librespot's OAuth once and return True when credentials are
-        cached. Reads librespot's stdout for the auth URL, opens it in the
-        browser, and waits (bounded) for credentials.json to appear."""
+        cached. librespot prints the auth URL on stdout; we read stdout on a
+        background daemon thread (so a quiet pipe never blocks us) and poll for
+        credentials.json, bounded by OAUTH_WAIT_SECONDS."""
         if self.is_authenticated():
             return True
         if not self._spawn(login=True):
             return False
-        proc = self._proc
+        with self._lock:
+            proc = self._proc
+        if proc is None:
+            return self.is_authenticated()
+
+        # Drain librespot stdout on a daemon thread; the wait loop never calls
+        # the blocking readline() itself, so it always honours the deadline.
+        line_q = queue.Queue()
+
+        def _reader(p):
+            try:
+                out = p.stdout
+                if out is not None:
+                    for ln in iter(out.readline, ""):
+                        line_q.put(ln)
+            except Exception:
+                logger.exception("LocalPlayer: librespot stdout reader failed")
+
+        threading.Thread(target=_reader, args=(proc,), daemon=True).start()
+
         deadline = self._now() + self.OAUTH_WAIT_SECONDS
         opened = False
-        try:
-            while self._now() < deadline and proc is not None and proc.poll() is None:
-                line = proc.stdout.readline() if proc.stdout else ""
-                if line and not opened:
+        while proc.poll() is None and self._now() < deadline:
+            if not opened:
+                try:
+                    line = line_q.get_nowait()
+                except queue.Empty:
+                    line = ""
+                if line:
                     url = self._extract_url(line)
                     if url:
                         try:
@@ -188,12 +212,9 @@ class LocalPlayer:
                         except Exception:
                             logger.exception("LocalPlayer: opening auth url failed")
                         opened = True
-                if self.is_authenticated():
-                    return True
-                if not line:
-                    self._sleep(0.1)
-        except Exception:
-            logger.exception("LocalPlayer.authenticate failed")
+            if self.is_authenticated():
+                return True
+            self._sleep(0.1)
         return self.is_authenticated()
 
     def start(self) -> bool:
