@@ -575,6 +575,43 @@ ALL += [test_autostart_transfers_when_idle, test_autostart_does_not_steal,
         test_autostart_device_never_appears, test_autostart_skipped_when_not_authenticated,
         test_autostart_disabled_flag, test_autostart_get_playback_error_skips_transfer]
 
+
+def test_start_and_activate_transfers_force_play():
+    _clean_env()
+    old = config.LOCAL_CFG; config.LOCAL_CFG = {}
+    try:
+        tmp = tempfile.mkdtemp(prefix="lp_")
+        sp = FakeSpotify(devices=[{"id": "LOCAL1", "name": "SPT-TUI Local"}],
+                         playback={"is_playing": True})  # playing elsewhere, but user chose local
+        lp = _authed_player(tmp, sp)
+        dev = lp.start_and_activate()
+        check("returns local device id", dev == "LOCAL1", repr(dev))
+        check("explicit activate uses force_play=True",
+              sp.transfers == [("LOCAL1", True)], repr(sp.transfers))
+        shutil.rmtree(tmp, ignore_errors=True)
+    finally:
+        _clean_env(); config.LOCAL_CFG = old
+
+
+def test_start_and_activate_unavailable():
+    _clean_env()
+    old = config.LOCAL_CFG; config.LOCAL_CFG = {}
+    orig_which = lp_mod.shutil.which
+    try:
+        tmp = tempfile.mkdtemp(prefix="lp_")
+        lp_mod.shutil.which = lambda name: None
+        sp = FakeSpotify()
+        lp = LocalPlayer(sp, cache_dir=tmp, popen=FakePopen(), sleep=lambda s: None)
+        check("unavailable -> None", lp.start_and_activate() is None)
+        check("unavailable -> no transfer", sp.transfers == [])
+        shutil.rmtree(tmp, ignore_errors=True)
+    finally:
+        lp_mod.shutil.which = orig_which
+        _clean_env(); config.LOCAL_CFG = old
+
+
+ALL += [test_start_and_activate_transfers_force_play, test_start_and_activate_unavailable]
+
 def main():
     for fn in ALL:
         try:

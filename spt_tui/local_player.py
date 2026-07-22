@@ -267,3 +267,20 @@ class LocalPlayer:
             self._spotify.transfer(dev_id, force_play=False)
         except Exception:
             logger.exception("LocalPlayer: polite transfer to local device failed")
+
+    def start_and_activate(self) -> Optional[str]:
+        """User explicitly chose the local device (Devices view). Ensure it is
+        running (running OAuth if needed), then transfer to it and play."""
+        if not self.is_available():
+            return None
+        if not self.is_running():
+            if not self.start():
+                return None
+        dev_id = self._wait_for_local_device()
+        if dev_id is None:
+            return None
+        try:
+            self._spotify.transfer(dev_id, force_play=True)
+        except Exception:
+            logger.exception("LocalPlayer: transfer to local device failed")
+        return dev_id
