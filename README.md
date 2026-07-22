@@ -28,6 +28,7 @@ Search Spotify, browse your library and playlists, control playback, follow sync
 - [Tests](#tests)
 - [Architecture](#architecture)
 - [Caching](#caching)
+- [Local player (experimental)](#local-player-experimental)
 - [Limitations](#limitations)
 - [Security](#security)
 - [Contributing](#contributing)
@@ -557,6 +558,32 @@ Spotify-TUI uses multiple cache strategies depending on the type of data.
 - Bounded by total serialized size.
 - Older entries are removed automatically when limits are exceeded.
 - Temporary network failures are not stored as permanent missing results.
+
+## Local player (experimental)
+
+Spotify-TUI can run its own audio player via [librespot](https://github.com/librespot-org/librespot),
+so it plays music without any other Spotify client open. Spotify **Premium** is
+still required (librespot cannot bypass it).
+
+- **Provide the binary:** put `librespot` on your `PATH`, or set
+  `SPT_LIBRESPOT_PATH` to its absolute path. With no binary present, the app
+  behaves exactly as before (it controls other Spotify Connect devices).
+- **First run:** open Devices (`d`) and select **SPT-TUI Local (start)** to
+  authorize once in your browser. After that it starts headless — no browser,
+  and never the official app.
+- **On launch** it activates automatically **only if nothing is already
+  playing** on another device — it never interrupts an active session.
+
+Config keys (in `spt_config.json`) / environment variables:
+
+| Key | Env | Default |
+| --- | --- | --- |
+| `local_player_enabled` | `SPT_LOCAL_PLAYER` | `true` |
+| `librespot_path` | `SPT_LIBRESPOT_PATH` | (auto-discovered) |
+| `local_player_autostart` | `SPT_LOCAL_AUTOSTART` | `true` |
+| `local_player_name` | `SPT_LOCAL_NAME` | `SPT-TUI Local` |
+
+Shipping the binary and a one-click installer is tracked separately (Sub-project B).
 
 ## Limitations
 
