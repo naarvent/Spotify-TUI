@@ -46,6 +46,10 @@ def _cfg_str(key: str, env: str, default):
 
 
 class LocalPlayer:
+    # librespot writes credentials.json into its --cache dir after a successful
+    # login; its presence means we can start headless (no browser).
+    CREDENTIALS_FILE = "credentials.json"
+
     def __init__(self, spotify, *, cache_dir: Optional[str] = None,
                  popen: Callable = subprocess.Popen,
                  open_url: Optional[Callable[[str], None]] = None,
@@ -84,3 +88,21 @@ class LocalPlayer:
 
     def is_available(self) -> bool:
         return bool(self._enabled) and self.binary_path() is not None
+
+    def credentials_path(self) -> str:
+        return os.path.join(self._librespot_cache, self.CREDENTIALS_FILE)
+
+    def is_authenticated(self) -> bool:
+        return os.path.isfile(self.credentials_path())
+
+    def _build_argv(self, binary: str, *, login: bool) -> List[str]:
+        argv = [binary,
+                "--name", self._name,
+                "--cache", self._librespot_cache,
+                "--backend", "rodio",
+                "--bitrate", "160"]
+        if login:
+            # Interactive OAuth to obtain and cache credentials. Headless runs
+            # (login=False) reuse the cached credentials.json in --cache.
+            argv.append("--enable-oauth")
+        return argv

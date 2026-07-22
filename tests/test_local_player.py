@@ -132,8 +132,42 @@ def test_disabled_flag():
         _clean_env(); config.LOCAL_CFG = old
 
 
+def test_is_authenticated():
+    _clean_env()
+    old = config.LOCAL_CFG; config.LOCAL_CFG = {}
+    try:
+        tmp = tempfile.mkdtemp(prefix="lp_")
+        lp = LocalPlayer(FakeSpotify(), cache_dir=tmp)
+        check("no creds -> not authenticated", lp.is_authenticated() is False)
+        os.makedirs(os.path.join(tmp, "librespot"), exist_ok=True)
+        open(lp.credentials_path(), "w").close()
+        check("creds file -> authenticated", lp.is_authenticated() is True)
+        shutil.rmtree(tmp, ignore_errors=True)
+    finally:
+        _clean_env(); config.LOCAL_CFG = old
+
+
+def test_build_argv():
+    _clean_env()
+    old = config.LOCAL_CFG; config.LOCAL_CFG = {}
+    try:
+        tmp = tempfile.mkdtemp(prefix="lp_")
+        lp = LocalPlayer(FakeSpotify(), cache_dir=tmp)
+        run = lp._build_argv("/x/librespot", login=False)
+        login = lp._build_argv("/x/librespot", login=True)
+        check("argv starts with binary", run[0] == "/x/librespot", repr(run[:1]))
+        check("argv carries name", "--name" in run and "SPT-TUI Local" in run)
+        check("argv carries cache dir", os.path.join(tmp, "librespot") in run)
+        check("run mode has no oauth", "--enable-oauth" not in run)
+        check("login mode enables oauth", "--enable-oauth" in login)
+        shutil.rmtree(tmp, ignore_errors=True)
+    finally:
+        _clean_env(); config.LOCAL_CFG = old
+
+
 ALL = [test_cfg_defaults, test_cfg_env_precedence, test_discovery_override_first,
-       test_discovery_bundled_then_path, test_discovery_none_disables, test_disabled_flag]
+       test_discovery_bundled_then_path, test_discovery_none_disables, test_disabled_flag,
+       test_is_authenticated, test_build_argv]
 
 def main():
     for fn in ALL:
