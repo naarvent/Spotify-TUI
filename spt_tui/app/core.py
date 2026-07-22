@@ -1209,6 +1209,30 @@ class CoreMixin:
             name = (getattr(li, "data", {}) or {}).get("name", "")
             self._open_library_item(name)
 
+    def _resolve_device_id(self, table, row_key):
+        """Device id for a ``devices_table`` selection.
+
+        Textual hands `RowSelected` a `RowKey` object, not the plain int we
+        passed as ``key=``, and `RowKey` does not compare equal to that int — so
+        the direct ``row_to_device.get(event.row_key)`` always missed and Enter
+        did nothing. Normalise the same way `_play_row` does for the tracks
+        table: exact hit, then match by string, then the cursor row.
+        """
+        mapping = getattr(table, "row_to_device", None) or {}
+        dev_id = mapping.get(row_key)
+        if dev_id is not None:
+            return dev_id
+        raw = getattr(row_key, "value", row_key)
+        for k, v in mapping.items():
+            if str(k) == str(raw):
+                return v
+        getter = getattr(self, "_get_cursor_row", None)
+        if getter is not None:
+            row = getter(table)
+            if row is not None:
+                return mapping.get(row)
+        return None
+
     def _select_device(self, dev_id) -> None:
         """Route a Devices-view selection. The synthetic sentinel row starts and
         activates the local librespot player; any real id transfers to it."""
@@ -1227,7 +1251,7 @@ class CoreMixin:
         if table.id == "tracks_table" and hasattr(table, "row_to_uri"):
             self._play_row(event.row_key, table)
         elif table.id == "devices_table" and hasattr(table, "row_to_device"):
-            dev_id = table.row_to_device.get(event.row_key)
+            dev_id = self._resolve_device_id(table, event.row_key)
             if dev_id:
                 self._select_device(dev_id)
                 self._back_one_level()

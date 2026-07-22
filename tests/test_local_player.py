@@ -742,6 +742,51 @@ def test_start_local_autostart_thread():
 ALL += [test_on_unmount_stops_player, test_start_local_autostart_thread]
 
 
+class FakeRowKey:
+    """Stands in for textual's `RowKey`: it wraps the value we passed as `key=`
+    but does NOT compare equal to that bare value, which is exactly why a direct
+    `row_to_device.get(event.row_key)` silently missed and Enter did nothing."""
+    def __init__(self, value):
+        self.value = value
+    def __hash__(self):
+        return hash(self.value)
+    def __eq__(self, other):
+        if isinstance(other, FakeRowKey):
+            return self.value == other.value
+        return NotImplemented
+
+
+def test_resolve_device_id_handles_rowkey_object():
+    obj = CoreMixin.__new__(CoreMixin)
+    obj.local_player = FakeLP(available=True, running=False)
+    table = FakeTable()
+    QueueDevicesMixin._populate_devices_table(
+        obj, table, [{"id": "PHONE", "name": "Phone", "is_active": True}])
+
+    # Reproduces the defect: the raw lookup the code used to do returns nothing.
+    check("raw dict lookup misses a RowKey (the bug)",
+          table.row_to_device.get(FakeRowKey(0)) is None)
+
+    sentinel = CoreMixin._resolve_device_id(obj, table, FakeRowKey(0))
+    phone = CoreMixin._resolve_device_id(obj, table, FakeRowKey(1))
+    check("resolves the synthetic start row from a RowKey",
+          sentinel == LOCAL_START_SENTINEL, repr(sentinel))
+    check("resolves a real device from a RowKey", phone == "PHONE", repr(phone))
+
+
+def test_resolve_device_id_unknown_key():
+    obj = CoreMixin.__new__(CoreMixin)
+    obj.local_player = FakeLP(available=False, running=False)
+    table = FakeTable()
+    QueueDevicesMixin._populate_devices_table(
+        obj, table, [{"id": "PHONE", "name": "Phone", "is_active": True}])
+    check("unknown row key resolves to None",
+          CoreMixin._resolve_device_id(obj, table, FakeRowKey(99)) is None)
+
+
+ALL += [test_resolve_device_id_handles_rowkey_object, test_resolve_device_id_unknown_key]
+
+
 def test_start_in_flight_does_not_double_spawn():
     _clean_env()
     old = config.LOCAL_CFG; config.LOCAL_CFG = {}
