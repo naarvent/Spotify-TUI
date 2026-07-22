@@ -260,7 +260,7 @@ class LocalPlayer:
             pb = self._spotify.get_playback() or {}
         except Exception:
             logger.exception("LocalPlayer: get_playback during autostart failed")
-            pb = {}
+            return  # unknown playback state — fail safe, never risk stealing a foreign session
         if pb.get("is_playing"):
             return  # something is playing elsewhere — stay available, do not transfer
         try:

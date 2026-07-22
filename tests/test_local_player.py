@@ -527,12 +527,36 @@ def test_autostart_disabled_flag():
     old = config.LOCAL_CFG; config.LOCAL_CFG = {}
     try:
         tmp = tempfile.mkdtemp(prefix="lp_")
+        fake_bin = os.path.join(tmp, "b"); open(fake_bin, "w").close()
+        os.environ["SPT_LIBRESPOT_PATH"] = fake_bin
+        os.makedirs(os.path.join(tmp, "librespot"), exist_ok=True)
+        open(os.path.join(tmp, "librespot", "credentials.json"), "w").close()
         os.environ["SPT_LOCAL_AUTOSTART"] = "false"
+        fp = FakePopen()
         sp = FakeSpotify(devices=[{"id": "LOCAL1", "name": "SPT-TUI Local"}],
                          playback={"is_playing": False})
-        lp = _authed_player(tmp, sp)
+        lp = LocalPlayer(sp, cache_dir=tmp, popen=fp, sleep=lambda s: None)
         lp.maybe_autostart()
         check("autostart disabled: no transfer", sp.transfers == [], repr(sp.transfers))
+        check("autostart disabled: no spawn", fp.spawns == [], repr(fp.spawns))
+        shutil.rmtree(tmp, ignore_errors=True)
+    finally:
+        _clean_env(); config.LOCAL_CFG = old
+
+
+def test_autostart_get_playback_error_skips_transfer():
+    _clean_env()
+    old = config.LOCAL_CFG; config.LOCAL_CFG = {}
+    try:
+        tmp = tempfile.mkdtemp(prefix="lp_")
+        class RaisingPlaybackSpotify(FakeSpotify):
+            def get_playback(self):
+                raise RuntimeError("playback boom")
+        sp = RaisingPlaybackSpotify(
+            devices=[{"id": "LOCAL1", "name": "SPT-TUI Local", "is_active": False}])
+        lp = _authed_player(tmp, sp)
+        lp.maybe_autostart()
+        check("get_playback error -> NO transfer (fail safe)", sp.transfers == [], repr(sp.transfers))
         shutil.rmtree(tmp, ignore_errors=True)
     finally:
         _clean_env(); config.LOCAL_CFG = old
@@ -549,7 +573,7 @@ ALL += [test_authenticate_times_out_bounded, test_start_returns_true_when_runnin
 
 ALL += [test_autostart_transfers_when_idle, test_autostart_does_not_steal,
         test_autostart_device_never_appears, test_autostart_skipped_when_not_authenticated,
-        test_autostart_disabled_flag]
+        test_autostart_disabled_flag, test_autostart_get_playback_error_skips_transfer]
 
 def main():
     for fn in ALL:
