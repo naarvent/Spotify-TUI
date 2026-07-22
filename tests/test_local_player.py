@@ -612,6 +612,102 @@ def test_start_and_activate_unavailable():
 
 ALL += [test_start_and_activate_transfers_force_play, test_start_and_activate_unavailable]
 
+
+from spt_tui.app.queue_devices import QueueDevicesMixin
+from spt_tui.app.core import CoreMixin
+
+
+class FakeTable:
+    def __init__(self):
+        self.rows = []            # list of (cells, key)
+        self.row_to_device = {}
+        self.cleared = False
+    def clear(self):
+        self.cleared = True; self.rows = []
+    def add_row(self, *cells, key=None):
+        self.rows.append((cells, key))
+
+
+class FakeLP:
+    def __init__(self, available=True, running=False, name="SPT-TUI Local"):
+        self._available = available; self._running = running; self._name = name
+        self.activated = 0
+    @property
+    def device_name(self): return self._name
+    def is_available(self): return self._available
+    def is_running(self): return self._running
+    def start_and_activate(self): self.activated += 1; return "LOCAL1"
+
+
+def test_devices_table_injects_start_row():
+    obj = QueueDevicesMixin()
+    obj.local_player = FakeLP(available=True, running=False)
+    table = FakeTable()
+    QueueDevicesMixin._populate_devices_table(obj, table, [{"id": "PHONE", "name": "Phone", "is_active": True}])
+    # first row is the synthetic start entry, mapped to the sentinel id
+    check("start row present", table.row_to_device.get(0) == LOCAL_START_SENTINEL, repr(table.row_to_device))
+    check("phone still listed", table.row_to_device.get(1) == "PHONE", repr(table.row_to_device))
+
+
+def test_devices_table_no_start_row_when_running():
+    obj = QueueDevicesMixin()
+    obj.local_player = FakeLP(available=True, running=True)
+    table = FakeTable()
+    # librespot already appears as a real device named "SPT-TUI Local"
+    QueueDevicesMixin._populate_devices_table(
+        obj, table, [{"id": "LOCAL1", "name": "SPT-TUI Local", "is_active": True}])
+    check("no synthetic row when running", LOCAL_START_SENTINEL not in table.row_to_device.values(),
+          repr(table.row_to_device))
+    check("real local device listed", table.row_to_device.get(0) == "LOCAL1", repr(table.row_to_device))
+
+
+def test_select_device_routes_sentinel(monkey=None):
+    obj = CoreMixin.__new__(CoreMixin)   # bare instance, skip __init__
+    obj.local_player = FakeLP()
+    # run threads synchronously so the test is deterministic
+    orig_thread = lp_core_thread_patch(True)
+    try:
+        CoreMixin._select_device(obj, LOCAL_START_SENTINEL)
+        check("sentinel -> start_and_activate called", obj.local_player.activated == 1,
+              str(obj.local_player.activated))
+    finally:
+        lp_core_thread_patch(False, orig_thread)
+
+
+def test_select_device_routes_real_id():
+    obj = CoreMixin.__new__(CoreMixin)
+    obj.local_player = FakeLP()
+    obj.spotify = FakeSpotify()
+    orig_thread = lp_core_thread_patch(True)
+    try:
+        CoreMixin._select_device(obj, "PHONE")
+        check("real id -> transfer force_play", obj.spotify.transfers == [("PHONE", True)],
+              repr(obj.spotify.transfers))
+    finally:
+        lp_core_thread_patch(False, orig_thread)
+
+
+# --- helper: make threading.Thread in core.py run its target synchronously ---
+import spt_tui.app.core as core_mod
+class _SyncThread:
+    def __init__(self, target=None, args=(), kwargs=None, daemon=None):
+        self._t = target; self._a = args; self._k = kwargs or {}
+    def start(self):
+        if self._t: self._t(*self._a, **self._k)
+def lp_core_thread_patch(on, saved=None):
+    if on:
+        prev = core_mod.threading.Thread
+        core_mod.threading.Thread = _SyncThread
+        return prev
+    else:
+        core_mod.threading.Thread = saved
+        return None
+
+
+ALL += [test_devices_table_injects_start_row, test_devices_table_no_start_row_when_running,
+        test_select_device_routes_sentinel, test_select_device_routes_real_id]
+
+
 def main():
     for fn in ALL:
         try:

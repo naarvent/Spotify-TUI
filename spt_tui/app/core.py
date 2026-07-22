@@ -26,6 +26,7 @@ from .. import config
 from ..config import logger, LOG_PATH
 from ..constants import WELCOME, WELCOME_SPOTIFY_ART, WELCOME_AUTHOR, LIBRARY_ITEMS
 from ..spotify_client import SpotifyClient
+from ..local_player import LocalPlayer, LOCAL_START_SENTINEL
 from ..widgets import HelpScroll, ContentPanel
 
 class CoreMixin:
@@ -1183,6 +1184,19 @@ class CoreMixin:
             name = (getattr(li, "data", {}) or {}).get("name", "")
             self._open_library_item(name)
 
+    def _select_device(self, dev_id) -> None:
+        """Route a Devices-view selection. The synthetic sentinel row starts and
+        activates the local librespot player; any real id transfers to it."""
+        if not dev_id:
+            return
+        if dev_id == LOCAL_START_SENTINEL:
+            lp = getattr(self, "local_player", None)
+            if lp is not None:
+                threading.Thread(target=lp.start_and_activate, daemon=True).start()
+            return
+        threading.Thread(
+            target=lambda: self.spotify.transfer(dev_id, force_play=True), daemon=True).start()
+
     def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
         table: DataTable = event.data_table
         if table.id == "tracks_table" and hasattr(table, "row_to_uri"):
@@ -1190,7 +1204,7 @@ class CoreMixin:
         elif table.id == "devices_table" and hasattr(table, "row_to_device"):
             dev_id = table.row_to_device.get(event.row_key)
             if dev_id:
-                threading.Thread(target=lambda: self.spotify.transfer(dev_id, force_play=True), daemon=True).start()
+                self._select_device(dev_id)
                 self._back_one_level()
 
             left_col = self.query_one('#left_col')
