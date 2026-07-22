@@ -708,6 +708,40 @@ ALL += [test_devices_table_injects_start_row, test_devices_table_no_start_row_wh
         test_select_device_routes_sentinel, test_select_device_routes_real_id]
 
 
+class LifecycleLP:
+    def __init__(self):
+        self.autostarted = 0; self.stopped = 0
+    def maybe_autostart(self): self.autostarted += 1
+    def stop(self): self.stopped += 1
+
+
+def test_on_unmount_stops_player():
+    obj = CoreMixin.__new__(CoreMixin)
+    obj.local_player = LifecycleLP()
+    obj._closing = False
+    # _stop_all_intervals touches timers we don't have; stub it for this unit test
+    obj._stop_all_intervals = lambda: None
+    CoreMixin.on_unmount(obj)
+    check("on_unmount stops local player", obj.local_player.stopped == 1,
+          str(obj.local_player.stopped))
+    check("on_unmount sets _closing", obj._closing is True)
+
+
+def test_start_local_autostart_thread():
+    obj = CoreMixin.__new__(CoreMixin)
+    obj.local_player = LifecycleLP()
+    orig = lp_core_thread_patch(True)
+    try:
+        CoreMixin._start_local_player(obj)
+        check("autostart invoked", obj.local_player.autostarted == 1,
+              str(obj.local_player.autostarted))
+    finally:
+        lp_core_thread_patch(False, orig)
+
+
+ALL += [test_on_unmount_stops_player, test_start_local_autostart_thread]
+
+
 def main():
     for fn in ALL:
         try:

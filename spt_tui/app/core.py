@@ -34,6 +34,12 @@ class CoreMixin:
         super().__init__()
         self.spotify = SpotifyClient()
         try:
+            self.local_player = LocalPlayer(
+                self.spotify, open_url=getattr(self, "_open_url_in_browser", None))
+        except Exception:
+            logger.exception("LocalPlayer init failed")
+            self.local_player = None
+        try:
             self._auto_load_playlists = os.getenv('SPT_AUTO_LOAD_PLAYLISTS', '0') == '1'
         except Exception:
             self._auto_load_playlists = False
@@ -291,6 +297,19 @@ class CoreMixin:
         except Exception:
             logger.exception("Could not start playlist retry worker")
 
+        self._start_local_player()
+
+    def _start_local_player(self) -> None:
+        """Kick off the polite local-player autostart on a daemon thread so the
+        UI thread is never blocked by spawn / device-poll / get_playback."""
+        lp = getattr(self, "local_player", None)
+        if lp is None:
+            return
+        try:
+            threading.Thread(target=lp.maybe_autostart, daemon=True).start()
+        except Exception:
+            logger.exception("Could not start local player autostart thread")
+
     def _stop_all_intervals(self) -> None:
         """Pause and drop every periodic timer. Idempotent: safe to call more
         than once (e.g. teardown running twice)."""
@@ -312,6 +331,12 @@ class CoreMixin:
         and stop every timer so no worker paints into a torn-down app."""
         self._closing = True
         self._stop_all_intervals()
+        lp = getattr(self, "local_player", None)
+        if lp is not None:
+            try:
+                lp.stop()
+            except Exception:
+                logger.exception("Stopping local player during teardown failed")
 
     # How long a message stays up. Long enough to read, short enough not to sit
     # over the now-playing bar.
