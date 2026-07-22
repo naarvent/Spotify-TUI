@@ -5,7 +5,7 @@ all injected, and a FakeSpotify records device/playback/transfer calls.
 Run standalone:  python tests/test_local_player.py
 Exit code is 0 only if every check passes.
 """
-import os, sys, time, tempfile, shutil, traceback, threading
+import os, sys, time, tempfile, shutil, traceback, threading, subprocess
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -260,9 +260,54 @@ def test_spawn_no_binary():
         _clean_env(); config.LOCAL_CFG = old
 
 
+def test_stop_reaps_after_kill():
+    _clean_env()
+    old = config.LOCAL_CFG; config.LOCAL_CFG = {}
+    try:
+        tmp = tempfile.mkdtemp(prefix="lp_")
+        fake_bin = os.path.join(tmp, "b"); open(fake_bin, "w").close()
+        os.environ["SPT_LIBRESPOT_PATH"] = fake_bin
+        fp = FakePopen()
+        lp = LocalPlayer(FakeSpotify(), cache_dir=tmp, popen=fp)
+        lp._spawn(login=False)
+        proc = fp.last
+        calls = {"wait": 0}
+        def fake_wait(timeout=None):
+            calls["wait"] += 1
+            if calls["wait"] == 1:
+                raise subprocess.TimeoutExpired(cmd="librespot", timeout=timeout)
+            proc._alive = False
+            return 0
+        proc.wait = fake_wait
+        lp.stop()
+        check("terminate then kill on timeout", proc.killed is True)
+        check("reaps after kill (2nd wait)", calls["wait"] >= 2, str(calls["wait"]))
+        shutil.rmtree(tmp, ignore_errors=True)
+    finally:
+        _clean_env(); config.LOCAL_CFG = old
+
+
+def test_spawn_popen_raises_returns_false():
+    _clean_env()
+    old = config.LOCAL_CFG; config.LOCAL_CFG = {}
+    try:
+        tmp = tempfile.mkdtemp(prefix="lp_")
+        fake_bin = os.path.join(tmp, "b"); open(fake_bin, "w").close()
+        os.environ["SPT_LIBRESPOT_PATH"] = fake_bin
+        def raising_popen(argv, **kw):
+            raise RuntimeError("boom")
+        lp = LocalPlayer(FakeSpotify(), cache_dir=tmp, popen=raising_popen)
+        check("spawn returns False on Popen failure", lp._spawn(login=False) is False)
+        check("not running after failed spawn", lp.is_running() is False)
+        shutil.rmtree(tmp, ignore_errors=True)
+    finally:
+        _clean_env(); config.LOCAL_CFG = old
+
+
 ALL = [test_cfg_defaults, test_cfg_env_precedence, test_discovery_override_first,
        test_discovery_bundled_then_path, test_discovery_none_disables, test_disabled_flag,
-       test_is_authenticated, test_build_argv, test_spawn_and_is_running, test_stop_terminates, test_spawn_no_binary]
+       test_is_authenticated, test_build_argv, test_spawn_and_is_running, test_stop_terminates, test_spawn_no_binary,
+       test_stop_reaps_after_kill, test_spawn_popen_raises_returns_false]
 
 def main():
     for fn in ALL:

@@ -112,6 +112,10 @@ class LocalPlayer:
         return p is not None and p.poll() is None
 
     def _spawn(self, *, login: bool) -> bool:
+        """Spawn librespot. Precondition: call only when not already running
+        (is_running() is False); the caller owns stopping any prior process
+        first. Returns True on a successful spawn, False if there is no binary
+        or Popen fails."""
         binary = self.binary_path()
         if binary is None:
             return False
@@ -128,7 +132,8 @@ class LocalPlayer:
             return True
         except Exception:
             logger.exception("LocalPlayer: could not spawn librespot")
-            self._proc = None
+            with self._lock:
+                self._proc = None
             return False
 
     def stop(self) -> None:
@@ -142,7 +147,11 @@ class LocalPlayer:
                 p.terminate()
                 try:
                     p.wait(timeout=5)
-                except Exception:
+                except subprocess.TimeoutExpired:
                     p.kill()
+                    try:
+                        p.wait(timeout=5)  # reap after force-kill; avoid a zombie
+                    except Exception:
+                        logger.exception("LocalPlayer: librespot did not exit after kill")
         except Exception:
             logger.exception("LocalPlayer: error stopping librespot")
