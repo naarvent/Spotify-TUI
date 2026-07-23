@@ -218,18 +218,50 @@ publisher" warning — click **More info → Run anyway**.
 ### Linux / macOS (pipx)
 
 There is no bundled installer for Linux/macOS — use `pipx`, which installs the
-app in an isolated environment and puts the `spt` command on your `PATH`:
+app in an isolated environment and puts the `spt` command on your `PATH`.
+
+**1. Install pipx** (it is not preinstalled):
+
+```bash
+sudo apt install pipx          # Debian / Ubuntu
+sudo dnf install pipx          # Fedora
+sudo pacman -S python-pipx     # Arch
+brew install pipx              # macOS (Homebrew)
+python3 -m pip install --user pipx   # any system, fallback
+```
+
+**2. Put pipx apps on your PATH** (once), then open a new terminal:
+
+```bash
+pipx ensurepath
+```
+
+**3. Install SPT-TUI:**
 
 ```bash
 pipx install git+https://github.com/naarvent/Spotify-TUI.git
+```
+
+**4. (Optional) Install librespot** for local playback — the built-in player:
+
+```bash
+sudo pacman -S librespot       # Arch (repos/AUR)
+cargo install librespot --locked   # any system, builds from source
+```
+
+SPT-TUI finds `librespot` on your `PATH` automatically (or set
+`SPT_LIBRESPOT_PATH` to point at it). Without it, the app still works as a
+controller for another Spotify Connect device.
+
+**5. Run it:**
+
+```bash
 spt
 ```
 
-To play audio locally (the built-in player), also install `librespot` — from your
-package manager (`librespot` or `spotifyd` is packaged on many distros) or with
-`cargo install librespot --locked`. SPT-TUI finds it on your `PATH`. Without it,
-the app still works as a controller for another Spotify Connect device. Spotify
-**Premium** is required for playback either way.
+Update later with `pipx upgrade Spotify-TUI`. Spotify **Premium** is required for
+playback, with or without the local player. On macOS the same steps apply
+(`brew install pipx`).
 
 ### From source (any OS)
 
