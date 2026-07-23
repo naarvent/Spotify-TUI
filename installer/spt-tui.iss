@@ -44,7 +44,8 @@ UninstallDisplayName={#AppName}
 Name: "english"; MessagesFile: "compiler:Default.isl"
 
 [Tasks]
-Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription: "Additional shortcuts:"; Flags: unchecked
+Name: "addtopath"; Description: "Add SPT-TUI to your PATH (lets you run ""spt"" in any terminal)"; GroupDescription: "Options:"
+Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription: "Options:"; Flags: unchecked
 
 [Files]
 ; The whole onedir freeze (spt.exe, its dependencies, and librespot.exe which the
@@ -57,9 +58,16 @@ Name: "{userdesktop}\{#AppName}"; Filename: "{app}\{#AppExeName}"; Tasks: deskto
 
 [Registry]
 ; Add the install dir to the *user* PATH so `spt` works in any new terminal.
+; Gated on the (default-on) "addtopath" task, so the user can opt out.
 Root: HKCU; Subkey: "Environment"; ValueType: expandsz; ValueName: "Path"; \
   ValueData: "{olddata};{app}"; Flags: preservestringtype; \
-  Check: NeedsAddPath(ExpandConstant('{app}'))
+  Tasks: addtopath; Check: NeedsAddPath(ExpandConstant('{app}'))
+
+[Run]
+; Offer to launch the app from the final wizard page (a checkbox the user can
+; clear). nowait lets the installer close; skipifsilent keeps silent installs quiet.
+Filename: "{app}\{#AppExeName}"; Description: "Launch SPT-TUI now"; \
+  Flags: nowait postinstall skipifsilent
 
 [Code]
 function NeedsAddPath(Param: string): Boolean;
