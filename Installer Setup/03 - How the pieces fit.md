@@ -39,7 +39,8 @@ Turns `dist/spt/` (with `librespot.exe` already inside) into the installer:
   checkbox (the "addtopath" task), so `spt` works in any new terminal unless the
   user opts out.
 - Creates a Start Menu shortcut (and an optional, default-off desktop shortcut),
-  and offers a "Launch SPT-TUI now" checkbox on the final page.
+  offers a "Launch SPT-TUI now" checkbox on the final page, and shows the MIT
+  `LICENSE` on an agreement page.
 - Has a **fixed `AppId`** — this is what makes re-running a newer installer an
   in-place upgrade instead of a second copy. Never change it.
 - Its uninstaller removes files, the `PATH` entry, and shortcuts, but leaves the

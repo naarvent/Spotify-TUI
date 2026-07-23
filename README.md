@@ -203,6 +203,20 @@ Browsing, searching and some library operations may work with a free Spotify acc
 
 ## Installation
 
+### Windows installer (easiest)
+
+Download the latest `SPT-TUI-Setup-<version>.exe` from the
+[Releases page](https://github.com/naarvent/Spotify-TUI/releases) and run the
+wizard. It installs everything — **no Python needed** — and bundles the local
+player (`librespot`), so you can play music without any other Spotify client open
+(Spotify **Premium** required). The wizard adds `spt` to your `PATH` (optional),
+so you can open a new terminal and just run `spt`.
+
+The installer is unsigned, so on first run Windows SmartScreen shows an "unknown
+publisher" warning — click **More info → Run anyway**.
+
+### From source (any OS)
+
 ```bash
 # 1. Clone the repository
 git clone https://github.com/naarvent/Spotify-TUI.git
