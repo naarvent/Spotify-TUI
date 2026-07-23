@@ -7,6 +7,7 @@ __pycache__/
 .cache*
 *.cache_spotify_token
 spt_config.json
+*_cache.json
 *credentials*
 *token*.json
 
