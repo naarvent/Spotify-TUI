@@ -7,6 +7,11 @@ with no Python and no Rust on the user's machine.
 
 If you just want to develop, ignore all of this and run `python -m spt_tui`.
 
+> **Windows only.** Linux and macOS have no bundled installer — users install
+> with `pipx install git+https://github.com/naarvent/Spotify-TUI.git` and get
+> `librespot` from their package manager or `cargo install librespot --locked`.
+> See the main `README.md`. This folder is entirely about the Windows `.exe`.
+
 ## The one thing to remember
 
 **Releasing a new version is a single tag push.** Bump the version, tag it, push

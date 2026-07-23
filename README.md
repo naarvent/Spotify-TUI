@@ -215,6 +215,22 @@ so you can open a new terminal and just run `spt`.
 The installer is unsigned, so on first run Windows SmartScreen shows an "unknown
 publisher" warning — click **More info → Run anyway**.
 
+### Linux / macOS (pipx)
+
+There is no bundled installer for Linux/macOS — use `pipx`, which installs the
+app in an isolated environment and puts the `spt` command on your `PATH`:
+
+```bash
+pipx install git+https://github.com/naarvent/Spotify-TUI.git
+spt
+```
+
+To play audio locally (the built-in player), also install `librespot` — from your
+package manager (`librespot` or `spotifyd` is packaged on many distros) or with
+`cargo install librespot --locked`. SPT-TUI finds it on your `PATH`. Without it,
+the app still works as a controller for another Spotify Connect device. Spotify
+**Premium** is required for playback either way.
+
 ### From source (any OS)
 
 ```bash
