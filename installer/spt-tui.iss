@@ -24,6 +24,10 @@ AppPublisher={#AppPublisher}
 AppPublisherURL={#AppURL}
 AppSupportURL={#AppURL}/issues
 DefaultDirName={localappdata}\Programs\{#AppName}
+; Paths in [Files]/OutputDir are relative to SourceDir, which is relative to this
+; .iss file's folder (installer/). '..' makes them relative to the repo root, so
+; dist\spt and dist\installer resolve the same whether built locally or in CI.
+SourceDir=..
 DisableProgramGroupPage=yes
 PrivilegesRequired=lowest
 OutputBaseFilename=SPT-TUI-Setup-{#AppVersion}

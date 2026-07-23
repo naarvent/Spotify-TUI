@@ -19,8 +19,13 @@ real release (reproducible, hashed, attached to the tag).
    pip install pyinstaller
    ```
 
-3. **Inno Setup 6** — download from https://jrsoftware.org/isdl.php and install.
-   The compiler ends up at `C:\Program Files (x86)\Inno Setup 6\ISCC.exe`.
+3. **Inno Setup 6** — install it one of two ways, which land the compiler
+   (`ISCC.exe`) in different places:
+   - `winget install JRSoftware.InnoSetup` → `%LOCALAPPDATA%\Programs\Inno Setup 6\ISCC.exe`
+   - the installer from https://jrsoftware.org/isdl.php → `C:\Program Files (x86)\Inno Setup 6\ISCC.exe`
+
+   Use whichever path exists in the ISCC command in step 5. (CI uses `choco`,
+   which lands it in `Program Files (x86)`.)
 
 ## Build steps
 
@@ -51,8 +56,12 @@ Run these from the repo root (`SPT-TUI - Refactorizar`) in PowerShell.
    It should print `spt-tui <version>`. You can also just run `dist\spt\spt.exe`
    to launch the full TUI and confirm the local player works.
 
-5. **Build the installer** (use your real version for `AppVersion`):
+5. **Build the installer** (use your real version for `AppVersion`, and the ISCC
+   path that matches how you installed Inno — see prerequisites):
    ```powershell
+   # winget install:
+   & "$env:LOCALAPPDATA\Programs\Inno Setup 6\ISCC.exe" /DAppVersion=0.2.1 installer\spt-tui.iss
+   # or classic installer:
    & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" /DAppVersion=0.2.1 installer\spt-tui.iss
    ```
    The installer lands at `dist\installer\SPT-TUI-Setup-0.2.1.exe`.
