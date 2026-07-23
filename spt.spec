@@ -30,7 +30,10 @@ for _pkg in ("textual", "pyfiglet"):
 hiddenimports += ["spt_tui", "spt_tui.app", "spotipy", "rich", "requests"]
 
 a = Analysis(
-    ["spt_tui/__main__.py"],
+    # A launcher, not spt_tui/__main__.py directly: PyInstaller runs the entry
+    # as top-level __main__ with no parent package, which would break that
+    # module's relative imports. run_spt.py imports the package normally.
+    ["run_spt.py"],
     pathex=[],
     binaries=binaries,
     datas=datas,
