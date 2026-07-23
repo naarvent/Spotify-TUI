@@ -63,3 +63,10 @@ docs/
 *.swp
 .DS_Store
 Thumbs.db
+
+# ---------------------------------------------------------------------------
+# Installer / packaging build outputs (see Installer Setup/)
+# ---------------------------------------------------------------------------
+librespot-bin/
+librespot-cargo/
+*.whl

@@ -13,6 +13,7 @@ cache directory are all injectable.
 from __future__ import annotations
 
 import os
+import sys
 import time
 import shutil
 import subprocess
@@ -91,9 +92,22 @@ class LocalPlayer:
         cand = self._path_override
         if cand and os.path.isfile(cand):
             return cand
-        bundled = os.path.join(self._cache_dir, "bin", self._exe_name())
+        exe = self._exe_name()
+        bundled = os.path.join(self._cache_dir, "bin", exe)
         if os.path.isfile(bundled):
             return bundled
+        # Beside the running executable: for the PyInstaller onedir build the
+        # installer drops librespot.exe next to spt.exe, and sys.executable is
+        # spt.exe. PATH-independent, so it is found even when launched from the
+        # Start Menu shortcut. In a plain `python -m spt_tui` run this points at
+        # the Python directory and simply finds nothing, falling through to PATH.
+        try:
+            beside = os.path.join(
+                os.path.dirname(os.path.abspath(sys.executable)), exe)
+            if os.path.isfile(beside):
+                return beside
+        except Exception:
+            logger.exception("LocalPlayer: beside-executable discovery failed")
         return shutil.which("librespot")
 
     def is_available(self) -> bool:
