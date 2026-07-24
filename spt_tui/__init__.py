@@ -5,7 +5,7 @@ from __future__ import annotations
 # Single source of truth for the version: pyproject.toml reads it from here
 # (hatchling dynamic version), the installer/CI read it via
 # ``spt_tui.__version__``, and ``spt --version`` prints it.
-__version__ = "0.2.1"
+__version__ = "0.2.2"
 
 from .app import SptPy
 

@@ -43,6 +43,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   background refresh or leaving the view never double-mounts or paints a stale
   table. Cold loads are unchanged — network latency already showed the line.
 
+## [v0.2.2] - 2026-07-24
+
+### Added
+
+- An experimental built-in local player backed by
+  [librespot](https://github.com/librespot-org/librespot): Spotify-TUI can now
+  play audio itself, without any other Spotify client open (Premium still
+  required). One-time browser authorization from Devices, then it runs
+  headless. Autostart only activates when nothing is already playing
+  elsewhere, so it never interrupts an active session. Covered by
+  `tests/test_local_player.py`.
+- A one-click Windows installer (`SPT-TUI-Setup-<version>.exe`, published to
+  GitHub Releases): no Python required, bundles `librespot`, adds `spt` to
+  `PATH` (opt-out) and shows the MIT license during setup.
+- Documented the Linux/macOS install path via `pipx` (no bundled installer
+  off Windows).
+
+### Fixed
+
+- Devices: pressing `Enter` on a row now reliably selects it — `RowKey`
+  resolution was wrong, so selection silently failed.
+- Local player start is now serialized so a race cannot orphan a second
+  `librespot` process, and startup failures surface on the status line
+  instead of failing silently.
+
 ## [v0.2.1] - 2026-07-20
 
 ### Added

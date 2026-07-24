@@ -1,12 +1,12 @@
 # Spotify-TUI
 
-[![Version](https://img.shields.io/badge/version-0.2.1-blue.svg)](https://github.com/naarvent/Spotify-TUI/releases) [![Python](https://img.shields.io/badge/python-3.9%2B-blue.svg)](https://www.python.org/) [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE) [![Textual](https://img.shields.io/badge/Textual-8.x-5a4fcf.svg)](https://github.com/Textualize/textual)
+[![Version](https://img.shields.io/badge/version-0.2.2-blue.svg)](https://github.com/naarvent/Spotify-TUI/releases) [![Python](https://img.shields.io/badge/python-3.9%2B-blue.svg)](https://www.python.org/) [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE) [![Textual](https://img.shields.io/badge/Textual-8.x-5a4fcf.svg)](https://github.com/Textualize/textual)
 
 A fast keyboard-driven Spotify client for the terminal, built with [Textual](https://github.com/Textualize/textual).
 
 Search Spotify, browse your library and playlists, control playback, follow synced lyrics, manage your queue and devices, all from the keyboard.
 
-**Status:** `v0.2.1` (early release). The application includes responsive search and tables, reliable cached library and playlist loading, synchronized lyrics, visible action feedback and an extensive offline regression suite. APIs and behaviour may still change before `1.0`.
+**Status:** `v0.2.2` (early release). The application includes responsive search and tables, reliable cached library and playlist loading, synchronized lyrics, visible action feedback, an experimental built-in local player and a one-click Windows installer, backed by an extensive offline regression suite. APIs and behaviour may still change before `1.0`.
 
 <p align="center">
   <img alt="Spotify-TUI interface" src="https://github.com/user-attachments/assets/35ab7ab0-43a7-43f3-b8b6-056d45521255" />
@@ -17,6 +17,7 @@ Search Spotify, browse your library and playlists, control playback, follow sync
 ## Contents
 
 - [Features](#features)
+- [What's New in v0.2.2](#whats-new-in-v022)
 - [What's New in v0.2.1](#whats-new-in-v021)
 - [Previous Release: v0.2.0](#previous-release-v020)
 - [Requirements](#requirements)
@@ -57,6 +58,25 @@ Search Spotify, browse your library and playlists, control playback, follow sync
 - **Built-in help view** with keyboard scrolling.
 - **Responsive welcome screen** with layouts adapted to the available terminal size.
 - **Offline regression suites** covering navigation, search, library loading, playback, lyrics, caching and responsive layouts.
+
+## What's New in v0.2.2
+
+v0.2.2 adds a built-in local player and a one-click Windows installer.
+
+### Local Player
+
+- Spotify-TUI can now run its own playback backend via [librespot](https://github.com/librespot-org/librespot), so it plays music without any other Spotify client open (Premium still required).
+- One-time browser authorization from Devices (`d` → **SPT-TUI Local (start)**); after that it starts headless.
+- Polite autostart: activates on launch only if nothing is already playing elsewhere, never stealing an active session.
+- Serialized start prevents a race from orphaning a second `librespot` process, and startup failures now surface on the status line instead of failing silently.
+- Fixed: pressing `Enter` on a Devices row now reliably selects it (row key resolution bug).
+
+See [Local player (experimental)](#local-player-experimental) for configuration.
+
+### Windows Installer
+
+- Download `SPT-TUI-Setup-<version>.exe` from [Releases](https://github.com/naarvent/Spotify-TUI/releases) — no Python needed, bundles `librespot`, adds `spt` to `PATH` (optional), shows the MIT license during setup.
+- Linux/macOS keep the `pipx` install path; there is no bundled installer for those platforms.
 
 ## What's New in v0.2.1
 
