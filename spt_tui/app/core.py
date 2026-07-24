@@ -26,12 +26,19 @@ from .. import config
 from ..config import logger, LOG_PATH
 from ..constants import WELCOME, WELCOME_SPOTIFY_ART, WELCOME_AUTHOR, LIBRARY_ITEMS
 from ..spotify_client import SpotifyClient
+from ..local_player import LocalPlayer, LOCAL_START_SENTINEL
 from ..widgets import HelpScroll, ContentPanel
 
 class CoreMixin:
     def __init__(self):
         super().__init__()
         self.spotify = SpotifyClient()
+        try:
+            self.local_player = LocalPlayer(
+                self.spotify, open_url=getattr(self, "_open_url_in_browser", None))
+        except Exception:
+            logger.exception("LocalPlayer init failed")
+            self.local_player = None
         try:
             self._auto_load_playlists = os.getenv('SPT_AUTO_LOAD_PLAYLISTS', '0') == '1'
         except Exception:
@@ -290,6 +297,19 @@ class CoreMixin:
         except Exception:
             logger.exception("Could not start playlist retry worker")
 
+        self._start_local_player()
+
+    def _start_local_player(self) -> None:
+        """Kick off the polite local-player autostart on a daemon thread so the
+        UI thread is never blocked by spawn / device-poll / get_playback."""
+        lp = getattr(self, "local_player", None)
+        if lp is None:
+            return
+        try:
+            threading.Thread(target=lp.maybe_autostart, daemon=True).start()
+        except Exception:
+            logger.exception("Could not start local player autostart thread")
+
     def _stop_all_intervals(self) -> None:
         """Pause and drop every periodic timer. Idempotent: safe to call more
         than once (e.g. teardown running twice)."""
@@ -311,6 +331,12 @@ class CoreMixin:
         and stop every timer so no worker paints into a torn-down app."""
         self._closing = True
         self._stop_all_intervals()
+        lp = getattr(self, "local_player", None)
+        if lp is not None:
+            try:
+                lp.stop()
+            except Exception:
+                logger.exception("Stopping local player during teardown failed")
 
     # How long a message stays up. Long enough to read, short enough not to sit
     # over the now-playing bar.
@@ -1183,14 +1209,76 @@ class CoreMixin:
             name = (getattr(li, "data", {}) or {}).get("name", "")
             self._open_library_item(name)
 
+    def _resolve_device_id(self, table, row_key):
+        """Device id for a ``devices_table`` selection.
+
+        Textual hands `RowSelected` a `RowKey` object, not the plain int we
+        passed as ``key=``, and `RowKey` does not compare equal to that int — so
+        the direct ``row_to_device.get(event.row_key)`` always missed and Enter
+        did nothing. Normalise the same way `_play_row` does for the tracks
+        table: exact hit, then match by string, then the cursor row.
+        """
+        mapping = getattr(table, "row_to_device", None) or {}
+        dev_id = mapping.get(row_key)
+        if dev_id is not None:
+            return dev_id
+        raw = getattr(row_key, "value", row_key)
+        for k, v in mapping.items():
+            if str(k) == str(raw):
+                return v
+        getter = getattr(self, "_get_cursor_row", None)
+        if getter is not None:
+            row = getter(table)
+            if row is not None:
+                return mapping.get(row)
+        return None
+
+    def _activate_local_player(self) -> None:
+        """Start the local player, reporting failure on the status line.
+
+        librespot can die the moment it starts — its OAuth callback port already
+        taken, no usable audio backend — and staying silent about that makes the
+        Devices row look like it simply does nothing.
+        """
+        lp = getattr(self, "local_player", None)
+        if lp is None:
+            return
+        try:
+            dev_id = lp.start_and_activate()
+        except Exception:
+            logger.exception("local player activation failed")
+            dev_id = None
+        if dev_id:
+            return
+        detail = getattr(lp, "last_error", None)
+        msg = "[b]Local player did not start.[/b] "
+        msg += rich_escape(detail) if detail else "See the log for librespot's output."
+        try:
+            self.call_from_thread(self._notify, msg, warn=True)
+        except Exception:
+            logger.warning("could not report the local player failure: %s", detail)
+
+    def _select_device(self, dev_id) -> None:
+        """Route a Devices-view selection. The synthetic sentinel row starts and
+        activates the local librespot player; any real id transfers to it."""
+        if not dev_id:
+            return
+        if dev_id == LOCAL_START_SENTINEL:
+            lp = getattr(self, "local_player", None)
+            if lp is not None:
+                threading.Thread(target=self._activate_local_player, daemon=True).start()
+            return
+        threading.Thread(
+            target=lambda: self.spotify.transfer(dev_id, force_play=True), daemon=True).start()
+
     def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
         table: DataTable = event.data_table
         if table.id == "tracks_table" and hasattr(table, "row_to_uri"):
             self._play_row(event.row_key, table)
         elif table.id == "devices_table" and hasattr(table, "row_to_device"):
-            dev_id = table.row_to_device.get(event.row_key)
+            dev_id = self._resolve_device_id(table, event.row_key)
             if dev_id:
-                threading.Thread(target=lambda: self.spotify.transfer(dev_id, force_play=True), daemon=True).start()
+                self._select_device(dev_id)
                 self._back_one_level()
 
             left_col = self.query_one('#left_col')

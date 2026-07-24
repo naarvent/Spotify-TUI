@@ -1,65 +1,39 @@
-# ---------------------------------------------------------------------------
-# Python bytecode / caches
-# ---------------------------------------------------------------------------
+# Python
 __pycache__/
 *.py[cod]
-*$py.class
-*.pyo
 
-# ---------------------------------------------------------------------------
-# Secrets / tokens / local Spotify state  (never commit these)
-# ---------------------------------------------------------------------------
+# Secrets / local Spotify state — never commit
 .env
-.env.*
-*.env
-.cache_spotify_token
-*.cache_spotify_token
 .cache*
+*.cache_spotify_token
 spt_config.json
-playlists_cache.json
-*token*.json
-*secret*
+*_cache.json
 *credentials*
+*token*.json
 
-# ---------------------------------------------------------------------------
 # Logs
-# ---------------------------------------------------------------------------
 *.log
-logs/
 
-# ---------------------------------------------------------------------------
-# Test / build artifacts
-# ---------------------------------------------------------------------------
-.pytest_cache/
-.coverage
-htmlcov/
-.tox/
+# Build / distribution artifacts (the installer is published to GitHub Releases,
+# not committed here)
 build/
 dist/
 *.egg-info/
+*.whl
+librespot-bin/
+librespot-cargo/
 
-# ---------------------------------------------------------------------------
 # Virtual environments
-# ---------------------------------------------------------------------------
 .venv/
 venv/
-env/
-ENV/
 
-# ---------------------------------------------------------------------------
-# Claude Code local workspace (agent settings / session state — never publish)
-# ---------------------------------------------------------------------------
+# Local agent workspace and design docs
 .claude/
 .agents/
-
-# Local documentation and agent work products
 docs/
 
-# ---------------------------------------------------------------------------
 # Editor / OS
-# ---------------------------------------------------------------------------
 .vscode/
 .idea/
-*.swp
 .DS_Store
 Thumbs.db

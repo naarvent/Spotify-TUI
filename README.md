@@ -28,6 +28,7 @@ Search Spotify, browse your library and playlists, control playback, follow sync
 - [Tests](#tests)
 - [Architecture](#architecture)
 - [Caching](#caching)
+- [Local player (experimental)](#local-player-experimental)
 - [Limitations](#limitations)
 - [Security](#security)
 - [Contributing](#contributing)
@@ -201,6 +202,68 @@ Searches with explicit prefixes still use full single-type result tables.
 Browsing, searching and some library operations may work with a free Spotify account, but playback-control endpoints require Premium.
 
 ## Installation
+
+### Windows installer (easiest)
+
+Download the latest `SPT-TUI-Setup-<version>.exe` from the
+[Releases page](https://github.com/naarvent/Spotify-TUI/releases) and run the
+wizard. It installs everything — **no Python needed** — and bundles the local
+player (`librespot`), so you can play music without any other Spotify client open
+(Spotify **Premium** required). The wizard adds `spt` to your `PATH` (optional),
+so you can open a new terminal and just run `spt`.
+
+The installer is unsigned, so on first run Windows SmartScreen shows an "unknown
+publisher" warning — click **More info → Run anyway**.
+
+### Linux / macOS (pipx)
+
+There is no bundled installer for Linux/macOS — use `pipx`, which installs the
+app in an isolated environment and puts the `spt` command on your `PATH`.
+
+**1. Install pipx** (it is not preinstalled):
+
+```bash
+sudo apt install pipx          # Debian / Ubuntu
+sudo dnf install pipx          # Fedora
+sudo pacman -S python-pipx     # Arch
+brew install pipx              # macOS (Homebrew)
+python3 -m pip install --user pipx   # any system, fallback
+```
+
+**2. Put pipx apps on your PATH** (once), then open a new terminal:
+
+```bash
+pipx ensurepath
+```
+
+**3. Install SPT-TUI:**
+
+```bash
+pipx install git+https://github.com/naarvent/Spotify-TUI.git
+```
+
+**4. (Optional) Install librespot** for local playback — the built-in player:
+
+```bash
+sudo pacman -S librespot       # Arch (repos/AUR)
+cargo install librespot --locked   # any system, builds from source
+```
+
+SPT-TUI finds `librespot` on your `PATH` automatically (or set
+`SPT_LIBRESPOT_PATH` to point at it). Without it, the app still works as a
+controller for another Spotify Connect device.
+
+**5. Run it:**
+
+```bash
+spt
+```
+
+Update later with `pipx upgrade Spotify-TUI`. Spotify **Premium** is required for
+playback, with or without the local player. On macOS the same steps apply
+(`brew install pipx`).
+
+### From source (any OS)
 
 ```bash
 # 1. Clone the repository
@@ -557,6 +620,49 @@ Spotify-TUI uses multiple cache strategies depending on the type of data.
 - Bounded by total serialized size.
 - Older entries are removed automatically when limits are exceeded.
 - Temporary network failures are not stored as permanent missing results.
+
+## Local player (experimental)
+
+Spotify-TUI can run its own audio player via [librespot](https://github.com/librespot-org/librespot),
+so it plays music without any other Spotify client open. Spotify **Premium** is
+still required (librespot cannot bypass it).
+
+- **Provide the binary:** put `librespot` on your `PATH`, or set
+  `SPT_LIBRESPOT_PATH` to its absolute path. With no binary present, the app
+  behaves exactly as before (it controls other Spotify Connect devices).
+- **First run:** open Devices (`d`) and select **SPT-TUI Local (start)** to
+  authorize once in your browser. After that it starts headless — no browser,
+  and never the official app.
+- **On launch** it activates automatically **only if nothing is already
+  playing** on another device — it never interrupts an active session.
+
+Config keys (in `spt_config.json`) / environment variables:
+
+| Key | Env | Default |
+| --- | --- | --- |
+| `local_player_enabled` | `SPT_LOCAL_PLAYER` | `true` |
+| `librespot_path` | `SPT_LIBRESPOT_PATH` | (auto-discovered) |
+| `local_player_autostart` | `SPT_LOCAL_AUTOSTART` | `true` |
+| `local_player_name` | `SPT_LOCAL_NAME` | `SPT-TUI Local` |
+
+There is no official librespot binary for Windows, so build it yourself with
+`cargo install librespot --locked` (the `--locked` matters: without it a newer
+transitive dependency breaks the build). Do not run an unvetted prebuilt
+binary — it handles your Spotify credentials.
+
+**If the local player does not start**, the failure now appears on the status
+line and every line librespot prints is in the log. The usual cause is:
+
+```
+Failed to bind server to 127.0.0.1:5588 (os error 10048)
+```
+
+librespot binds `127.0.0.1:5588` for its OAuth redirect, and only one instance
+can hold it. Another librespot — typically an earlier one still waiting for you
+to finish authorizing — is already there. Quit the app (which stops its
+librespot), confirm nothing holds the port, and try once more.
+
+Shipping the binary and a one-click installer is tracked separately (Sub-project B).
 
 ## Limitations
 

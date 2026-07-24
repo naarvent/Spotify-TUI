@@ -1,0 +1,133 @@
+name: Build Windows installer
+
+# Publishing a release is a single tag push:
+#   git tag v0.3.0 && git push origin v0.3.0
+# This builds librespot from source (pinned), freezes the app with PyInstaller,
+# packages the Inno Setup installer, and attaches it to the GitHub Release for
+# the tag. `workflow_dispatch` runs the same build and uploads the installer as
+# a workflow artifact (for test runs, without touching a release).
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  # The one place the pinned librespot version lives. Bumping it is a deliberate
+  # edit; the cache key below is derived from it, so it only recompiles then.
+  LIBRESPOT_VERSION: "0.8.0"
+  PYTHON_VERSION: "3.12"
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Resolve version
+        id: ver
+        shell: pwsh
+        run: |
+          # Single source of truth: spt_tui/__init__.py. Read it without importing
+          # the app (no deps needed yet).
+          $v = python -c "import re, pathlib; print(re.search(r'__version__\s*=\s*\""([^\""]+)\""', pathlib.Path('spt_tui/__init__.py').read_text()).group(1))"
+          "version=$v" >> $env:GITHUB_OUTPUT
+          Write-Host "Package version: $v"
+          if ($env:GITHUB_REF -like "refs/tags/*") {
+            $tag = $env:GITHUB_REF_NAME -replace '^v', ''
+            if ($tag -ne $v) {
+              Write-Error "Tag '$tag' does not match package version '$v'. Bump spt_tui/__init__.py to match the tag."
+              exit 1
+            }
+          }
+
+      - name: Cache librespot binary
+        id: cache-librespot
+        uses: actions/cache@v4
+        with:
+          path: librespot-bin
+          key: librespot-${{ env.LIBRESPOT_VERSION }}-windows
+
+      - name: Build librespot (from source, pinned)
+        if: steps.cache-librespot.outputs.cache-hit != 'true'
+        shell: pwsh
+        run: |
+          rustup default stable
+          # --locked is mandatory: without the published lockfile a newer
+          # transitive dependency (vergen/vergen-lib) fails to compile.
+          cargo install librespot --version $env:LIBRESPOT_VERSION --locked --root librespot-cargo
+          New-Item -ItemType Directory -Force -Path librespot-bin | Out-Null
+          Copy-Item librespot-cargo\bin\librespot.exe librespot-bin\librespot.exe
+
+      - name: Verify librespot
+        shell: pwsh
+        run: |
+          librespot-bin\librespot.exe --version
+          # Confirm the audio backend we launch it with is present.
+          $backends = & librespot-bin\librespot.exe --backend ? 2>&1 | Out-String
+          if ($backends -notmatch "rodio") { Write-Error "rodio backend missing"; exit 1 }
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install app and PyInstaller
+        run: pip install . pyinstaller
+
+      - name: Freeze the app
+        run: pyinstaller spt.spec --noconfirm
+
+      - name: Bundle librespot beside the app
+        shell: pwsh
+        run: Copy-Item librespot-bin\librespot.exe dist\spt\librespot.exe
+
+      - name: Smoke test the frozen app
+        shell: pwsh
+        run: |
+          $out = & dist\spt\spt.exe --version | Out-String
+          Write-Host $out
+          if ($out -notmatch [regex]::Escape("${{ steps.ver.outputs.version }}")) {
+            Write-Error "Frozen app did not report version ${{ steps.ver.outputs.version }}: $out"
+            exit 1
+          }
+
+      - name: Install Inno Setup
+        shell: pwsh
+        run: choco install innosetup --no-progress -y
+
+      - name: Build the installer
+        shell: pwsh
+        run: |
+          & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" /DAppVersion=${{ steps.ver.outputs.version }} installer\spt-tui.iss
+
+      - name: Compute checksums
+        shell: pwsh
+        run: |
+          $ver = "${{ steps.ver.outputs.version }}"
+          $inst = "dist\installer\SPT-TUI-Setup-$ver.exe"
+          $out = "dist\installer\checksums.txt"
+          "$((Get-FileHash $inst -Algorithm SHA256).Hash)  SPT-TUI-Setup-$ver.exe" | Out-File -Encoding ascii $out
+          "$((Get-FileHash dist\spt\librespot.exe -Algorithm SHA256).Hash)  librespot.exe" | Add-Content -Encoding ascii $out
+          Get-Content $out
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: SPT-TUI-Setup-${{ steps.ver.outputs.version }}
+          path: |
+            dist/installer/SPT-TUI-Setup-*.exe
+            dist/installer/checksums.txt
+
+      - name: Attach to the GitHub Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/installer/SPT-TUI-Setup-*.exe
+            dist/installer/checksums.txt

@@ -23,6 +23,7 @@ from textual.css.query import NoMatches
 from ..config import logger
 from ..constants import GLYPHS
 from ..spotify_client import SpotifyClient
+from ..local_player import LOCAL_START_SENTINEL
 
 class QueueDevicesMixin:
     def action_queue_track(self):
@@ -495,10 +496,24 @@ class QueueDevicesMixin:
     def _populate_devices_table(self, table: DataTable, devs):
         table.clear()
         table.row_to_device = {}
-        for i, d in enumerate(devs or []):
+        rows = list(devs or [])
+        entries = []  # (mark, name, type, device_id)
+
+        # Offer a synthetic "start" row only when the local player exists, is
+        # usable, and is not already a real device in the list.
+        lp = getattr(self, "local_player", None)
+        if lp is not None and lp.is_available() and not lp.is_running() \
+                and lp.device_name not in {d.get("name") for d in rows}:
+            entries.append((GLYPHS["dot_off"], f"{lp.device_name} (start)", "local",
+                            LOCAL_START_SENTINEL))
+
+        for d in rows:
             active = GLYPHS["dot_on"] if d.get("is_active") else GLYPHS["dot_off"]
-            table.add_row(active, d.get("name", "(no name)"), d.get("type", ""), key=i)
-            table.row_to_device[i] = d.get("id")
+            entries.append((active, d.get("name", "(no name)"), d.get("type", ""), d.get("id")))
+
+        for i, (mark, name, dtype, dev_id) in enumerate(entries):
+            table.add_row(mark, name, dtype, key=i)
+            table.row_to_device[i] = dev_id
 
     def _stop_devices_interval(self):
         """Pause and drop the devices refresh interval (idempotent). Single exit
