@@ -282,10 +282,10 @@ class QueueDevicesMixin:
         while True:
             pg = self.spotify.playlist_items(
                 playlist_id, limit=100, offset=offset,
-                fields="items(track(uri)),next") or {}
+                fields="items(item(uri),track(uri)),next") or {}
             items = pg.get("items", []) or []
             for it in items:
-                u = ((it or {}).get("track") or {}).get("uri")
+                u = SpotifyClient.playlist_entry_track(it).get("uri")
                 if u:
                     uris.append(u)
             if pg.get("next") and items:

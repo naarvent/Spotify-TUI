@@ -319,6 +319,17 @@ class SpotifyClient:
             logger.exception("Error adding items to playlist %s", playlist_id)
             return False
 
+    @staticmethod
+    def playlist_entry_track(entry):
+        """Return the track/episode dict of one playlist-items entry.
+
+        Spotify's February 2026 API change renamed the per-entry wrapper from
+        `track` to `item` (and deprecated `track`). Accept both so the app works
+        against either shape."""
+        if not isinstance(entry, dict):
+            return {}
+        return entry.get("item") or entry.get("track") or {}
+
     def playlist_items(self, playlist_id, limit=100, offset=0, fields=None):
         if fields:
             return self.ensure().playlist_items(playlist_id, limit=limit, offset=offset, fields=fields)

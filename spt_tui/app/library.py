@@ -301,15 +301,17 @@ class LibraryMixin:
 
         # Only request the fields we actually render; big playlists return huge
         # track objects otherwise, which dominates the load time.
-        FIELDS = ("items(added_at,track(id,uri,name,type,duration_ms,"
-                  "artists(name),album(name))),total")
+        # Spotify (Feb 2026) renamed the per-entry `track` to `item`; ask for both
+        # so the filter doesn't strip the payload on either API shape.
+        _TR = "id,uri,name,type,duration_ms,artists(name),album(name)"
+        FIELDS = f"items(added_at,item({_TR}),track({_TR})),total"
 
         title = f"[b]{rich_escape(pl_name)}[/b]"
 
         def _extract(page):
             page_rows, page_track_ids = [], []
             for it in page.get("items", []):
-                track = (it.get("track") or {})
+                track = SpotifyClient.playlist_entry_track(it)
                 if not track:
                     continue
                 page_rows.append({
@@ -488,8 +490,19 @@ class LibraryMixin:
                 if track_ids:
                     self.spotify.check_saved_tracks(track_ids, on_batch=_on_liked_batch)
                 liked = [bool(liked_by_id.get(r.get("id"), False)) for r in rows]
-            except Exception:
+            except Exception as e:
                 logger.exception("_open_playlist_table worker failed")
+                # Don't leave "Loading playlist…" on screen forever. Typical cause:
+                # Spotify only returns items for playlists the user owns or
+                # collaborates on (403 otherwise, since Feb 2026).
+                status = getattr(e, "http_status", None)
+                if status == 403:
+                    msg = ("[b]Can't load this playlist's tracks[/b]\n"
+                           "[dim]Spotify only allows reading items of playlists you own "
+                           "or collaborate on.[/dim]")
+                else:
+                    msg = f"[b]Couldn't load playlist[/b]\n[dim]{rich_escape(str(e)[:200])}[/dim]"
+                self.call_from_thread(lambda: self._safe_update_right("playlist", pl_id, token, msg))
                 return
 
             # Cache the finished list even if the user has since left: the work
