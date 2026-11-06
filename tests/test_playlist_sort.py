@@ -153,8 +153,7 @@ async def test_sort_in_app():
         titles = [r["title"] for r in t._model_rows]
         check("s sorts by title (case-insensitive)",
               titles == sorted(titles, key=str.casefold), str(titles))
-        check("the highlighted track stays highlighted",
-              t._model_rows[app._get_cursor_row(t)]["title"] == "bravo 003")
+        check("sorting jumps the cursor to the top row", app._get_cursor_row(t) == 0)
         check("row maps, likes and context URIs follow the new order", aligned(t))
         check("title shows the criterion", "sort: Title ↑" in str(t._view_title), str(t._view_title))
         check("choice saved to spt_config.json",

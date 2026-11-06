@@ -564,9 +564,9 @@ class LibraryMixin:
 
         Row keys/indices are view positions, so everything indexed by them
         (liked map, row_to_* maps, context URIs, Multi-Add selection) is
-        rebuilt from the sorted model. The highlighted track stays highlighted;
-        ``follow`` scrolls to it (user-initiated sort), otherwise the scroll
-        offset is kept (pages streaming in).
+        rebuilt from the sorted model. ``follow`` (user-initiated sort) jumps to
+        the top row; otherwise the highlighted track stays highlighted and the
+        scroll offset is kept (pages streaming in).
         """
         model = list(getattr(table, "_model_rows", None) or [])
         liked_map = getattr(table, "_liked_map", None) or {}
@@ -603,7 +603,15 @@ class LibraryMixin:
         if multi_on:
             multi.clear()
             multi.update(i for i, r in enumerate(new_rows) if self._pl_row_ident(r) in sel_idents)
-        if cur_ident is not None:
+        if follow and new_rows:
+            # User-initiated sort: jump to the top of the new order.
+            try:
+                col = int(getattr(getattr(table, "cursor_coordinate", None), "column", 0) or 0)
+                table.move_cursor(row=0, column=col, animate=False, scroll=True)
+                table.scroll_home(animate=False)
+            except Exception:
+                logger.debug("_resort_playlist_table: jump to top failed")
+        elif cur_ident is not None:
             for i, r in enumerate(new_rows):
                 if self._pl_row_ident(r) == cur_ident:
                     try:
