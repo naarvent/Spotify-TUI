@@ -68,20 +68,15 @@ jobs:
         shell: pwsh
         run: |
           librespot-bin\librespot.exe --version
-          # DIAGNOSTIC (temporary): find a reliable way to see the compiled backends.
+          # DIAGNOSTIC (temporary): is rodio really inside the binary?
           $exe = "librespot-bin\librespot.exe"
-          Write-Host "=== A: --verbose --backend '?' ==="
-          & $exe --verbose --backend '?' 2>&1 | Out-String | Write-Host
-          Write-Host "=== B: RUST_LOG=info --backend '?' ==="
-          $env:RUST_LOG = "info"
-          & $exe --backend '?' 2>&1 | Out-String | Write-Host
-          Remove-Item Env:RUST_LOG
-          Write-Host "=== C: --backend nonexistent ==="
-          & $exe --name diag --backend nonexistent 2>&1 | Out-String | Write-Host
-          Write-Host "exit code C: $LASTEXITCODE"
-          Write-Host "=== D: --backend rodio --version ==="
-          & $exe --backend rodio --version 2>&1 | Out-String | Write-Host
-          Write-Host "exit code D: $LASTEXITCODE"
+          $text = [System.Text.Encoding]::Latin1.GetString([System.IO.File]::ReadAllBytes((Resolve-Path $exe)))
+          foreach ($needle in @("rodio-0.", "cpal-0.", "alsa", "portaudio", "rodio")) {
+            $n = [regex]::Matches($text, [regex]::Escape($needle)).Count
+            Write-Host "needle '$needle': $n matches"
+          }
+          [regex]::Matches($text, "rodio-0\.[0-9.]+") | Select-Object -First 3 | ForEach-Object { Write-Host "found: $($_.Value)" }
+          Write-Host ("binary size: " + (Get-Item $exe).Length)
 
       - name: Set up Python
         uses: actions/setup-python@v5
