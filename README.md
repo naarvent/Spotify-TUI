@@ -1,12 +1,12 @@
 # Spotify-TUI
 
-[![Version](https://img.shields.io/badge/version-0.2.2-blue.svg)](https://github.com/naarvent/Spotify-TUI/releases) [![Python](https://img.shields.io/badge/python-3.9%2B-blue.svg)](https://www.python.org/) [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE) [![Textual](https://img.shields.io/badge/Textual-8.x-5a4fcf.svg)](https://github.com/Textualize/textual)
+[![Version](https://img.shields.io/badge/version-0.2.3-blue.svg)](https://github.com/naarvent/Spotify-TUI/releases) [![Python](https://img.shields.io/badge/python-3.9%2B-blue.svg)](https://www.python.org/) [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE) [![Textual](https://img.shields.io/badge/Textual-8.x-5a4fcf.svg)](https://github.com/Textualize/textual)
 
 A fast keyboard-driven Spotify client for the terminal, built with [Textual](https://github.com/Textualize/textual).
 
 Search Spotify, browse your library and playlists, control playback, follow synced lyrics, manage your queue and devices, all from the keyboard.
 
-**Status:** `v0.2.2` (early release). The application includes responsive search and tables, reliable cached library and playlist loading, synchronized lyrics, visible action feedback, an experimental built-in local player and a one-click Windows installer, backed by an extensive offline regression suite. APIs and behaviour may still change before `1.0`.
+**Status:** `v0.2.3` (early release). The application includes responsive search and tables, reliable cached library and playlist loading, synchronized lyrics, visible action feedback, an experimental built-in local player and a one-click Windows installer, backed by an extensive offline regression suite. APIs and behaviour may still change before `1.0`.
 
 <p align="center">
   <img alt="Spotify-TUI interface" src="https://github.com/user-attachments/assets/35ab7ab0-43a7-43f3-b8b6-056d45521255" />
@@ -17,22 +17,21 @@ Search Spotify, browse your library and playlists, control playback, follow sync
 ## Contents
 
 - [Features](#features)
-- [What's New in v0.2.2](#whats-new-in-v022)
-- [What's New in v0.2.1](#whats-new-in-v021)
-- [Previous Release: v0.2.0](#previous-release-v020)
+- [What's New in v0.2.3](#whats-new-in-v023)
 - [Requirements](#requirements)
 - [Installation](#installation)
 - [Spotify Setup](#spotify-setup)
 - [Running](#running)
 - [Search](#search)
 - [Keyboard Shortcuts](#keyboard-shortcuts)
-- [Tests](#tests)
-- [Architecture](#architecture)
-- [Caching](#caching)
 - [Local player (experimental)](#local-player-experimental)
+- [Caching](#caching)
+- [Architecture](#architecture)
+- [Tests](#tests)
 - [Limitations](#limitations)
 - [Security](#security)
 - [Contributing](#contributing)
+- [Release notes](#release-notes)
 - [License](#license)
 
 ## Features
@@ -60,157 +59,32 @@ Search Spotify, browse your library and playlists, control playback, follow sync
 - **Responsive welcome screen** with layouts adapted to the available terminal size.
 - **Offline regression suites** covering navigation, search, library loading, playback, lyrics, caching and responsive layouts.
 
-## What's New in v0.2.2
+## What's New in v0.2.3
 
-v0.2.2 adds a built-in local player and a one-click Windows installer.
+v0.2.3 adds playlist sorting and makes the queue, Settings and lyrics noticeably more reliable.
 
-### Local Player
+### Playlist Sorting
 
-- Spotify-TUI can now run its own playback backend via [librespot](https://github.com/librespot-org/librespot), so it plays music without any other Spotify client open (Premium still required).
-- One-time browser authorization from Devices (`d` → **SPT-TUI Local (start)**); after that it starts headless.
-- Polite autostart: activates on launch only if nothing is already playing elsewhere, never stealing an active session.
-- Serialized start prevents a race from orphaning a second `librespot` process, and startup failures now surface on the status line instead of failing silently.
-- Fixed: pressing `Enter` on a Devices row now reliably selects it (row key resolution bug).
+- Press `s` on an open playlist to cycle the order: Default (playlist order) → Title → Artist → Album → Duration → Date added. `S` reverses it.
+- Sorting is view-only: the playlist on Spotify is never reordered. The criterion and direction appear in the table title and are remembered between sessions.
+- Pages that stream in are merged into the sorted view, and the highlighted track is followed instead of jumping to the top.
+- Playing a track from a sorted playlist starts it at its real playlist position, not at its table row.
+- `Ctrl+D` removes only the selected occurrence of a track that appears more than once in a playlist. If the playlist changed in the meantime, it re-reads the playlist and removes the closest matching occurrence.
 
-See [Local player (experimental)](#local-player-experimental) for configuration.
+### Queue
 
-### Windows Installer
+- The Source column shows a readable label (Playlist, Liked Songs, Recently Played, Album...) instead of an internal widget id.
+- Opening the queue twice, or holding `Ctrl+C`, no longer crashes the app. Repeated presses refresh the open queue once at a time and bring focus back to it.
 
-- Download `SPT-TUI-Setup-<version>.exe` from [Releases](https://github.com/naarvent/Spotify-TUI/releases) — no Python needed, bundles `librespot`, adds `spt` to `PATH` (optional), shows the MIT license during setup.
-- Linux/macOS keep the `pipx` install path; there is no bundled installer for those platforms.
+### Settings and Lyrics
 
-## What's New in v0.2.1
+- Settings and the lyrics view no longer crash when opened while another view is on screen, and `Up` / `Down` move correctly between the Settings fields.
+- Lyrics stay in sync more reliably: pausing no longer makes them jump back, a playback sync that was already in flight can no longer undo a seek or pause, and the position is anchored to the middle of the playback request so network latency no longer delays the lyrics.
+- Plain (unsynced) lyrics are only used as a last resort, after looking for a synced version, and the LRC `[offset:]` tag is now applied.
 
-v0.2.1 focuses on making everyday playlist work faster, safer and clearer.
+### Favorites
 
-### Playlist Workflow
-
-- Add a selected track or episode to a playlist with `Ctrl+Shift+P`.
-- Add every track or episode from a selected album, artist, playlist or podcast; large additions ask for confirmation.
-- Playlist pages stream into the table as they load, while liked-state hearts fill in progressively.
-- Reopened playlists use an in-session cache for immediate rendering and refresh safely in the background.
-- Removing a playlist track requires a second `Ctrl+D`; the confirmation is cancelled when leaving that playlist.
-
-### Interface and Navigation
-
-- A dedicated status line makes feedback visible above tables instead of hiding it behind them.
-- `Ctrl+B` hides or restores the sidebar, assigning its width to the active content panel.
-- `Tab` and `Shift+Tab` cycle predictably between the principal navigation stops.
-- Tables use the available panel width; on narrow terminals, low-priority columns are hidden in a predictable order and identified in the table title.
-
-### Reliability and Testing
-
-- Spotify liked-track checks are batched within the API limit, making long playlists much quicker to load.
-- Test runs use isolated cache directories, avoiding access to local tokens, logs and playlist caches.
-- `tests/run_all.py` can execute suites in parallel and supports filtering, worker-count and timeout options.
-- `tests/check_live_api.py` provides an optional read-only verification against the real Spotify API.
-
-For the full release record, see [CHANGELOG.md](CHANGELOG.md).
-
-## Previous Release: v0.2.0
-
-The v0.2.0 notes are retained below as reference for the previous major application update.
-
-### Multi-panel Search
-
-Searches without a type prefix now use a categorized dashboard:
-
-- Songs
-- Artists
-- Albums
-- Playlists
-
-Each category has its own panel, selection state and navigation behaviour.
-
-The search dashboard uses a two-level navigation model:
-
-1. Select a result category with the arrow keys.
-2. Press `Enter` to enter the selected panel.
-3. Use `Up` and `Down` to navigate its results.
-4. Use `Left` or `Right` to return to panel selection.
-
-Searches with explicit prefixes still use full single-type result tables.
-
-### Search Reliability
-
-- Immediate visual feedback when a search begins.
-- Existing results remain visible while a new search is running.
-- A visible frame title indicates the active search query.
-- Long-running searches display an additional waiting state.
-- Older results cannot overwrite a newer search.
-- Empty results are distinguished from request failures.
-- Partial search failures preserve successful result categories.
-- Search workers cannot repaint the interface after leaving Search.
-
-### Library Reliability
-
-- Saved Albums now tolerate unavailable Spotify entries.
-- Saved Episodes handle unavailable tombstone objects without displaying fake durations.
-- Saved Artists use the same reliable background-loading infrastructure as the other saved-library views.
-- Recently Played provides clear loading feedback.
-- Errors no longer silently appear as empty libraries.
-- Valid cached data remains visible during temporary failures.
-- Library responses are protected against stale worker updates.
-- Cursor and scroll position are preserved during refreshes where possible.
-
-### Playlists
-
-- Improved disk-cache safety.
-- Atomic cache writes.
-- Invalid or incomplete responses no longer erase valid playlists.
-- Older workers cannot replace newer playlist data.
-- Playlist refreshes preserve existing content during temporary API errors.
-- Reduced risk of the playlist list disappearing during refresh.
-
-### Saved and Liked State
-
-- Fixed liked-state rendering for tracks opened from albums.
-- Track hearts are resolved in the background and matched by Spotify track ID.
-- Favorite mutations update the relevant row without resetting the table.
-- Saved-state visuals now use hearts consistently.
-- Removed the old `S` saved-state column header.
-- Removed floppy-disk saved indicators.
-- Track, album, artist, podcast and episode semantics remain independent internally.
-
-### Tables and Layout
-
-- Redesigned responsive column-width calculation.
-- Removed unnecessary horizontal scrolling in normal terminal sizes.
-- Removed manual column resizing with the mouse.
-- Added automatic width profiles for different table types.
-- Improved width distribution for titles, artists, albums, owners, durations and dates.
-- Long text is truncated predictably without hiding compact fields.
-- Table resize operations preserve cursor, selection and vertical scroll.
-- Removed the Source column from standard content views.
-- Queue retains Source where it still provides useful context.
-- Improved table borders and content framing.
-
-### Now Playing
-
-- Removed unnecessary spacer rows.
-- Search, Help, the main content area and Now Playing now use a tighter layout.
-- Now Playing remains visible across supported terminal sizes.
-
-### Lyrics
-
-- Added a hard maximum number of cached lyrics entries.
-- Added a maximum cache-file size.
-- Older entries are automatically removed when limits are exceeded.
-- Lyrics cache files can no longer grow indefinitely.
-- Improved metadata updates when the current track changes.
-- Previous lyrics no longer remain associated with a newly selected track.
-
-### Refresh Behaviour
-
-`Ctrl+R` is now context-aware:
-
-- Lyrics refreshes the current lyrics.
-- Search repeats the active search.
-- Playlists refreshes the current playlist.
-- Library views refresh the active library section.
-- Queue and Devices refresh their current data.
-- Welcome refreshes the visible playlist list.
-- Text left in the Search input no longer hijacks refresh actions elsewhere.
+- The heart of a liked track is applied to the right row even if the table is re-sorted while the request is running.
 
 ## Requirements
 
@@ -486,65 +360,81 @@ While Help is open:
 | `Home` / `End` | Jump to the beginning or end |
 | `Escape` | Close Help |
 
-## Tests
+## Local player (experimental)
 
-The test suites are standalone Python scripts. No external test framework is required.
+Spotify-TUI can run its own audio player via [librespot](https://github.com/librespot-org/librespot),
+so it plays music without any other Spotify client open. Spotify **Premium** is
+still required (librespot cannot bypass it).
 
-Each test script exits with status `0` only when all its checks pass.
+- **Provide the binary:** put `librespot` on your `PATH`, or set
+  `SPT_LIBRESPOT_PATH` to its absolute path. With no binary present, the app
+  behaves exactly as before (it controls other Spotify Connect devices).
+- **First run:** open Devices (`d`) and select **SPT-TUI Local (start)** to
+  authorize once in your browser. After that it starts headless — no browser,
+  and never the official app.
+- **On launch** it activates automatically **only if nothing is already
+  playing** on another device — it never interrupts an active session.
 
-Run a single suite:
+Config keys (in `spt_config.json`) / environment variables:
 
-```bash
-python tests/test_spotify_client.py
+| Key | Env | Default |
+| --- | --- | --- |
+| `local_player_enabled` | `SPT_LOCAL_PLAYER` | `true` |
+| `librespot_path` | `SPT_LIBRESPOT_PATH` | (auto-discovered) |
+| `local_player_autostart` | `SPT_LOCAL_AUTOSTART` | `true` |
+| `local_player_name` | `SPT_LOCAL_NAME` | `SPT-TUI Local` |
+
+There is no official librespot binary for Windows, so build it yourself with
+`cargo install librespot --locked` (the `--locked` matters: without it a newer
+transitive dependency breaks the build). Do not run an unvetted prebuilt
+binary — it handles your Spotify credentials.
+
+**If the local player does not start**, the failure now appears on the status
+line and every line librespot prints is in the log. The usual cause is:
+
+```
+Failed to bind server to 127.0.0.1:5588 (os error 10048)
 ```
 
-Run the complete suite (parallel by default):
+librespot binds `127.0.0.1:5588` for its OAuth redirect, and only one instance
+can hold it. Another librespot — typically an earlier one still waiting for you
+to finish authorizing — is already there. Quit the app (which stops its
+librespot), confirm nothing holds the port, and try once more.
 
-```bash
-python tests/run_all.py
-```
+Shipping the binary and a one-click installer is tracked separately (Sub-project B).
 
-Use `python tests/run_all.py --help` for worker-count, name-filter, timeout and verbose options. The optional `tests/check_live_api.py` performs read-only checks against Spotify's live API and requires configured credentials; it is not included in the offline suite.
+## Caching
 
-Run all suites on Linux or macOS:
+Spotify-TUI uses multiple cache strategies depending on the type of data.
 
-```bash
-for f in tests/test_*.py; do
-    python "$f" || echo "FAILED: $f"
-done
-```
+### Playlists
 
-Run all suites on Windows PowerShell:
+- Stored on disk.
+- The eight most recently opened playlist contents are also cached for the current session.
+- Painted immediately during startup.
+- Refreshed in the background.
+- Written atomically.
+- Protected against invalid, stale or unexpectedly empty responses.
 
-```powershell
-Get-ChildItem tests/test_*.py | ForEach-Object {
-    python $_.FullName
-}
-```
+### Saved Library Views
 
-The regression suites use fake Spotify clients and deterministic Textual test pilots. Network operations are mocked, allowing the primary behaviour to be tested offline.
+- Cached in memory for the current session.
+- Refreshed in the background.
+- Protected by view tokens and worker generations.
 
-Some concurrency tests depend on event-loop and thread scheduling and may occasionally require a retry under unusually heavy CPU load.
+### Recently Played
 
-Current coverage includes:
+- Treated as volatile data.
+- Refreshed directly instead of being persisted as a long-lived cache.
+- Shows immediate loading feedback while new data is being retrieved.
 
-- Spotify client behaviour
-- Search loading and result ordering
-- Multi-panel search navigation
-- Search limits and partial failures
-- Library pagination and cache behaviour
-- Playlist refresh protection
-- Favorites and saved-state synchronization
-- Album-track liked state
-- Lyrics lookup and bounded caching
-- Queue and device views
-- Responsive tables
-- Table titles and content frames
-- Recently Played loading feedback
-- Welcome responsiveness
-- Now Playing spacing
-- Application teardown
-- Worker error handling
+### Lyrics
+
+- Stored in a persistent local cache.
+- Bounded by entry count.
+- Bounded by total serialized size.
+- Older entries are removed automatically when limits are exceeded.
+- Temporary network failures are not stored as permanent missing results.
 
 ## Architecture
 
@@ -611,81 +501,65 @@ Spotify-TUI/
 
 The 28 standalone regression suites protect application behaviour introduced during and after the refactor.
 
-## Caching
+## Tests
 
-Spotify-TUI uses multiple cache strategies depending on the type of data.
+The test suites are standalone Python scripts. No external test framework is required.
 
-### Playlists
+Each test script exits with status `0` only when all its checks pass.
 
-- Stored on disk.
-- The eight most recently opened playlist contents are also cached for the current session.
-- Painted immediately during startup.
-- Refreshed in the background.
-- Written atomically.
-- Protected against invalid, stale or unexpectedly empty responses.
+Run a single suite:
 
-### Saved Library Views
-
-- Cached in memory for the current session.
-- Refreshed in the background.
-- Protected by view tokens and worker generations.
-
-### Recently Played
-
-- Treated as volatile data.
-- Refreshed directly instead of being persisted as a long-lived cache.
-- Shows immediate loading feedback while new data is being retrieved.
-
-### Lyrics
-
-- Stored in a persistent local cache.
-- Bounded by entry count.
-- Bounded by total serialized size.
-- Older entries are removed automatically when limits are exceeded.
-- Temporary network failures are not stored as permanent missing results.
-
-## Local player (experimental)
-
-Spotify-TUI can run its own audio player via [librespot](https://github.com/librespot-org/librespot),
-so it plays music without any other Spotify client open. Spotify **Premium** is
-still required (librespot cannot bypass it).
-
-- **Provide the binary:** put `librespot` on your `PATH`, or set
-  `SPT_LIBRESPOT_PATH` to its absolute path. With no binary present, the app
-  behaves exactly as before (it controls other Spotify Connect devices).
-- **First run:** open Devices (`d`) and select **SPT-TUI Local (start)** to
-  authorize once in your browser. After that it starts headless — no browser,
-  and never the official app.
-- **On launch** it activates automatically **only if nothing is already
-  playing** on another device — it never interrupts an active session.
-
-Config keys (in `spt_config.json`) / environment variables:
-
-| Key | Env | Default |
-| --- | --- | --- |
-| `local_player_enabled` | `SPT_LOCAL_PLAYER` | `true` |
-| `librespot_path` | `SPT_LIBRESPOT_PATH` | (auto-discovered) |
-| `local_player_autostart` | `SPT_LOCAL_AUTOSTART` | `true` |
-| `local_player_name` | `SPT_LOCAL_NAME` | `SPT-TUI Local` |
-
-There is no official librespot binary for Windows, so build it yourself with
-`cargo install librespot --locked` (the `--locked` matters: without it a newer
-transitive dependency breaks the build). Do not run an unvetted prebuilt
-binary — it handles your Spotify credentials.
-
-**If the local player does not start**, the failure now appears on the status
-line and every line librespot prints is in the log. The usual cause is:
-
-```
-Failed to bind server to 127.0.0.1:5588 (os error 10048)
+```bash
+python tests/test_spotify_client.py
 ```
 
-librespot binds `127.0.0.1:5588` for its OAuth redirect, and only one instance
-can hold it. Another librespot — typically an earlier one still waiting for you
-to finish authorizing — is already there. Quit the app (which stops its
-librespot), confirm nothing holds the port, and try once more.
+Run the complete suite (parallel by default):
 
-Shipping the binary and a one-click installer is tracked separately (Sub-project B).
+```bash
+python tests/run_all.py
+```
+
+Use `python tests/run_all.py --help` for worker-count, name-filter, timeout and verbose options. The optional `tests/check_live_api.py` performs read-only checks against Spotify's live API and requires configured credentials; it is not included in the offline suite.
+
+Run all suites on Linux or macOS:
+
+```bash
+for f in tests/test_*.py; do
+    python "$f" || echo "FAILED: $f"
+done
+```
+
+Run all suites on Windows PowerShell:
+
+```powershell
+Get-ChildItem tests/test_*.py | ForEach-Object {
+    python $_.FullName
+}
+```
+
+The regression suites use fake Spotify clients and deterministic Textual test pilots. Network operations are mocked, allowing the primary behaviour to be tested offline.
+
+Some concurrency tests depend on event-loop and thread scheduling and may occasionally require a retry under unusually heavy CPU load.
+
+Current coverage includes:
+
+- Spotify client behaviour
+- Search loading and result ordering
+- Multi-panel search navigation
+- Search limits and partial failures
+- Library pagination and cache behaviour
+- Playlist refresh protection
+- Favorites and saved-state synchronization
+- Album-track liked state
+- Lyrics lookup and bounded caching
+- Queue and device views
+- Responsive tables
+- Table titles and content frames
+- Recently Played loading feedback
+- Welcome responsiveness
+- Now Playing spacing
+- Application teardown
+- Worker error handling
 
 ## Limitations
 
@@ -745,6 +619,167 @@ python -m pyflakes spt_tui
 python -m vulture spt_tui --min-confidence 80
 git diff --check
 ```
+
+## Release notes
+
+The latest release is described in [What's New in v0.2.3](#whats-new-in-v023). Earlier releases are summarised below; the full record is in [CHANGELOG.md](CHANGELOG.md).
+
+### v0.2.2
+
+v0.2.2 adds a built-in local player and a one-click Windows installer.
+
+#### Local Player
+
+- Spotify-TUI can now run its own playback backend via [librespot](https://github.com/librespot-org/librespot), so it plays music without any other Spotify client open (Premium still required).
+- One-time browser authorization from Devices (`d` → **SPT-TUI Local (start)**); after that it starts headless.
+- Polite autostart: activates on launch only if nothing is already playing elsewhere, never stealing an active session.
+- Serialized start prevents a race from orphaning a second `librespot` process, and startup failures now surface on the status line instead of failing silently.
+- Fixed: pressing `Enter` on a Devices row now reliably selects it (row key resolution bug).
+
+See [Local player (experimental)](#local-player-experimental) for configuration.
+
+#### Windows Installer
+
+- Download `SPT-TUI-Setup-<version>.exe` from [Releases](https://github.com/naarvent/Spotify-TUI/releases) — no Python needed, bundles `librespot`, adds `spt` to `PATH` (optional), shows the MIT license during setup.
+- Linux/macOS keep the `pipx` install path; there is no bundled installer for those platforms.
+
+<details>
+<summary><b>Older releases (v0.2.1, v0.2.0)</b></summary>
+
+### v0.2.1
+
+v0.2.1 focuses on making everyday playlist work faster, safer and clearer.
+
+#### Playlist Workflow
+
+- Add a selected track or episode to a playlist with `Ctrl+Shift+P`.
+- Add every track or episode from a selected album, artist, playlist or podcast; large additions ask for confirmation.
+- Playlist pages stream into the table as they load, while liked-state hearts fill in progressively.
+- Reopened playlists use an in-session cache for immediate rendering and refresh safely in the background.
+- Removing a playlist track requires a second `Ctrl+D`; the confirmation is cancelled when leaving that playlist.
+
+#### Interface and Navigation
+
+- A dedicated status line makes feedback visible above tables instead of hiding it behind them.
+- `Ctrl+B` hides or restores the sidebar, assigning its width to the active content panel.
+- `Tab` and `Shift+Tab` cycle predictably between the principal navigation stops.
+- Tables use the available panel width; on narrow terminals, low-priority columns are hidden in a predictable order and identified in the table title.
+
+#### Reliability and Testing
+
+- Spotify liked-track checks are batched within the API limit, making long playlists much quicker to load.
+- Test runs use isolated cache directories, avoiding access to local tokens, logs and playlist caches.
+- `tests/run_all.py` can execute suites in parallel and supports filtering, worker-count and timeout options.
+- `tests/check_live_api.py` provides an optional read-only verification against the real Spotify API.
+
+For the full release record, see [CHANGELOG.md](CHANGELOG.md).
+
+### v0.2.0
+
+The v0.2.0 notes are retained below as reference for the previous major application update.
+
+#### Multi-panel Search
+
+Searches without a type prefix now use a categorized dashboard:
+
+- Songs
+- Artists
+- Albums
+- Playlists
+
+Each category has its own panel, selection state and navigation behaviour.
+
+The search dashboard uses a two-level navigation model:
+
+1. Select a result category with the arrow keys.
+2. Press `Enter` to enter the selected panel.
+3. Use `Up` and `Down` to navigate its results.
+4. Use `Left` or `Right` to return to panel selection.
+
+Searches with explicit prefixes still use full single-type result tables.
+
+#### Search Reliability
+
+- Immediate visual feedback when a search begins.
+- Existing results remain visible while a new search is running.
+- A visible frame title indicates the active search query.
+- Long-running searches display an additional waiting state.
+- Older results cannot overwrite a newer search.
+- Empty results are distinguished from request failures.
+- Partial search failures preserve successful result categories.
+- Search workers cannot repaint the interface after leaving Search.
+
+#### Library Reliability
+
+- Saved Albums now tolerate unavailable Spotify entries.
+- Saved Episodes handle unavailable tombstone objects without displaying fake durations.
+- Saved Artists use the same reliable background-loading infrastructure as the other saved-library views.
+- Recently Played provides clear loading feedback.
+- Errors no longer silently appear as empty libraries.
+- Valid cached data remains visible during temporary failures.
+- Library responses are protected against stale worker updates.
+- Cursor and scroll position are preserved during refreshes where possible.
+
+#### Playlists
+
+- Improved disk-cache safety.
+- Atomic cache writes.
+- Invalid or incomplete responses no longer erase valid playlists.
+- Older workers cannot replace newer playlist data.
+- Playlist refreshes preserve existing content during temporary API errors.
+- Reduced risk of the playlist list disappearing during refresh.
+
+#### Saved and Liked State
+
+- Fixed liked-state rendering for tracks opened from albums.
+- Track hearts are resolved in the background and matched by Spotify track ID.
+- Favorite mutations update the relevant row without resetting the table.
+- Saved-state visuals now use hearts consistently.
+- Removed the old `S` saved-state column header.
+- Removed floppy-disk saved indicators.
+- Track, album, artist, podcast and episode semantics remain independent internally.
+
+#### Tables and Layout
+
+- Redesigned responsive column-width calculation.
+- Removed unnecessary horizontal scrolling in normal terminal sizes.
+- Removed manual column resizing with the mouse.
+- Added automatic width profiles for different table types.
+- Improved width distribution for titles, artists, albums, owners, durations and dates.
+- Long text is truncated predictably without hiding compact fields.
+- Table resize operations preserve cursor, selection and vertical scroll.
+- Removed the Source column from standard content views.
+- Queue retains Source where it still provides useful context.
+- Improved table borders and content framing.
+
+#### Now Playing
+
+- Removed unnecessary spacer rows.
+- Search, Help, the main content area and Now Playing now use a tighter layout.
+- Now Playing remains visible across supported terminal sizes.
+
+#### Lyrics
+
+- Added a hard maximum number of cached lyrics entries.
+- Added a maximum cache-file size.
+- Older entries are automatically removed when limits are exceeded.
+- Lyrics cache files can no longer grow indefinitely.
+- Improved metadata updates when the current track changes.
+- Previous lyrics no longer remain associated with a newly selected track.
+
+#### Refresh Behaviour
+
+`Ctrl+R` is now context-aware:
+
+- Lyrics refreshes the current lyrics.
+- Search repeats the active search.
+- Playlists refreshes the current playlist.
+- Library views refresh the active library section.
+- Queue and Devices refresh their current data.
+- Welcome refreshes the visible playlist list.
+- Text left in the Search input no longer hijacks refresh actions elsewhere.
+
+</details>
 
 ## License
 

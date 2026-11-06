@@ -37,3 +37,6 @@ docs/
 .idea/
 .DS_Store
 Thumbs.db
+
+# Obsidian vault config (README viewed as a vault)
+.obsidian/
