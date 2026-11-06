@@ -111,11 +111,13 @@ class LibraryMixin:
                 right.mount(Static('[dim]Lyrics cache accepts sizes like "200 MB", "500 MB", "1 GB" or "2 GB". Press ESC to go back.[/dim]'))
             except Exception:
                 pass
-            self.seek_vol_down_input = Input(placeholder=f'Volume Down step percent (current {cur_vol_down})', id='seek_vol_down_input')
-            self.seek_vol_up_input = Input(placeholder=f'Volume Up step percent (current {cur_vol_up})', id='seek_vol_up_input')
-            self.seek_track_input = Input(placeholder=f'Track jump seconds (current {cur_track})', id='seek_track_input')
-            self.seek_episode_input = Input(placeholder=f'Episode jump seconds (current {cur_episode})', id='seek_episode_input')
-            self.lyrics_cache_input = Input(placeholder=f'Lyrics cache max size, e.g. 200 MB or 1 GB (current {cur_cache_h})', id='lyrics_cache_input')
+            # No widget ids: remove() is async, so a second Settings open in the same
+            # turn would hit DuplicateIds. The wizard finds the inputs by attribute.
+            self.seek_vol_down_input = Input(placeholder=f'Volume Down step percent (current {cur_vol_down})')
+            self.seek_vol_up_input = Input(placeholder=f'Volume Up step percent (current {cur_vol_up})')
+            self.seek_track_input = Input(placeholder=f'Track jump seconds (current {cur_track})')
+            self.seek_episode_input = Input(placeholder=f'Episode jump seconds (current {cur_episode})')
+            self.lyrics_cache_input = Input(placeholder=f'Lyrics cache max size, e.g. 200 MB or 1 GB (current {cur_cache_h})')
             right.mount(self.seek_vol_down_input)
             right.mount(self.seek_vol_up_input)
             right.mount(self.seek_track_input)

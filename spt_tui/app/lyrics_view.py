@@ -73,7 +73,9 @@ class LyricsMixin:
         # freezes; the network fetch happens in a background thread below.
         right = self._clear_right()
         right.add_class("lyrics-mode")
-        self.lyrics_box = Static("", id="lyrics_box")
+        # A class, not an id: Widget.remove() is asynchronous, so an old box can
+        # still be mounted when a new one arrives (DuplicateIds crash).
+        self.lyrics_box = Static("", classes="lyrics_box")
         right.mount(self.lyrics_box)
 
         # Best-effort title from the cached now-playing track (no network call).

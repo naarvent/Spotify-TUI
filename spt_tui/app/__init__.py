@@ -58,7 +58,7 @@ class SptPy(
         "#right.table-view { padding: 0; }\n"
         "#right.table-view > DataTable, #right.table-view > DataTable:focus { border: none; }\n"
         "#right.lyrics-mode { content-align: center middle; }\n"
-        "#lyrics_box { width: 1fr; height: 1fr; text-align: center; padding: 1 2; }\n"
+        ".lyrics_box { width: 1fr; height: 1fr; text-align: center; padding: 1 2; }\n"
         "#help_scroll { width: 1fr; height: 1fr; }\n"
         "#help_text { width: 1fr; text-align: left; }\n"
         "ListView { height: auto; }\n"
