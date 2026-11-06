@@ -368,9 +368,38 @@ class QueueDevicesMixin:
         self.level = self.LVL_VIEW
 
     def action_open_queue(self):
+        # Ctrl+C held down (auto-repeat) fires this dozens of times. Ignore it
+        # while a mount is in flight and, if the queue is already on screen,
+        # just refresh it: never remount #queue_table (DuplicateIds).
+        if getattr(self, "_queue_opening", False):
+            return
+        rv = getattr(self, "_right_view", None)
+        if rv and rv[0] == "queue":
+            try:
+                self.right_panel.query_one("#queue_table", DataTable)
+                try:
+                    self._refresh_queue_table()
+                except Exception:
+                    logger.exception('_refresh_queue_table failed')
+                return
+            except NoMatches:
+                pass
         self._leave_lyrics_mode()
-        self._new_view_token("queue", "")
+        token = self._new_view_token("queue", "")
+        self._queue_opening = True
+        try:
+            self.run_worker(self._open_queue_view(token), group="open_queue")
+        except Exception:
+            self._queue_opening = False
+            raise
 
+    async def _open_queue_view(self, token: int):
+        try:
+            await self._mount_queue_view(token)
+        finally:
+            self._queue_opening = False
+
+    async def _mount_queue_view(self, token: int):
         try:
             if getattr(self, '_queue_interval', None):
                 try: self._queue_interval.pause()
@@ -380,6 +409,14 @@ class QueueDevicesMixin:
             pass
 
         right = self._clear_right()
+        # Widget.remove() is asynchronous: wait until the previous view (maybe
+        # an older #queue_table) is really gone before mounting the new one.
+        try:
+            await right.remove_children()
+        except Exception:
+            logger.exception('remove_children before queue mount failed')
+        if not self._is_current_view("queue", "", token):
+            return  # another view took over while we waited
         right.mount(Static("[b]Queue[/b]", markup=True))
 
         table = self._create_table_with_full_width(
