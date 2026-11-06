@@ -68,15 +68,20 @@ jobs:
         shell: pwsh
         run: |
           librespot-bin\librespot.exe --version
-          # DIAGNOSTIC (temporary): show what the backend listing really prints.
-          $backends = & librespot-bin\librespot.exe --backend '?' 2>&1 | Out-String
-          Write-Host "exit code: $LASTEXITCODE"
-          Write-Host "----- --backend '?' output -----"
-          Write-Host $backends
-          Write-Host "----- --help (backend lines) -----"
-          (& librespot-bin\librespot.exe --help 2>&1 | Out-String) -split "`n" | Select-String -Pattern "backend|rodio"
-          Write-Host "-----"
-          if ($backends -notmatch "rodio") { Write-Warning "rodio backend not listed (diagnostic only)" }
+          # DIAGNOSTIC (temporary): find a reliable way to see the compiled backends.
+          $exe = "librespot-bin\librespot.exe"
+          Write-Host "=== A: --verbose --backend '?' ==="
+          & $exe --verbose --backend '?' 2>&1 | Out-String | Write-Host
+          Write-Host "=== B: RUST_LOG=info --backend '?' ==="
+          $env:RUST_LOG = "info"
+          & $exe --backend '?' 2>&1 | Out-String | Write-Host
+          Remove-Item Env:RUST_LOG
+          Write-Host "=== C: --backend nonexistent ==="
+          & $exe --name diag --backend nonexistent 2>&1 | Out-String | Write-Host
+          Write-Host "exit code C: $LASTEXITCODE"
+          Write-Host "=== D: --backend rodio --version ==="
+          & $exe --backend rodio --version 2>&1 | Out-String | Write-Host
+          Write-Host "exit code D: $LASTEXITCODE"
 
       - name: Set up Python
         uses: actions/setup-python@v5
