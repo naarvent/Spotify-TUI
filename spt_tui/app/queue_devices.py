@@ -26,6 +26,21 @@ from ..spotify_client import SpotifyClient
 from ..local_player import LOCAL_START_SENTINEL
 
 class QueueDevicesMixin:
+    # The widget id used to leak into the queue's Source column ("tracks_table").
+    _QUEUE_SOURCE_LABELS = {
+        "tracks_table": "Playlist",
+        "search_table": "Search",
+        "songs_table": "Search",
+        "albums_table": "Album",
+        "artists_table": "Artist",
+        "playlists_table": "Playlist",
+        "queue_table": "Queue",
+    }
+
+    def _queue_source_label(self, table) -> str:
+        wid = getattr(table, "id", "") or ""
+        return self._QUEUE_SOURCE_LABELS.get(wid, "")
+
     def action_queue_track(self):
         try:
             focused = self.focused
@@ -82,7 +97,7 @@ class QueueDevicesMixin:
                         "artist": row_obj.get("artist") or "",
                         "album": row_obj.get("album") or "",
                         "dur": row_obj.get("dur") or "",
-                        "source": getattr(focused, 'id', '') or row_obj.get('source', '') or '',
+                        "source": self._queue_source_label(focused) or row_obj.get('source', '') or '',
                         "added_at": int(time.time() * 1000),
                     }
                     self._local_queue.append(qitem)
