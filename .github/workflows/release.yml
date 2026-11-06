@@ -68,15 +68,16 @@ jobs:
         shell: pwsh
         run: |
           librespot-bin\librespot.exe --version
-          # DIAGNOSTIC (temporary): is rodio really inside the binary?
+          # librespot 0.8.0 cannot list its audio backends: `--backend ?` only prints
+          # the version banner and exits 0 (so it can't be used as a check). Instead,
+          # confirm the rodio crate (and its cpal device layer) is compiled into the
+          # binary: their versioned crate paths are embedded in release builds.
           $exe = "librespot-bin\librespot.exe"
           $text = [System.Text.Encoding]::Latin1.GetString([System.IO.File]::ReadAllBytes((Resolve-Path $exe)))
-          foreach ($needle in @("rodio-0.", "cpal-0.", "alsa", "portaudio", "rodio")) {
-            $n = [regex]::Matches($text, [regex]::Escape($needle)).Count
-            Write-Host "needle '$needle': $n matches"
-          }
-          [regex]::Matches($text, "rodio-0\.[0-9.]+") | Select-Object -First 3 | ForEach-Object { Write-Host "found: $($_.Value)" }
-          Write-Host ("binary size: " + (Get-Item $exe).Length)
+          $rodio = [regex]::Match($text, "rodio-[0-9]+\.[0-9]+\.[0-9]+")
+          if (-not $rodio.Success) { Write-Error "rodio backend missing from librespot.exe"; exit 1 }
+          if ($text -notmatch "cpal-[0-9]+\.[0-9]+\.[0-9]+") { Write-Error "cpal missing from librespot.exe"; exit 1 }
+          Write-Host "librespot includes $($rodio.Value)"
 
       - name: Set up Python
         uses: actions/setup-python@v5
