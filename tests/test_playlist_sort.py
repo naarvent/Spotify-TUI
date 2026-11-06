@@ -74,6 +74,11 @@ class PlFake:
     def __init__(self, total=5):
         self.total = total
         self.played = []
+        self.specific = []; self.all_removed = []
+    def playlist_remove_specific_occurrences_of_items(self, pid, items, snapshot_id=None):
+        self.specific.append((pid, items)); return True
+    def playlist_remove_all_occurrences_of_items(self, pid, uris):
+        self.all_removed.append((pid, uris)); return True
     def has_cached_token(self): return True
     def user_playlists(self, limit=50, offset=0): return {"items": [], "next": None}
     def devices(self): return []
@@ -181,7 +186,18 @@ async def test_sort_in_app():
         app.action_delete(); await pilot.pause()
         pend = getattr(app, "_pending_remove_track", None) or {}
         check("Ctrl+D targets the highlighted track's URI", pend.get("uri") == want["uri"], str(pend))
+        check("Ctrl+D carries the row's real playlist position",
+              pend.get("position") == want["_pos"], str(pend))
         app._cancel_remove_track()
+
+        # Confirming removes only that occurrence, never "all occurrences".
+        fake.specific = []; fake.all_removed = []
+        app.action_delete(); await pilot.pause()
+        app.action_delete(); await pilot.pause()         # second Ctrl+D confirms
+        await poll(lambda: fake.specific or fake.all_removed)
+        check("removal uses the specific occurrence at its position",
+              fake.specific and fake.specific[-1][1] == [{"uri": want["uri"], "positions": [want["_pos"]]}]
+              and not fake.all_removed, f"{fake.specific} {fake.all_removed}")
 
 
 async def test_streaming_into_sorted_view():

@@ -1126,7 +1126,14 @@ class NavigationMixin:
                     return
 
                 title = getattr(focused, 'row_to_title', {}).get(row, '') or 'this track'
-                self._confirm_remove_track(pl_id, uri, title, pdata)
+                position = None
+                try:
+                    mr = getattr(focused, '_model_rows', None) or []
+                    if 0 <= row < len(mr) and isinstance(mr[row], dict):
+                        position = mr[row].get('_pos')
+                except Exception:
+                    position = None
+                self._confirm_remove_track(pl_id, uri, title, pdata, position=position)
                 return
 
             try:
@@ -1136,7 +1143,7 @@ class NavigationMixin:
         except Exception:
             logger.exception('action_delete failed')
 
-    def _confirm_remove_track(self, pl_id: str, track_uri: str, title: str, pdata=None) -> None:
+    def _confirm_remove_track(self, pl_id: str, track_uri: str, title: str, pdata=None, position=None) -> None:
         """Arm a removal and ask first.
 
         Deleting a whole playlist makes you type its name, but removing a track
@@ -1146,6 +1153,7 @@ class NavigationMixin:
         rv = getattr(self, "_right_view", None)
         self._pending_remove_track = {"playlist": pl_id, "uri": track_uri,
                                       "title": title, "pdata": pdata,
+                                      "position": position,
                                       "view": tuple(rv[:3]) if rv else None}
         self._notify(f"[b]Remove[/b] {rich_escape(str(title))} [b]from the playlist?[/b]  "
                      "Ctrl+D again to confirm, Esc to cancel.", warn=True, sticky=True)
@@ -1169,13 +1177,19 @@ class NavigationMixin:
         self._pending_remove_track = None
         self._clear_status_line()
         self._remove_track_from_playlist(pending["playlist"], pending["uri"],
-                                         pending.get("pdata"))
+                                         pending.get("pdata"),
+                                         position=pending.get("position"))
 
-    def _remove_track_from_playlist(self, pl_id: str, track_uri: str, pdata=None) -> None:
+    def _remove_track_from_playlist(self, pl_id: str, track_uri: str, pdata=None, position=None) -> None:
         """Remove one track from a playlist, off-thread, then reopen the view.
 
         spotipy renamed this call across versions, so the known names are tried
         in turn, each with the plain URI and then a normalised one.
+
+        With ``position`` (the entry's real index in the playlist) only that
+        occurrence is removed, so a duplicated track keeps its other copies.
+        If that call fails nothing else is tried: falling back to "remove every
+        occurrence" would delete more than the user selected.
         """
         def worker():
             try:
@@ -1183,12 +1197,23 @@ class NavigationMixin:
                 tid = self.spotify._normalize_track_id(track_uri) or track_uri
                 candidates = [track_uri, f'spotify:track:{tid}', f'spotify:episode:{tid}']
                 removed = False
-                methods = [
-                    'playlist_remove_all_occurrences_of_items',
-                    'playlist_remove_specific_occurrences_of_items',
-                    'playlist_remove_items',
-                    'playlist_remove_tracks',
-                ]
+                if isinstance(position, int) and not isinstance(position, bool) and position >= 0:
+                    func = getattr(sp, 'playlist_remove_specific_occurrences_of_items', None)
+                    if func is not None:
+                        for cand in candidates[:2]:
+                            try:
+                                func(pl_id, [{'uri': cand, 'positions': [position]}])
+                                removed = True; break
+                            except Exception:
+                                logger.exception('remove specific occurrence failed')
+                    methods = []
+                else:
+                    methods = [
+                        'playlist_remove_all_occurrences_of_items',
+                        'playlist_remove_specific_occurrences_of_items',
+                        'playlist_remove_items',
+                        'playlist_remove_tracks',
+                    ]
                 for mname in methods:
                     try:
                         if hasattr(sp, mname):
