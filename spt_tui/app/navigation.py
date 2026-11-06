@@ -20,6 +20,7 @@ except Exception:
 
 from ..config import logger
 from ..constants import WELCOME
+from ..spotify_client import SpotifyClient
 
 class NavigationMixin:
     def _new_view_token(self, kind: str, ident: str = "") -> int:
@@ -278,7 +279,9 @@ class NavigationMixin:
                             idx = None
                             for i, w in enumerate(inputs):
                                 try:
-                                    if w is focused or getattr(w, 'id', None) == getattr(focused, 'id', None):
+                                    # Identity only: the Settings inputs have no id
+                                    # (DuplicateIds), so None == None matched the first.
+                                    if w is focused:
                                         idx = i; break
                                 except Exception:
                                     continue
@@ -1188,8 +1191,9 @@ class NavigationMixin:
 
         With ``position`` (the entry's real index in the playlist) only that
         occurrence is removed, so a duplicated track keeps its other copies.
-        If that call fails nothing else is tried: falling back to "remove every
-        occurrence" would delete more than the user selected.
+        If that call fails (the playlist changed since it was loaded) the URI is
+        looked up again and the nearest occurrence is removed instead; never
+        "remove every occurrence", which would delete more than was selected.
         """
         def worker():
             try:
@@ -1206,6 +1210,20 @@ class NavigationMixin:
                                 removed = True; break
                             except Exception:
                                 logger.exception('remove specific occurrence failed')
+                        if not removed:
+                            # The playlist changed since it was loaded (no
+                            # snapshot_id is kept), so `position` no longer holds
+                            # this URI. Find the URI in the current playlist and
+                            # remove the occurrence nearest the old position:
+                            # still exactly one copy, never all of them.
+                            try:
+                                new_pos = self._nearest_playlist_position(pl_id, candidates[:3], position)
+                                if new_pos is not None:
+                                    cand, p = new_pos
+                                    func(pl_id, [{'uri': cand, 'positions': [p]}])
+                                    removed = True
+                            except Exception:
+                                logger.exception('remove occurrence by URI fallback failed')
                     methods = []
                 else:
                     methods = [
@@ -1246,6 +1264,29 @@ class NavigationMixin:
                 logger.exception('Error removing track from playlist')
 
         threading.Thread(target=worker, daemon=True).start()
+
+    def _nearest_playlist_position(self, pl_id, uris, position):
+        """(uri, index) of the entry matching one of ``uris`` closest to
+        ``position`` in the playlist as it is now, or None. Worker thread."""
+        wanted = set(u for u in uris if u)
+        best = None
+        offset = 0
+        while True:
+            pg = self.spotify.playlist_items(
+                pl_id, limit=100, offset=offset,
+                fields="items(item(uri),track(uri)),next") or {}
+            items = pg.get("items", []) or []
+            for n, it in enumerate(items):
+                u = SpotifyClient.playlist_entry_track(it).get("uri")
+                if u in wanted:
+                    idx = offset + n
+                    if best is None or abs(idx - position) < abs(best[1] - position):
+                        best = (u, idx)
+            if pg.get("next") and items:
+                offset += 100
+            else:
+                break
+        return best
 
     def _get_cursor_row(self, table: DataTable):
         row = getattr(table, "cursor_row", None)

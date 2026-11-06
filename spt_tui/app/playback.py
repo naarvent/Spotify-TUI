@@ -317,7 +317,13 @@ class PlaybackMixin:
 
     def _get_current_or_last_track(self) -> tuple[dict | None, int, int, bool]:
         try:
+            # Spotify sampled progress_ms somewhere between sending the request
+            # and receiving the answer: remember the midpoint so _sync_playback
+            # can anchor the position there, not at the end of this whole call
+            # (which may also include track()/episode() metadata look-ups).
+            t0 = _mono()
             pb = self.spotify.get_playback() or {}
+            self._pb_sample_wall_ms = (t0 + _mono()) * 500.0
             item = pb.get("item") or pb.get("track") or pb.get("episode") or None
             ctype = (pb.get("currently_playing_type") or "").lower()
 
@@ -454,6 +460,8 @@ class PlaybackMixin:
 
         def worker():
             try:
+                started = _mono()
+                self._pb_sample_wall_ms = None
                 try:
                     item, pos_ms, dur_ms, is_playing = self._get_current_or_last_track()
                 except Exception:
@@ -462,13 +470,19 @@ class PlaybackMixin:
                 # Drop stale results: a newer sync has superseded this one.
                 if my_seq != getattr(self, "_sync_seq", my_seq):
                     return
+                # A seek / play-pause / skip issued while this fetch was in
+                # flight: the answer predates it and would drag the position
+                # (and the lyrics) back until the next tick. Keep the local state.
+                if float(getattr(self, "_now_local_edit_mono", 0.0) or 0.0) >= started:
+                    return
                 new_id = (item or {}).get('id') if item else None
                 track_changed = new_id != getattr(self, "_now_internal_track_id", None)
                 self._now_internal_track_id = new_id
                 self._now_internal_pos_ms = int(pos_ms or 0)
                 self._now_internal_dur_ms = int(dur_ms or 0)
                 self._now_internal_is_playing = bool(is_playing)
-                self._now_internal_last_wall_ms = _mono() * 1000.0
+                sample = getattr(self, "_pb_sample_wall_ms", None)
+                self._now_internal_last_wall_ms = sample if sample is not None else _mono() * 1000.0
                 if item:
                     self._bar_last_track = item
 
@@ -505,13 +519,19 @@ class PlaybackMixin:
         """Fire a mutating Spotify call on a background thread so the single
         keypress that triggered it never blocks the UI on a network round
         trip. Optionally re-syncs cached state afterwards (for actions whose
-        outcome isn't fully predictable locally, e.g. next/prev/seek)."""
+        outcome isn't fully predictable locally, e.g. next/prev/seek).
+
+        Those calls change the position, so a sync fetch started before the
+        call reached Spotify is discarded (see _now_local_edit_mono)."""
+        if resync_after is not None:
+            self._now_local_edit_mono = _mono()
         def worker():
             try:
                 fn()
             except Exception:
                 logger.exception("playback call failed")
             if resync_after is not None:
+                self._now_local_edit_mono = _mono()
                 try:
                     time.sleep(resync_after)
                     self._sync_playback()
@@ -527,6 +547,10 @@ class PlaybackMixin:
         # _sync_playback) instead of blocking the UI on a fresh get_playback().
         was_playing = bool(getattr(self, '_now_internal_is_playing', False))
         new_playing = not was_playing
+        # Freeze the extrapolated position first: re-stamping the clock alone
+        # threw away the time played since the last sync (up to 1.5 s), so a
+        # pause jumped the bar/lyrics back and a quick resume stayed behind.
+        self._now_internal_pos_ms = self._cached_pos_ms()
         self._now_internal_is_playing = new_playing
         self._now_internal_last_wall_ms = _mono() * 1000.0
         try:
@@ -667,6 +691,25 @@ class PlaybackMixin:
             except Exception:
                 pass
 
+    def _rows_for_track(self, table, tid):
+        """Current row indices of track ``tid`` in ``table`` (row_to_id first,
+        then the model rows' ids)."""
+        rows = [rk for rk, v in (getattr(table, 'row_to_id', {}) or {}).items() if v == tid]
+        if rows:
+            return rows
+        model = getattr(table, '_model_rows', None) or []
+        out = []
+        for i, r in enumerate(model):
+            if not isinstance(r, dict):
+                continue
+            rid = r.get('id')
+            if not rid and r.get('uri'):
+                try: rid = self.spotify._normalize_track_id(r.get('uri'))
+                except Exception: rid = None
+            if rid == tid:
+                out.append(i)
+        return out
+
     def _toggle_track_favorite(self, tid, table, row):
         def worker():
             # P7: serialize read-modify-write per track id.
@@ -695,9 +738,13 @@ class PlaybackMixin:
                         if table is not None and row is not None:
                             if not hasattr(table, '_liked_map'):
                                 table._liked_map = {}
-                            table._liked_map[row] = new_liked
-                            try: self._set_heart_icon(table, row, new_liked)
-                            except Exception: pass
+                            # The table may have been re-sorted/repainted while the
+                            # request ran, so `row` can now hold another track:
+                            # find the track's current row(s) by id instead.
+                            for r in self._rows_for_track(table, tid):
+                                table._liked_map[r] = new_liked
+                                try: self._set_heart_icon(table, r, new_liked)
+                                except Exception: pass
                         try: self._sync_liked_state_across_tables(tid, new_liked)
                         except Exception: pass
                         self._notify(f"[b]{'Added to' if new_liked else 'Removed from'} Liked Songs[/b]")

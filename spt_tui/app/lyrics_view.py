@@ -358,6 +358,11 @@ class LyricsMixin:
             dur_s = max(0, int(round((duration_ms or 0) / 1000)))
             clean = self._clean_track_title(title)
             errored = False
+            # Plain (unsynced) lyrics only get evenly spread fake timestamps, so
+            # they never follow the song. Keep them as a last resort and go on
+            # looking for a synced version (the /get match can be plain-only
+            # while /search has a synced entry for the same song).
+            plain_fallback = []
 
             def _from(data):
                 if not isinstance(data, dict):
@@ -366,8 +371,8 @@ class LyricsMixin:
                 if synced:
                     return self._parse_lrc(synced)
                 plain = (data.get("plainLyrics") or "").strip()
-                if plain:
-                    return self._plain_to_pseudo_lrc(plain, duration_ms)
+                if plain and not plain_fallback:
+                    plain_fallback.extend(self._plain_to_pseudo_lrc(plain, duration_ms))
                 return None
 
             # 1) Exact-match endpoint (lrclib's best): needs track + artist;
@@ -416,6 +421,8 @@ class LyricsMixin:
                     errored = True
                     logger.debug("lyrics: /search failed", exc_info=True)
 
+            if plain_fallback:
+                return plain_fallback, "found"
             return [], ("error" if errored else "notfound")
         except Exception:
             logger.exception("Lyrics: general failure in _fetch_synced_lyrics")
@@ -439,9 +446,20 @@ class LyricsMixin:
         if not lrc_text:
             return []
         lines: List[Tuple[int, str]] = []
+        # LRC "[offset:+/-ms]": positive shows the lyrics earlier. It used to be
+        # ignored (and shown as a lyric line at 0:00 along with [ar:]/[ti:] tags).
+        offset_ms = 0
         for raw in lrc_text.splitlines():
             raw = raw.strip()
             if not raw:
+                continue
+            tag = re.fullmatch(r"\[([A-Za-z]+):([^\]]*)\]", raw)
+            if tag:
+                if tag.group(1).lower() == "offset":
+                    try:
+                        offset_ms = int(tag.group(2).strip())
+                    except ValueError:
+                        pass
                 continue
             parts = raw.split(']')
             stamps = []
@@ -471,6 +489,8 @@ class LyricsMixin:
                     lines.append((ts, text))
             else:
                 lines.append((0, raw))
+        if offset_ms:
+            lines = [(max(0, ts - offset_ms), txt) for ts, txt in lines]
         lines.sort(key=lambda x: x[0])
         return lines
 

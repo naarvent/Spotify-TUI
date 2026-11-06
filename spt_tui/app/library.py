@@ -385,8 +385,15 @@ class LibraryMixin:
             if key == "default" and not desc:
                 self._append_track_rows(table, page_rows)
             else:
-                # A new page can land anywhere in a sorted view.
-                self._resort_playlist_table(table, extra_rows=page_rows)
+                # A new page can land anywhere in a sorted view, and re-sorting +
+                # repainting the whole table per page was O(n²) on a long
+                # playlist. Only extend the model here (as an unpainted tail, so
+                # the indices of the rows on screen stay valid); _paint_final
+                # does the single full sort + repaint.
+                model = getattr(table, "_model_rows", None)
+                if model is None:
+                    model = table._model_rows = []
+                model.extend(page_rows)
 
         def _paint_preview(rows):
             self.call_from_thread(lambda: _mount(rows, None))
