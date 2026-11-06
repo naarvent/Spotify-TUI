@@ -1068,6 +1068,16 @@ class TablesMixin:
             # Cached shuffle state — no blocking get_playback() on the UI thread.
             was_shuffle = bool(getattr(self, '_now_shuffle', False))
             idx = resolve_index(row_key)
+            # A playlist row knows its position in the playlist; once the view is
+            # sorted that differs from the row index, and the context offset
+            # must use the playlist position.
+            ctx_pos = idx
+            try:
+                mr = (getattr(table, '_model_rows', None) or [])[int(idx)]
+                if isinstance(mr, dict) and isinstance(mr.get('_pos'), int):
+                    ctx_pos = mr['_pos']
+            except Exception:
+                pass
 
             def announce(msg, warn=False):
                 try:
@@ -1079,7 +1089,7 @@ class TablesMixin:
                 try:
                     if ctx_uri is not None:
                         try:
-                            self.spotify.start_playback(context_uri=ctx_uri, offset={"position": int(idx)})
+                            self.spotify.start_playback(context_uri=ctx_uri, offset={"position": int(ctx_pos)})
                             self._last_played = {'uri': getattr(table, 'row_to_uri', {}).get(row_key) or None, 'ts': time.time()}
                             announce(f"[b]Playing from playlist:[/b] {rich_escape(title)}")
                             return

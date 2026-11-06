@@ -20,6 +20,7 @@ except Exception:
 
 from ..config import logger
 from ..constants import WELCOME
+from ..spotify_client import SpotifyClient
 
 class NavigationMixin:
     def _new_view_token(self, kind: str, ident: str = "") -> int:
@@ -278,7 +279,9 @@ class NavigationMixin:
                             idx = None
                             for i, w in enumerate(inputs):
                                 try:
-                                    if w is focused or getattr(w, 'id', None) == getattr(focused, 'id', None):
+                                    # Identity only: the Settings inputs have no id
+                                    # (DuplicateIds), so None == None matched the first.
+                                    if w is focused:
                                         idx = i; break
                                 except Exception:
                                     continue
@@ -1126,7 +1129,14 @@ class NavigationMixin:
                     return
 
                 title = getattr(focused, 'row_to_title', {}).get(row, '') or 'this track'
-                self._confirm_remove_track(pl_id, uri, title, pdata)
+                position = None
+                try:
+                    mr = getattr(focused, '_model_rows', None) or []
+                    if 0 <= row < len(mr) and isinstance(mr[row], dict):
+                        position = mr[row].get('_pos')
+                except Exception:
+                    position = None
+                self._confirm_remove_track(pl_id, uri, title, pdata, position=position)
                 return
 
             try:
@@ -1136,7 +1146,7 @@ class NavigationMixin:
         except Exception:
             logger.exception('action_delete failed')
 
-    def _confirm_remove_track(self, pl_id: str, track_uri: str, title: str, pdata=None) -> None:
+    def _confirm_remove_track(self, pl_id: str, track_uri: str, title: str, pdata=None, position=None) -> None:
         """Arm a removal and ask first.
 
         Deleting a whole playlist makes you type its name, but removing a track
@@ -1146,6 +1156,7 @@ class NavigationMixin:
         rv = getattr(self, "_right_view", None)
         self._pending_remove_track = {"playlist": pl_id, "uri": track_uri,
                                       "title": title, "pdata": pdata,
+                                      "position": position,
                                       "view": tuple(rv[:3]) if rv else None}
         self._notify(f"[b]Remove[/b] {rich_escape(str(title))} [b]from the playlist?[/b]  "
                      "Ctrl+D again to confirm, Esc to cancel.", warn=True, sticky=True)
@@ -1169,13 +1180,20 @@ class NavigationMixin:
         self._pending_remove_track = None
         self._clear_status_line()
         self._remove_track_from_playlist(pending["playlist"], pending["uri"],
-                                         pending.get("pdata"))
+                                         pending.get("pdata"),
+                                         position=pending.get("position"))
 
-    def _remove_track_from_playlist(self, pl_id: str, track_uri: str, pdata=None) -> None:
+    def _remove_track_from_playlist(self, pl_id: str, track_uri: str, pdata=None, position=None) -> None:
         """Remove one track from a playlist, off-thread, then reopen the view.
 
         spotipy renamed this call across versions, so the known names are tried
         in turn, each with the plain URI and then a normalised one.
+
+        With ``position`` (the entry's real index in the playlist) only that
+        occurrence is removed, so a duplicated track keeps its other copies.
+        If that call fails (the playlist changed since it was loaded) the URI is
+        looked up again and the nearest occurrence is removed instead; never
+        "remove every occurrence", which would delete more than was selected.
         """
         def worker():
             try:
@@ -1183,12 +1201,37 @@ class NavigationMixin:
                 tid = self.spotify._normalize_track_id(track_uri) or track_uri
                 candidates = [track_uri, f'spotify:track:{tid}', f'spotify:episode:{tid}']
                 removed = False
-                methods = [
-                    'playlist_remove_all_occurrences_of_items',
-                    'playlist_remove_specific_occurrences_of_items',
-                    'playlist_remove_items',
-                    'playlist_remove_tracks',
-                ]
+                if isinstance(position, int) and not isinstance(position, bool) and position >= 0:
+                    func = getattr(sp, 'playlist_remove_specific_occurrences_of_items', None)
+                    if func is not None:
+                        for cand in candidates[:2]:
+                            try:
+                                func(pl_id, [{'uri': cand, 'positions': [position]}])
+                                removed = True; break
+                            except Exception:
+                                logger.exception('remove specific occurrence failed')
+                        if not removed:
+                            # The playlist changed since it was loaded (no
+                            # snapshot_id is kept), so `position` no longer holds
+                            # this URI. Find the URI in the current playlist and
+                            # remove the occurrence nearest the old position:
+                            # still exactly one copy, never all of them.
+                            try:
+                                new_pos = self._nearest_playlist_position(pl_id, candidates[:3], position)
+                                if new_pos is not None:
+                                    cand, p = new_pos
+                                    func(pl_id, [{'uri': cand, 'positions': [p]}])
+                                    removed = True
+                            except Exception:
+                                logger.exception('remove occurrence by URI fallback failed')
+                    methods = []
+                else:
+                    methods = [
+                        'playlist_remove_all_occurrences_of_items',
+                        'playlist_remove_specific_occurrences_of_items',
+                        'playlist_remove_items',
+                        'playlist_remove_tracks',
+                    ]
                 for mname in methods:
                     try:
                         if hasattr(sp, mname):
@@ -1221,6 +1264,29 @@ class NavigationMixin:
                 logger.exception('Error removing track from playlist')
 
         threading.Thread(target=worker, daemon=True).start()
+
+    def _nearest_playlist_position(self, pl_id, uris, position):
+        """(uri, index) of the entry matching one of ``uris`` closest to
+        ``position`` in the playlist as it is now, or None. Worker thread."""
+        wanted = set(u for u in uris if u)
+        best = None
+        offset = 0
+        while True:
+            pg = self.spotify.playlist_items(
+                pl_id, limit=100, offset=offset,
+                fields="items(item(uri),track(uri)),next") or {}
+            items = pg.get("items", []) or []
+            for n, it in enumerate(items):
+                u = SpotifyClient.playlist_entry_track(it).get("uri")
+                if u in wanted:
+                    idx = offset + n
+                    if best is None or abs(idx - position) < abs(best[1] - position):
+                        best = (u, idx)
+            if pg.get("next") and items:
+                offset += 100
+            else:
+                break
+        return best
 
     def _get_cursor_row(self, table: DataTable):
         row = getattr(table, "cursor_row", None)

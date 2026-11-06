@@ -58,7 +58,7 @@ class SptPy(
         "#right.table-view { padding: 0; }\n"
         "#right.table-view > DataTable, #right.table-view > DataTable:focus { border: none; }\n"
         "#right.lyrics-mode { content-align: center middle; }\n"
-        "#lyrics_box { width: 1fr; height: 1fr; text-align: center; padding: 1 2; }\n"
+        ".lyrics_box { width: 1fr; height: 1fr; text-align: center; padding: 1 2; }\n"
         "#help_scroll { width: 1fr; height: 1fr; }\n"
         "#help_text { width: 1fr; text-align: left; }\n"
         "ListView { height: auto; }\n"
@@ -111,6 +111,8 @@ class SptPy(
         ("r", "toggle_repeat", "Repeat"),
         ("c", "queue_track", "Queue"),
         ("ctrl+s", "toggle_shuffle", "Shuffle"),
+        ("s", "sort_playlist", "Sort"),
+        ("S", "reverse_playlist_sort", "Sort ↑↓"),
         ("-", "volume_down", "Vol -"),
         ("+", "volume_up", "Vol +"),
         ("m", "toggle_mute", "Mute"),

@@ -8,7 +8,7 @@ import threading
 import webbrowser
 from typing import Dict, List
 
-from textual.widgets import Input, Static, ListItem, Label
+from textual.widgets import DataTable, Input, Static, ListItem, Label
 from rich.markup import escape as rich_escape
 
 try:
@@ -21,6 +21,7 @@ except Exception:
     pyfiglet = None
 
 from .. import config
+from .. import playlist_sort
 from ..config import logger
 from ..spotify_client import SpotifyClient
 
@@ -110,11 +111,13 @@ class LibraryMixin:
                 right.mount(Static('[dim]Lyrics cache accepts sizes like "200 MB", "500 MB", "1 GB" or "2 GB". Press ESC to go back.[/dim]'))
             except Exception:
                 pass
-            self.seek_vol_down_input = Input(placeholder=f'Volume Down step percent (current {cur_vol_down})', id='seek_vol_down_input')
-            self.seek_vol_up_input = Input(placeholder=f'Volume Up step percent (current {cur_vol_up})', id='seek_vol_up_input')
-            self.seek_track_input = Input(placeholder=f'Track jump seconds (current {cur_track})', id='seek_track_input')
-            self.seek_episode_input = Input(placeholder=f'Episode jump seconds (current {cur_episode})', id='seek_episode_input')
-            self.lyrics_cache_input = Input(placeholder=f'Lyrics cache max size, e.g. 200 MB or 1 GB (current {cur_cache_h})', id='lyrics_cache_input')
+            # No widget ids: remove() is async, so a second Settings open in the same
+            # turn would hit DuplicateIds. The wizard finds the inputs by attribute.
+            self.seek_vol_down_input = Input(placeholder=f'Volume Down step percent (current {cur_vol_down})')
+            self.seek_vol_up_input = Input(placeholder=f'Volume Up step percent (current {cur_vol_up})')
+            self.seek_track_input = Input(placeholder=f'Track jump seconds (current {cur_track})')
+            self.seek_episode_input = Input(placeholder=f'Episode jump seconds (current {cur_episode})')
+            self.lyrics_cache_input = Input(placeholder=f'Lyrics cache max size, e.g. 200 MB or 1 GB (current {cur_cache_h})')
             right.mount(self.seek_vol_down_input)
             right.mount(self.seek_vol_up_input)
             right.mount(self.seek_track_input)
@@ -306,14 +309,19 @@ class LibraryMixin:
         _TR = "id,uri,name,type,duration_ms,artists(name),album(name)"
         FIELDS = f"items(added_at,item({_TR}),track({_TR})),total"
 
-        title = f"[b]{rich_escape(pl_name)}[/b]"
+        base_title = f"[b]{rich_escape(pl_name)}[/b]"
 
-        def _extract(page):
+        def _title(suffix=""):
+            # Re-read on every call: the sort can change while pages stream in.
+            return self._pl_title(base_title) + suffix
+
+        def _extract(page, page_offset=0):
             page_rows, page_track_ids = [], []
-            for it in page.get("items", []):
+            for n, it in enumerate(page.get("items", [])):
                 track = SpotifyClient.playlist_entry_track(it)
                 if not track:
                     continue
+                artists = track.get("artists") or []
                 page_rows.append({
                     "id": track.get("id"),
                     "uri": track.get("uri"),
@@ -322,6 +330,13 @@ class LibraryMixin:
                     "album": (track.get("album", {}) or {}).get("name", ""),
                     "dur": self.spotify.fmt_duration(track.get("duration_ms") or 0),
                     "added": SpotifyClient.fmt_date(it.get("added_at")),
+                    # View-only sort keys. `_pos` is the entry's position in the
+                    # playlist: playback offsets use it, so a sorted row still
+                    # starts the right track.
+                    "_pos": page_offset + n,
+                    "_artist0": ((artists[0] or {}).get("name") or "") if artists else "",
+                    "_dur_ms": track.get("duration_ms") or 0,
+                    "_added_at": it.get("added_at") or "",
                 })
                 # Only real tracks can be "liked"; episodes/podcasts would make
                 # current_user_saved_tracks_contains 400 and (via the per-id
@@ -354,14 +369,31 @@ class LibraryMixin:
                 if still_there and retries > 0:
                     self.call_after_refresh(lambda: attempt(retries - 1))
                     return
+                srows, sliked = self._pl_sorted(rows, liked)
                 state["table"] = self._render_tracks_table(
-                    title, rows, liked, context_uri=pl_uri,
-                    context_uris=[r["uri"] for r in rows], profile="playlist",
+                    _title(), srows, sliked, context_uri=pl_uri,
+                    context_uris=[r["uri"] for r in srows], profile="playlist",
                 )
+                state["table"]._pl_base_title = base_title
                 if state["pending"]:
-                    self._append_track_rows(state["table"], state["pending"])
+                    _add_rows(state["table"], state["pending"])
                     state["pending"] = []
             attempt()
+
+        def _add_rows(table, page_rows):
+            key, desc = self._pl_sort_pref()
+            if key == "default" and not desc:
+                self._append_track_rows(table, page_rows)
+            else:
+                # A new page can land anywhere in a sorted view, and re-sorting +
+                # repainting the whole table per page was O(n²) on a long
+                # playlist. Only extend the model here (as an unpainted tail, so
+                # the indices of the rows on screen stay valid); _paint_final
+                # does the single full sort + repaint.
+                model = getattr(table, "_model_rows", None)
+                if model is None:
+                    model = table._model_rows = []
+                model.extend(page_rows)
 
         def _paint_preview(rows):
             self.call_from_thread(lambda: _mount(rows, None))
@@ -378,7 +410,7 @@ class LibraryMixin:
                     # The preview is still waiting for the old table to go.
                     state["pending"].extend(page_rows)
                     return
-                self._append_track_rows(table, page_rows)
+                _add_rows(table, page_rows)
             self.call_from_thread(do)
 
         def _paint_final(rows, liked):
@@ -394,12 +426,8 @@ class LibraryMixin:
                     return
                 # Update the preview table in place — mounting a second widget
                 # with id "tracks_table" would collide (remove() is async).
-                table._model_rows = rows
-                table._liked_map = {i: bool(liked[i]) for i in range(len(rows))}
                 table._context_uri = pl_uri
-                table._context_uris = [r["uri"] for r in rows]
-                table.row_to_uri = {}; table.row_to_title = {}; table.row_to_id = {}
-                self._repaint_rows_from_model(table)
+                self._resort_playlist_table(table, replace=(rows, liked))
             self.call_from_thread(do)
 
         def _paint_hearts(id_to_liked):
@@ -443,7 +471,7 @@ class LibraryMixin:
                 if state["table"] is not None or not current():
                     return
                 _mount(list(cached_rows), list(cached_liked))
-                self._set_table_title("tracks_table", f"{title}  [dim](refreshing…)[/dim]")
+                self._set_table_title("tracks_table", _title("  [dim](refreshing…)[/dim]"))
             self.set_timer(self._CACHE_LOADING_MIN_S, _paint_cached)
 
         def worker():
@@ -459,14 +487,14 @@ class LibraryMixin:
                 multipage = total > len(rows)
                 if multipage and progressive:
                     _paint_preview(list(rows))
-                    _set_title(f"{title}  [dim](loading {len(rows)}/{total})[/dim]")
+                    _set_title(_title(f"  [dim](loading {len(rows)}/{total})[/dim]"))
 
                 offset = 100
                 while offset < total:
                     if not current():
                         return
                     page = self.spotify.playlist_items(pl_id, limit=100, offset=offset, fields=FIELDS) or {}
-                    page_rows, page_track_ids = _extract(page)
+                    page_rows, page_track_ids = _extract(page, offset)
                     if not page_rows:
                         break
                     rows += page_rows
@@ -474,11 +502,11 @@ class LibraryMixin:
                     offset += 100
                     if progressive:
                         _paint_page(list(page_rows))
-                        _set_title(f"{title}  [dim](loading {min(len(rows), total)}/{total})[/dim]")
+                        _set_title(_title(f"  [dim](loading {min(len(rows), total)}/{total})[/dim]"))
 
                 if not current():
                     return
-                _set_title(f"{title}  [dim](checking likes…)[/dim]" if multipage else title)
+                _set_title(_title("  [dim](checking likes…)[/dim]") if multipage else _title())
                 liked_by_id = {}
 
                 def _on_liked_batch(start, vals):
@@ -511,8 +539,139 @@ class LibraryMixin:
 
             # Final render: full track list with hearts resolved, clean title.
             _paint_final(rows, liked)
-            _set_title(title)
+            _set_title(_title())
         threading.Thread(target=worker, daemon=True).start()
+
+    # --- View-only sort of the open playlist (`s` / `S`) ------------------ #
+
+    def _pl_sort_pref(self):
+        """(key, desc) for playlist tables, read once from spt_config.json."""
+        pref = getattr(self, "_pl_sort", None)
+        if pref is None:
+            pref = self._pl_sort = playlist_sort.load_pref(config.LOCAL_CFG)
+        return pref
+
+    def _pl_title(self, base_title):
+        lab = playlist_sort.label(*self._pl_sort_pref())
+        return f"{base_title}  [dim]({lab})[/dim]" if lab else base_title
+
+    def _pl_sorted(self, rows, liked):
+        """Rows and their liked flags, both in the current view order."""
+        rows = list(rows or [])
+        liked = list(liked) if liked else []
+        flag = {id(r): bool(liked[i]) if i < len(liked) else False for i, r in enumerate(rows)}
+        out = playlist_sort.sort_rows(rows, *self._pl_sort_pref())
+        return out, [flag[id(r)] for r in out]
+
+    @staticmethod
+    def _pl_row_ident(r):
+        # Rows are rebuilt on a cache refresh, so match by position + URI.
+        return (r.get("_pos"), r.get("uri")) if isinstance(r, dict) else None
+
+    def _resort_playlist_table(self, table, *, extra_rows=None, replace=None, follow=False):
+        """Re-order a playlist table's model and repaint it.
+
+        Row keys/indices are view positions, so everything indexed by them
+        (liked map, row_to_* maps, context URIs, Multi-Add selection) is
+        rebuilt from the sorted model. ``follow`` (user-initiated sort) jumps to
+        the top row; otherwise the highlighted track stays highlighted and the
+        scroll offset is kept (pages streaming in).
+        """
+        model = list(getattr(table, "_model_rows", None) or [])
+        liked_map = getattr(table, "_liked_map", None) or {}
+        cur = None
+        try:
+            cur = self._get_cursor_row(table)
+        except Exception:
+            cur = None
+        cur_ident = self._pl_row_ident(model[cur]) if cur is not None and 0 <= cur < len(model) else None
+        # Untouched cursor on row 0 while loading: stay at the top.
+        if not follow and cur == 0:
+            cur_ident = None
+
+        multi = getattr(self, "_multi_add_selected_rows", None)
+        multi_on = (getattr(self, "_multi_add_table", None) is table and isinstance(multi, set))
+        sel_idents = {self._pl_row_ident(model[i]) for i in multi
+                      if isinstance(i, int) and 0 <= i < len(model)} if multi_on else set()
+
+        if replace is not None:
+            rows, liked = replace
+            pairs_rows, pairs_liked = list(rows or []), list(liked or [])
+        else:
+            pairs_rows = model + list(extra_rows or [])
+            pairs_liked = [bool(liked_map.get(i, False)) for i in range(len(model))] + \
+                [False] * len(extra_rows or [])
+        new_rows, new_liked = self._pl_sorted(pairs_rows, pairs_liked)
+
+        table._model_rows = new_rows
+        table._liked_map = {i: v for i, v in enumerate(new_liked)}
+        table._context_uris = [r.get("uri") for r in new_rows]
+        table.row_to_uri = {}; table.row_to_title = {}; table.row_to_id = {}
+        self._repaint_rows_from_model(table)
+
+        if multi_on:
+            multi.clear()
+            multi.update(i for i, r in enumerate(new_rows) if self._pl_row_ident(r) in sel_idents)
+        if follow and new_rows:
+            # User-initiated sort: jump to the top of the new order.
+            try:
+                col = int(getattr(getattr(table, "cursor_coordinate", None), "column", 0) or 0)
+                table.move_cursor(row=0, column=col, animate=False, scroll=True)
+                table.scroll_home(animate=False)
+            except Exception:
+                logger.debug("_resort_playlist_table: jump to top failed")
+        elif cur_ident is not None:
+            for i, r in enumerate(new_rows):
+                if self._pl_row_ident(r) == cur_ident:
+                    try:
+                        col = int(getattr(getattr(table, "cursor_coordinate", None), "column", 0) or 0)
+                        table.move_cursor(row=i, column=col, animate=False, scroll=follow)
+                    except Exception:
+                        logger.debug("_resort_playlist_table: cursor restore failed")
+                    break
+
+    def _open_playlist_tracks_table(self):
+        rv = getattr(self, "_right_view", None)
+        if not rv or rv[0] != "playlist":
+            return None
+        try:
+            table = self.query_one("#tracks_table", DataTable)
+        except Exception:
+            return None
+        return table if getattr(table, "_pl_base_title", None) is not None else None
+
+    def action_sort_playlist(self) -> None:
+        """`s`: next sort criterion for the open playlist (view only)."""
+        self._change_playlist_sort(cycle=True)
+
+    def action_reverse_playlist_sort(self) -> None:
+        """`S`: flip ascending/descending for the open playlist (view only)."""
+        self._change_playlist_sort(reverse=True)
+
+    def _change_playlist_sort(self, *, cycle=False, reverse=False) -> None:
+        table = self._open_playlist_tracks_table()
+        if table is None:
+            self._notify("[b]Open a playlist to sort its tracks.[/b]")
+            return
+        key, desc = self._pl_sort_pref()
+        if cycle:
+            key, desc = playlist_sort.next_key(key), False
+        if reverse:
+            desc = not desc
+        self._pl_sort = (key, desc)
+        try:
+            if not isinstance(config.LOCAL_CFG, dict):
+                config.LOCAL_CFG = {}
+            config.LOCAL_CFG[playlist_sort.CFG_KEY] = key
+            config.LOCAL_CFG[playlist_sort.CFG_DESC_KEY] = desc
+            config.save_local_config(config.LOCAL_CFG)
+        except Exception:
+            logger.exception("saving playlist sort failed")
+        self._resort_playlist_table(table, follow=True)
+        self._set_table_title("tracks_table", self._pl_title(table._pl_base_title))
+        arrow = "↓" if desc else "↑"
+        self._notify(f"[b]Sorted by {playlist_sort.SORT_LABELS[key]} {arrow}[/b]  "
+                     "[dim](view only; the playlist is unchanged)[/dim]")
 
     # How many playlists keep their tracks in memory. Enough to make going back
     # and forth instant without holding every big playlist of a long session.

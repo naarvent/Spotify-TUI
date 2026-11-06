@@ -26,6 +26,43 @@ from ..spotify_client import SpotifyClient
 from ..local_player import LOCAL_START_SENTINEL
 
 class QueueDevicesMixin:
+    # The widget id used to leak into the queue's Source column ("tracks_table").
+    _QUEUE_SOURCE_LABELS = {
+        "tracks_table": "Playlist",
+        "search_table": "Search",
+        "songs_table": "Search",
+        "albums_table": "Album",
+        "artists_table": "Artist",
+        "playlists_table": "Playlist",
+        "queue_table": "Queue",
+    }
+
+    # #tracks_table is shared by playlists, Liked Songs, Recently Played, albums
+    # and podcasts (and #search_table by the saved-library lists), so the view
+    # kind (_right_view[0]) decides the label; the widget id is the fallback.
+    _QUEUE_SOURCE_VIEW_LABELS = {
+        "playlist": "Playlist",
+        "liked": "Liked Songs",
+        "recent": "Recently Played",
+        "album": "Album",
+        "artist": "Artist",
+        "podcast": "Podcast",
+        "search": "Search",
+        "albums": "Saved Albums",
+        "artists": "Saved Artists",
+        "podcasts": "Saved Podcasts",
+        "episodes": "Saved Episodes",
+        "queue": "Queue",
+    }
+
+    def _queue_source_label(self, table) -> str:
+        wid = getattr(table, "id", "") or ""
+        rv = getattr(self, "_right_view", None)
+        kind = rv[0] if rv else None
+        if wid != "queue_table" and kind in self._QUEUE_SOURCE_VIEW_LABELS:
+            return self._QUEUE_SOURCE_VIEW_LABELS[kind]
+        return self._QUEUE_SOURCE_LABELS.get(wid, "")
+
     def action_queue_track(self):
         try:
             focused = self.focused
@@ -63,6 +100,9 @@ class QueueDevicesMixin:
                 row_obj = model_rows[row] if row is not None and row < len(model_rows) else {}
             except Exception:
                 row_obj = {}
+            # Resolved now: by the time add_to_queue returns the user may be
+            # in another view, and the label follows _right_view.
+            source_label = self._queue_source_label(focused)
 
             def worker():
                 try:
@@ -82,7 +122,7 @@ class QueueDevicesMixin:
                         "artist": row_obj.get("artist") or "",
                         "album": row_obj.get("album") or "",
                         "dur": row_obj.get("dur") or "",
-                        "source": getattr(focused, 'id', '') or row_obj.get('source', '') or '',
+                        "source": source_label or row_obj.get('source', '') or '',
                         "added_at": int(time.time() * 1000),
                     }
                     self._local_queue.append(qitem)
@@ -353,9 +393,48 @@ class QueueDevicesMixin:
         self.level = self.LVL_VIEW
 
     def action_open_queue(self):
+        # Ctrl+C held down (auto-repeat) fires this dozens of times. Ignore it
+        # while a mount is in flight and, if the queue is already on screen,
+        # just refresh it: never remount #queue_table (DuplicateIds).
+        if getattr(self, "_queue_opening", False):
+            return
+        rv = getattr(self, "_right_view", None)
+        if rv and rv[0] == "queue":
+            try:
+                table = self.right_panel.query_one("#queue_table", DataTable)
+            except NoMatches:
+                table = None
+            if table is not None:
+                # Already on screen (maybe with focus on the menu): bring the
+                # user back to it without remounting.
+                try: table.focus()
+                except Exception: pass
+                self.level = self.LVL_VIEW
+                try:
+                    self._refresh_queue_table()
+                except Exception:
+                    logger.exception('_refresh_queue_table failed')
+                return
         self._leave_lyrics_mode()
-        self._new_view_token("queue", "")
+        token = self._new_view_token("queue", "")
+        self._queue_opening = True
+        try:
+            self.run_worker(self._open_queue_view(token), group="open_queue")
+        except Exception:
+            self._queue_opening = False
+            raise
 
+    async def _open_queue_view(self, token: int):
+        try:
+            await self._mount_queue_view(token)
+        finally:
+            self._queue_opening = False
+
+    async def _mount_queue_view(self, token: int):
+        # A newer view may already own the panel: leave its intervals and
+        # widgets alone.
+        if not self._is_current_view("queue", "", token):
+            return
         try:
             if getattr(self, '_queue_interval', None):
                 try: self._queue_interval.pause()
@@ -365,6 +444,14 @@ class QueueDevicesMixin:
             pass
 
         right = self._clear_right()
+        # Widget.remove() is asynchronous: wait until the previous view (maybe
+        # an older #queue_table) is really gone before mounting the new one.
+        try:
+            await right.remove_children()
+        except Exception:
+            logger.exception('remove_children before queue mount failed')
+        if not self._is_current_view("queue", "", token):
+            return  # another view took over while we waited
         right.mount(Static("[b]Queue[/b]", markup=True))
 
         table = self._create_table_with_full_width(
@@ -568,8 +655,33 @@ class QueueDevicesMixin:
         }
         return [cell_map[f] for f in fields]
 
+    def _queue_refresh_finished(self):
+        """Main thread: release the in-flight guard and run one coalesced
+        refresh if more were requested meanwhile."""
+        self._queue_refresh_running = False
+        if getattr(self, "_queue_refresh_pending", False):
+            self._queue_refresh_pending = False
+            self._refresh_queue_table()
+
     def _refresh_queue_table(self):
+        # One fetch at a time: held Ctrl+C or the 5 s interval landing on a slow
+        # request used to start a parallel API call per trigger. Requests made
+        # while one is in flight collapse into a single follow-up refresh.
+        if getattr(self, "_queue_refresh_running", False):
+            self._queue_refresh_pending = True
+            return
+        self._queue_refresh_running = True
+
         def worker():
+            try:
+                _worker_body()
+            finally:
+                try:
+                    self.call_from_thread(self._queue_refresh_finished)
+                except Exception:
+                    self._queue_refresh_running = False
+
+        def _worker_body():
             try:
                 api_items = None
                 try:
@@ -721,4 +833,5 @@ class QueueDevicesMixin:
         try:
             threading.Thread(target=worker, daemon=True).start()
         except Exception:
+            self._queue_refresh_running = False
             logger.exception('Could not start _refresh_queue_table thread')

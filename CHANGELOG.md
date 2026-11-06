@@ -5,6 +5,55 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+## [v0.2.3] - 2026-11-06
+
+### Added
+
+- Sort the open playlist's track table with `s` (Default → Title → Artist →
+  Album → Duration → Date added) and reverse it with `S`. It is view-only: the
+  playlist on Spotify is never reordered. The criterion and direction show in
+  the table title and are saved to `spt_config.json` (`playlist_sort`,
+  `playlist_sort_desc`; missing or invalid values fall back to the playlist
+  order). Pages that stream in are merged into the sorted view, keeping the
+  highlighted track. Artist sorts by the first artist, case-insensitively, with
+  album and title as tie-breaks. Covered by `tests/test_playlist_sort.py`.
+
+### Fixed
+
+- Playing a track from a playlist starts the playlist context at the track's
+  real playlist position instead of its table row index (they differ once the
+  view is sorted, and when the playlist has unavailable entries).
+- `Ctrl+D` on a playlist track removes only the selected occurrence of a track
+  that appears more than once. If the position is stale (the playlist changed
+  elsewhere), the playlist is re-read and the closest matching occurrence is
+  removed; a failed removal never falls back to removing every occurrence.
+- Sorting a playlist follows the highlighted track instead of jumping to the
+  top, and streamed pages of a sorted playlist are added to the model and
+  repainted once at the end instead of re-sorting the whole table per page.
+- The queue `Source` column shows a readable label chosen from the view the
+  track was queued from (Playlist, Liked Songs, Recently Played, Album, ...)
+  instead of the internal widget id.
+- Opening the queue twice, or holding `Ctrl+C`, no longer crashes with
+  `DuplicateIds`. With the queue already open, `Ctrl+C` focuses it and refreshes
+  it with at most one request in flight (extra presses are coalesced), and a
+  queue mount that finishes after another view took over no longer blanks it.
+- The lyrics view and Settings no longer crash with `DuplicateIds` when opened
+  with another view, and `Up` / `Down` move between the Settings fields again
+  (the focused field is matched by identity, not by an id that is now `None`).
+- Lyrics stay in sync: pausing freezes the position instead of losing what
+  played since the last sync, a playback sync that started before a
+  seek/pause/skip is discarded instead of pulling the lyrics back, and the
+  position is anchored to the middle of the playback request so network latency
+  no longer delays the lyrics. Plain (unsynced) lyrics are kept as a last
+  resort while a synced version is still searched for, and the LRC `[offset:]`
+  tag is applied (metadata tags such as `[ar:]` are no longer shown as lyric
+  lines).
+- Toggling a favourite resolves the row by track id when it paints, so the
+  heart no longer lands on another track if the table was re-sorted while the
+  request ran.
+
 ## [RELEASED]
 
 ### Added
