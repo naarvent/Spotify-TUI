@@ -111,6 +111,8 @@ class SptPy(
         ("r", "toggle_repeat", "Repeat"),
         ("c", "queue_track", "Queue"),
         ("ctrl+s", "toggle_shuffle", "Shuffle"),
+        ("s", "sort_playlist", "Sort"),
+        ("S", "reverse_playlist_sort", "Sort ↑↓"),
         ("-", "volume_down", "Vol -"),
         ("+", "volume_up", "Vol +"),
         ("m", "toggle_mute", "Mute"),

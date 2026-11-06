@@ -1113,6 +1113,8 @@ class CoreMixin:
         - f: Toggle Favorite (Like / Unlike selected track)
         - Ctrl+Shift+P: Add to a playlist — the selected track/episode, or all tracks of a selected album/artist/playlist/podcast
         - Ctrl+D: Delete (playlist or remove item)
+        - s: Sort the open playlist (Default → Title → Artist → Album → Duration → Date added; view only)
+        - S (Shift+S): Reverse the playlist sort (ascending / descending)
         - Ctrl+R: Refresh / reload content
         - Ctrl+C: Open Queue view
         - Ctrl+T: Import playlists

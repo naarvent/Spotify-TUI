@@ -41,6 +41,7 @@ Search Spotify, browse your library and playlists, control playback, follow sync
 - **Type-specific search** for tracks, artists, albums, playlists, podcasts and episodes.
 - **Responsive search layout** that adapts to large, medium and narrow terminals.
 - **Playlists** with a persistent disk cache, instant startup rendering and safe background refresh.
+- **View-only playlist sorting** (`s` / `S`) by title, artist, album, duration or date added, remembered between sessions.
 - **Library** with liked songs, recently played tracks, saved albums, followed artists, saved podcasts and saved episodes.
 - **Favorites** for liking tracks and following or saving albums, artists, podcasts and episodes directly from the interface.
 - **Unified saved-state indicators** using consistent heart symbols throughout the application.
@@ -469,6 +470,8 @@ The search dashboard has two navigation levels.
 | `Ctrl+Shift+P` | Add to a playlist: the selected track/episode, or every track of a selected album, artist, playlist or podcast (large adds ask to confirm) |
 | `Ctrl+T` | Import a playlist |
 | `Ctrl+D` | Delete or remove the selected item (press again to confirm a track removal, `Esc` to cancel) |
+| `s` | Sort the open playlist: Default (playlist order) → Title → Artist → Album → Duration → Date added. View only; the choice is remembered in `spt_config.json` |
+| `S` (`Shift+S`) | Reverse the playlist sort (ascending / descending) |
 | `Ctrl+R` | Refresh the active view |
 | `Ctrl+B` | Hide/show the left sidebar (gives its width to the content) |
 

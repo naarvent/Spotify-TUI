@@ -5,6 +5,25 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- Sort the open playlist's track table with `s` (Default → Title → Artist →
+  Album → Duration → Date added) and reverse it with `S`. It is view-only: the
+  playlist on Spotify is never reordered. The criterion and direction show in
+  the table title and are saved to `spt_config.json` (`playlist_sort`,
+  `playlist_sort_desc`; missing or invalid values fall back to the playlist
+  order). Pages that stream in are merged into the sorted view, keeping the
+  highlighted track. Artist sorts by the first artist, case-insensitively, with
+  album and title as tie-breaks. Covered by `tests/test_playlist_sort.py`.
+
+### Fixed
+
+- Playing a track from a playlist starts the playlist context at the track's
+  real playlist position instead of its table row index (they differ once the
+  view is sorted, and when the playlist has unavailable entries).
+
 ## [RELEASED]
 
 ### Added
