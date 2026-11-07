@@ -75,12 +75,30 @@ def load_local_config() -> dict:
         logger.exception("load_local_config failed")
     return {}
 
+import threading as _threading
+_SAVE_LOCK = _threading.Lock()
+
 def save_local_config(cfg: dict) -> None:
-    try:
-        with open(CONFIG_PATH, "w", encoding="utf-8") as f:
-            json.dump(cfg or {}, f, ensure_ascii=False, indent=2)
-    except Exception:
-        logger.exception("save_local_config failed")
+    """Atomic write (unique temp file + rename) under a lock: several workers
+    (playlist import, provider switch, settings) may save at the same time."""
+    import tempfile
+    with _SAVE_LOCK:
+        tmp = None
+        try:
+            d = os.path.dirname(os.path.abspath(CONFIG_PATH))
+            fd, tmp = tempfile.mkstemp(prefix="spt_config.", suffix=".tmp", dir=d)
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                json.dump(cfg or {}, f, ensure_ascii=False, indent=2)
+            os.replace(tmp, CONFIG_PATH)
+            tmp = None
+        except Exception:
+            logger.exception("save_local_config failed")
+        finally:
+            if tmp:
+                try:
+                    os.unlink(tmp)
+                except OSError:
+                    pass
 
 LOCAL_CFG = load_local_config()
 CONFIG_LOADED = bool(LOCAL_CFG)
