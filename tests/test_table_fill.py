@@ -138,8 +138,9 @@ async def test_title_stays_weighted_over_artist():
             t = app._render_tracks_table("[b]P[/b]", rows_n(5), [False] * 5, profile="playlist")
             await pilot.pause()
             w = widths(t)
-            ratio = (w[1] / w[2]) if w[2] else 0
-            check(f"Title wider than Artist at {size}", w[1] > w[2], f"w={w}")
+            ti, ar = width_of(t, "Title"), width_of(t, "Artist") or 0
+            ratio = (ti / ar) if ar else 0
+            check(f"Title wider than Artist at {size}", ti > ar, f"w={w}")
             check(f"Title/Artist ratio stays near its weight at {size}", 1.2 <= ratio <= 1.6,
                   f"ratio={ratio:.2f} w={w}")
 

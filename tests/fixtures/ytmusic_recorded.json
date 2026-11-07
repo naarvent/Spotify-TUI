@@ -1,0 +1,615 @@
+{
+ "search_songs": [
+  {
+   "category": "Songs",
+   "resultType": "song",
+   "title": "Glimpse of Us",
+   "album": {
+    "name": "SMITHEREENS",
+    "id": "MPREb_5vUjzQdZE0Z"
+   },
+   "inLibrary": false,
+   "pinnedToListenAgain": false,
+   "videoId": "20zVdUxZdwg",
+   "videoType": "MUSIC_VIDEO_TYPE_ATV",
+   "isAvailable": true,
+   "duration": "3:54",
+   "year": null,
+   "artists": [
+    {
+     "name": "Joji",
+     "id": "UCXi-Rme73-wjVK5IE78a3SQ"
+    }
+   ],
+   "duration_seconds": 234,
+   "views": "556M",
+   "isExplicit": false
+  },
+  {
+   "category": "Songs",
+   "resultType": "song",
+   "title": "Ew",
+   "album": {
+    "name": "Nectar",
+    "id": "MPREb_gHkNkQi2oio"
+   },
+   "inLibrary": false,
+   "pinnedToListenAgain": false,
+   "videoId": "ti8gg8wMajY",
+   "videoType": "MUSIC_VIDEO_TYPE_ATV",
+   "isAvailable": true,
+   "duration": "3:28",
+   "year": null,
+   "artists": [
+    {
+     "name": "Joji",
+     "id": "UCXi-Rme73-wjVK5IE78a3SQ"
+    }
+   ],
+   "duration_seconds": 208,
+   "views": "73M",
+   "isExplicit": false
+  },
+  {
+   "category": "Songs",
+   "resultType": "song",
+   "title": "Glimpse of Us (if Chopin composed it)",
+   "album": {
+    "name": "Glimpse of Us (if Chopin composed it)",
+    "id": "MPREb_Fp4cnGeDUt8"
+   },
+   "inLibrary": false,
+   "pinnedToListenAgain": false,
+   "videoId": "FKpNfVOLHD4",
+   "videoType": "MUSIC_VIDEO_TYPE_ATV",
+   "isAvailable": true,
+   "duration": "4:08",
+   "year": null,
+   "artists": [
+    {
+     "name": "Birru",
+     "id": "UC_9S-KPZxJJyZBjUb1x2azA"
+    }
+   ],
+   "duration_seconds": 248,
+   "views": "11K",
+   "isExplicit": false
+  },
+  {
+   "category": "Songs",
+   "resultType": "song",
+   "title": "Glimpse of Us",
+   "album": {
+    "name": "Glimpse of Us",
+    "id": "MPREb_YzUrS8LzqLA"
+   },
+   "inLibrary": false,
+   "pinnedToListenAgain": false,
+   "videoId": "whKDDgPPvUc",
+   "videoType": "MUSIC_VIDEO_TYPE_ATV",
+   "isAvailable": true,
+   "duration": "3:39",
+   "year": null,
+   "artists": [
+    {
+     "name": "Khlui",
+     "id": "UCsE2717saNvh2ARPQKswtjg"
+    }
+   ],
+   "duration_seconds": 219,
+   "views": "139",
+   "isExplicit": false
+  }
+ ],
+ "search_albums": [
+  {
+   "category": "Albums",
+   "resultType": "album",
+   "title": "Nectar",
+   "type": "Album",
+   "playlistId": "OLAK5uy_nkJkAN5SvU3BBlVEdL8bCxVp4qRWzJL_A",
+   "duration": null,
+   "year": "2020",
+   "artists": [
+    {
+     "name": "Joji",
+     "id": "UCXi-Rme73-wjVK5IE78a3SQ"
+    }
+   ],
+   "browseId": "MPREb_GyHKAaehWoW",
+   "isExplicit": true
+  },
+  {
+   "category": "Albums",
+   "resultType": "album",
+   "title": "Piss In The Wind",
+   "type": "Album",
+   "playlistId": "OLAK5uy_kQ32mGN9J6nw3J2gl6xMflWmXiclIoZTc",
+   "duration": null,
+   "year": "2026",
+   "artists": [
+    {
+     "name": "Joji",
+     "id": "UCXi-Rme73-wjVK5IE78a3SQ"
+    }
+   ],
+   "browseId": "MPREb_pc8HNW0YetG",
+   "isExplicit": true
+  },
+  {
+   "category": "Albums",
+   "resultType": "album",
+   "title": "BALLADS 1",
+   "type": "Album",
+   "playlistId": "OLAK5uy_nKQwp3RV7TlO8yWtJVlk8of840eIJHgZU",
+   "duration": null,
+   "year": "2018",
+   "artists": [
+    {
+     "name": "Joji",
+     "id": "UCXi-Rme73-wjVK5IE78a3SQ"
+    }
+   ],
+   "browseId": "MPREb_EMUzictaCsc",
+   "isExplicit": true
+  }
+ ],
+ "search_artists": [
+  {
+   "category": "Artists",
+   "resultType": "artist",
+   "artist": "Joji",
+   "shuffleId": "RDAOIdhHX-Vn3o0Qmpgsjp6MXg",
+   "radioId": "RDEMIdhHX-Vn3o0Qmpgsjp6MXg",
+   "browseId": "UCXi-Rme73-wjVK5IE78a3SQ"
+  },
+  {
+   "category": "Artists",
+   "resultType": "artist",
+   "artist": "Joji",
+   "shuffleId": "RDAOY9IOpmciej65aSytE-Lcag",
+   "radioId": "RDEMY9IOpmciej65aSytE-Lcag",
+   "browseId": "UCL39Zc5nYmbw7JwaeoshWxQ"
+  }
+ ],
+ "search_playlists": [
+  {
+   "category": "Community playlists",
+   "resultType": "playlist",
+   "title": "Joji Mix",
+   "itemCount": null,
+   "author": "SegaGamerSonic",
+   "browseId": "VLPLnyBUpoNe_27GHOKI2eMGU7E_YB65APh1"
+  },
+  {
+   "category": "Community playlists",
+   "resultType": "playlist",
+   "title": "Joji Setlist 2026 | Solaris Tour | UPDATED: August 5th",
+   "itemCount": null,
+   "author": "Emile",
+   "browseId": "VLPLfFdD3txya-2DXmqpaiSspIKDPlTSGGN4"
+  }
+ ],
+ "get_artist": {
+  "name": "Joji",
+  "channelId": "UCFl7yKfcRcFmIUbKeCA-SJQ",
+  "albums": {
+   "browseId": null,
+   "results": [
+    {
+     "title": "Piss In The Wind",
+     "artists": [],
+     "browseId": "MPREb_pc8HNW0YetG",
+     "audioPlaylistId": "OLAK5uy_kQ32mGN9J6nw3J2gl6xMflWmXiclIoZTc",
+     "isExplicit": true,
+     "year": "2026"
+    },
+    {
+     "title": "SMITHEREENS",
+     "artists": [],
+     "browseId": "MPREb_umQk45p3rx2",
+     "audioPlaylistId": "OLAK5uy_k3PjxW48IpcnVsPn-AWVoll_mJvV2b6DY",
+     "isExplicit": true,
+     "year": "2022"
+    },
+    {
+     "title": "Nectar",
+     "artists": [],
+     "browseId": "MPREb_GyHKAaehWoW",
+     "audioPlaylistId": "OLAK5uy_nkJkAN5SvU3BBlVEdL8bCxVp4qRWzJL_A",
+     "isExplicit": true,
+     "year": "2020"
+    }
+   ]
+  },
+  "singles": {
+   "browseId": "MPADUCXi-Rme73-wjVK5IE78a3SQ",
+   "results": [
+    {
+     "title": "Beautiful",
+     "browseId": "MPREb_xFKzVdd04EL",
+     "type": "Single",
+     "year": "2026"
+    },
+    {
+     "title": "Back Home",
+     "browseId": "MPREb_fQVuW5eCM2f",
+     "type": "Single",
+     "year": "2026"
+    },
+    {
+     "title": "Last of a Dying Breed",
+     "browseId": "MPREb_rFDyfQMqlhC",
+     "type": "Single",
+     "year": "2026"
+    }
+   ],
+   "params": "ggMIegYIAhoCAQI%3D"
+  }
+ },
+ "get_album": {
+  "title": "Nectar",
+  "type": "Album",
+  "year": "2020",
+  "artists": [
+   {
+    "name": "Joji",
+    "id": "UCXi-Rme73-wjVK5IE78a3SQ"
+   }
+  ],
+  "trackCount": 18,
+  "tracks": [
+   {
+    "videoId": "UGB_Bsm5Unk",
+    "title": "Ew",
+    "artists": [
+     {
+      "name": "Joji",
+      "id": "UCXi-Rme73-wjVK5IE78a3SQ"
+     }
+    ],
+    "album": "Nectar",
+    "likeStatus": "INDIFFERENT",
+    "inLibrary": false,
+    "pinnedToListenAgain": false,
+    "isAvailable": true,
+    "isExplicit": false,
+    "videoType": "MUSIC_VIDEO_TYPE_OMV",
+    "views": "73M plays",
+    "communityVoteStatus": null,
+    "trackNumber": 1,
+    "duration": "3:28",
+    "duration_seconds": 208,
+    "creditsBrowseId": "MPTCCCCitjtDAwE"
+   },
+   {
+    "videoId": "Vu0nRz_bQ0Y",
+    "title": "MODUS",
+    "artists": [
+     {
+      "name": "Joji",
+      "id": "UCXi-Rme73-wjVK5IE78a3SQ"
+     }
+    ],
+    "album": "Nectar",
+    "likeStatus": "INDIFFERENT",
+    "inLibrary": false,
+    "pinnedToListenAgain": false,
+    "isAvailable": true,
+    "isExplicit": false,
+    "videoType": "MUSIC_VIDEO_TYPE_OMV",
+    "views": "35M plays",
+    "communityVoteStatus": null,
+    "trackNumber": 2,
+    "duration": "3:28",
+    "duration_seconds": 208,
+    "creditsBrowseId": "MPTCDm28CzSZyPo"
+   },
+   {
+    "videoId": "2FCo7OxVoeY",
+    "title": "Tick Tock",
+    "artists": [
+     {
+      "name": "Joji",
+      "id": "UCXi-Rme73-wjVK5IE78a3SQ"
+     }
+    ],
+    "album": "Nectar",
+    "likeStatus": "INDIFFERENT",
+    "inLibrary": false,
+    "pinnedToListenAgain": false,
+    "isAvailable": true,
+    "isExplicit": false,
+    "videoType": "MUSIC_VIDEO_TYPE_OMV",
+    "views": "51M plays",
+    "communityVoteStatus": null,
+    "trackNumber": 3,
+    "duration": "2:13",
+    "duration_seconds": 133,
+    "creditsBrowseId": "MPTCHnnIOJVmY4A"
+   },
+   {
+    "videoId": "v97FPN2US2o",
+    "title": "Daylight",
+    "artists": [
+     {
+      "name": "Joji",
+      "id": "UCXi-Rme73-wjVK5IE78a3SQ"
+     },
+     {
+      "name": "Diplo",
+      "id": "UCXAX3AtRPPdesKYSS8FKayg"
+     }
+    ],
+    "album": "Nectar",
+    "likeStatus": "INDIFFERENT",
+    "inLibrary": false,
+    "pinnedToListenAgain": false,
+    "isAvailable": true,
+    "isExplicit": true,
+    "videoType": "MUSIC_VIDEO_TYPE_OMV",
+    "views": "36M plays",
+    "communityVoteStatus": null,
+    "trackNumber": 4,
+    "duration": "2:44",
+    "duration_seconds": 164,
+    "creditsBrowseId": "MPTC01X2S-JNTPc"
+   }
+  ]
+ },
+ "get_single": {
+  "title": "Beautiful",
+  "type": "Single",
+  "year": "2026",
+  "artists": [
+   {
+    "name": "Anyma",
+    "id": "UCZdToquGS_Fiepyt7LBIX_Q"
+   },
+   {
+    "name": "Joji",
+    "id": "UCXi-Rme73-wjVK5IE78a3SQ"
+   }
+  ],
+  "trackCount": 1,
+  "tracks": [
+   {
+    "videoId": "DnTC2P9kxO8",
+    "title": "Beautiful",
+    "artists": [
+     {
+      "name": "Anyma",
+      "id": "UCZdToquGS_Fiepyt7LBIX_Q"
+     },
+     {
+      "name": "Joji",
+      "id": "UCXi-Rme73-wjVK5IE78a3SQ"
+     }
+    ],
+    "album": "Beautiful",
+    "likeStatus": "INDIFFERENT",
+    "inLibrary": false,
+    "pinnedToListenAgain": false,
+    "isAvailable": true,
+    "isExplicit": false,
+    "videoType": "MUSIC_VIDEO_TYPE_OMV",
+    "views": "7.3M plays",
+    "communityVoteStatus": null,
+    "trackNumber": 1,
+    "duration": "3:36",
+    "duration_seconds": 216,
+    "creditsBrowseId": "MPTCr8ZG53CRrrw"
+   }
+  ]
+ },
+ "get_playlist": {
+  "id": "PLnyBUpoNe_27GHOKI2eMGU7E_YB65APh1",
+  "title": "Joji Mix",
+  "author": {
+   "name": "SegaGamerSonic",
+   "id": "UCFjWLirRuCE4Ci91oVRX25w"
+  },
+  "trackCount": 19,
+  "privacy": "PUBLIC",
+  "tracks": [
+   {
+    "videoId": "LUXu4aTnK7E",
+    "title": "SLOW DANCING IN THE DARK",
+    "artists": [
+     {
+      "name": "Joji",
+      "id": "UCXi-Rme73-wjVK5IE78a3SQ"
+     }
+    ],
+    "album": {
+     "name": "BALLADS 1",
+     "id": "MPREb_UcqkMrXe9wt"
+    },
+    "likeStatus": "INDIFFERENT",
+    "inLibrary": false,
+    "pinnedToListenAgain": false,
+    "isAvailable": true,
+    "isExplicit": false,
+    "videoType": "MUSIC_VIDEO_TYPE_ATV",
+    "views": null,
+    "communityVoteStatus": null,
+    "duration": "3:30",
+    "duration_seconds": 210,
+    "creditsBrowseId": "MPTCLUXu4aTnK7E"
+   },
+   {
+    "videoId": "Rq3FSRGhqk0",
+    "title": "Demons",
+    "artists": [
+     {
+      "name": "Joji",
+      "id": "UCXi-Rme73-wjVK5IE78a3SQ"
+     }
+    ],
+    "album": {
+     "name": "In Tongues",
+     "id": "MPREb_hQyeGPk2ZgU"
+    },
+    "likeStatus": "INDIFFERENT",
+    "inLibrary": false,
+    "pinnedToListenAgain": false,
+    "isAvailable": true,
+    "isExplicit": true,
+    "videoType": "MUSIC_VIDEO_TYPE_ATV",
+    "views": null,
+    "communityVoteStatus": null,
+    "duration": "2:57",
+    "duration_seconds": 177,
+    "creditsBrowseId": "MPTCRq3FSRGhqk0"
+   },
+   {
+    "videoId": "1n7s2qH-a90",
+    "title": "Window",
+    "artists": [
+     {
+      "name": "Joji",
+      "id": "UCXi-Rme73-wjVK5IE78a3SQ"
+     }
+    ],
+    "album": {
+     "name": "In Tongues",
+     "id": "MPREb_hQyeGPk2ZgU"
+    },
+    "likeStatus": "INDIFFERENT",
+    "inLibrary": false,
+    "pinnedToListenAgain": false,
+    "isAvailable": true,
+    "isExplicit": true,
+    "videoType": "MUSIC_VIDEO_TYPE_ATV",
+    "views": null,
+    "communityVoteStatus": null,
+    "duration": "2:33",
+    "duration_seconds": 153,
+    "creditsBrowseId": "MPTC1n7s2qH-a90"
+   },
+   {
+    "videoId": "cLLpx7vyJN4",
+    "title": "TEST DRIVE",
+    "artists": [
+     {
+      "name": "Joji",
+      "id": "UCXi-Rme73-wjVK5IE78a3SQ"
+     }
+    ],
+    "album": {
+     "name": "BALLADS 1",
+     "id": "MPREb_EMUzictaCsc"
+    },
+    "likeStatus": "INDIFFERENT",
+    "inLibrary": false,
+    "pinnedToListenAgain": false,
+    "isAvailable": true,
+    "isExplicit": true,
+    "videoType": "MUSIC_VIDEO_TYPE_ATV",
+    "views": null,
+    "communityVoteStatus": null,
+    "duration": "3:00",
+    "duration_seconds": 180,
+    "creditsBrowseId": "MPTCcLLpx7vyJN4"
+   },
+   {
+    "videoId": "H0ab0AQU5Cs",
+    "title": "NO FUN",
+    "artists": [
+     {
+      "name": "Joji",
+      "id": "UCXi-Rme73-wjVK5IE78a3SQ"
+     }
+    ],
+    "album": {
+     "name": "BALLADS 1",
+     "id": "MPREb_EMUzictaCsc"
+    },
+    "likeStatus": "INDIFFERENT",
+    "inLibrary": false,
+    "pinnedToListenAgain": false,
+    "isAvailable": true,
+    "isExplicit": true,
+    "videoType": "MUSIC_VIDEO_TYPE_ATV",
+    "views": null,
+    "communityVoteStatus": null,
+    "duration": "2:49",
+    "duration_seconds": 169,
+    "creditsBrowseId": "MPTCH0ab0AQU5Cs"
+   }
+  ]
+ },
+ "get_song": {
+  "playabilityStatus": {
+   "status": "OK",
+   "playableInEmbed": true,
+   "audioOnlyPlayability": {
+    "audioOnlyPlayabilityRenderer": {
+     "trackingParams": "CBEQx2kiEwi-9aGZi_SXAxVARU8EHWBWI68=",
+     "audioOnlyAvailability": "FEATURE_AVAILABILITY_ALLOWED"
+    }
+   },
+   "miniplayer": {
+    "miniplayerRenderer": {
+     "playbackMode": "PLAYBACK_MODE_ALLOW"
+    }
+   },
+   "contextParams": "Q0FFU0FnZ0I="
+  },
+  "videoDetails": {
+   "videoId": "20zVdUxZdwg",
+   "title": "Glimpse of Us",
+   "lengthSeconds": "233",
+   "channelId": "UCXi-Rme73-wjVK5IE78a3SQ",
+   "isOwnerViewing": false,
+   "isCrawlable": true,
+   "allowRatings": true,
+   "viewCount": "64878796",
+   "author": "Joji",
+   "isPrivate": false,
+   "isUnpluggedCorpus": false,
+   "musicVideoType": "MUSIC_VIDEO_TYPE_ATV",
+   "isLiveContent": false,
+   "isTvfilmVideo": false
+  }
+ },
+ "_note": "Recorded from ytmusicapi 1.12.3 (anonymous) on 2026-11-06; thumbnails and tokens stripped.",
+ "search_videos_ugc": [
+  {
+   "category": "Videos",
+   "resultType": "video",
+   "title": "Joji - Unsaved Info Extended Version",
+   "videoId": "pzm-4mlzZPU",
+   "videoType": "MUSIC_VIDEO_TYPE_UGC",
+   "isAvailable": true,
+   "duration": "2:26",
+   "year": null,
+   "artists": [
+    {
+     "name": "naruto_niichan",
+     "id": "UCLCpCzJLDF7u260oje5r_aA"
+    }
+   ],
+   "views": "4.8M",
+   "duration_seconds": 146
+  },
+  {
+   "category": "Videos",
+   "resultType": "video",
+   "title": "[ Joji ] - Feeling Like The End // Español + Lyrics",
+   "videoId": "DRVpSWxUtfQ",
+   "videoType": "MUSIC_VIDEO_TYPE_UGC",
+   "isAvailable": true,
+   "duration": "1:43",
+   "year": null,
+   "artists": [
+    {
+     "name": "withears;;",
+     "id": "UCjX37W1ai25VdSAGyRmeFkw"
+    }
+   ],
+   "views": "11K",
+   "duration_seconds": 103
+  }
+ ]
+}

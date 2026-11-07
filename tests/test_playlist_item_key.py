@@ -18,4 +18,5 @@ def test_missing_or_null():
     assert SpotifyClient.playlist_entry_track(None) == {}
 
 if __name__ == "__main__":
-    test_new_shape(); test_legacy_shape(); test_missing_or_null(); print("ok")
+    test_new_shape(); test_legacy_shape(); test_missing_or_null()
+    print("3/3 checks passed")

@@ -11,6 +11,7 @@ redirected to a temp location so the user's real config is never written.
 Run standalone:  python tests/test_lyrics_cache_size.py
 """
 import os, sys, json, asyncio, tempfile, shutil, traceback
+os.environ.setdefault("SPT_SPICY_LYRICS", "off")   # never reach the real API from a suite
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 

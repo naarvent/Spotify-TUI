@@ -1,0 +1,277 @@
+{
+ "data": {
+  "trackUnion": {
+   "__typename": "Track",
+   "associationsV3": {
+    "audioAssociations": {
+     "__typename": "TrackAudioAssociationPage",
+     "items": []
+    },
+    "videoAssociations": {
+     "totalCount": 1
+    }
+   },
+   "contentRating": {
+    "label": "NONE"
+   },
+   "duration": {
+    "totalMilliseconds": 213573
+   },
+   "id": "4uLU6hMCjMI75M1A2tKUQC",
+   "mediaType": "AUDIO",
+   "name": "Never Gonna Give You Up",
+   "playability": {
+    "playable": true,
+    "reason": "PLAYABLE"
+   },
+   "playcount": "1201043432",
+   "saved": false,
+   "sharingInfo": {
+    "shareId": "NnGldl0TRKmaPZPfnkc3-Q",
+    "shareUrl": "https://open.spotify.com/track/4uLU6hMCjMI75M1A2tKUQC?si=NnGldl0TRKmaPZPfnkc3-Q"
+   },
+   "trackNumber": 1,
+   "uri": "spotify:track:4uLU6hMCjMI75M1A2tKUQC",
+   "visualIdentity": {
+    "squareCoverImage": {
+     "__typename": "VisualIdentityImage",
+     "extractedColorSet": {
+      "encoreBaseSetTextColor": {
+       "alpha": 255,
+       "blue": 241,
+       "green": 200,
+       "red": 74
+      },
+      "highContrast": {
+       "backgroundBase": {
+        "alpha": 255,
+        "blue": 118,
+        "green": 89,
+        "red": 0
+       },
+       "backgroundTintedBase": {
+        "alpha": 255,
+        "blue": 80,
+        "green": 53,
+        "red": 0
+       },
+       "textBase": {
+        "alpha": 255,
+        "blue": 255,
+        "green": 255,
+        "red": 255
+       },
+       "textBrightAccent": {
+        "alpha": 255,
+        "blue": 255,
+        "green": 255,
+        "red": 255
+       },
+       "textSubdued": {
+        "alpha": 255,
+        "blue": 251,
+        "green": 217,
+        "red": 124
+       }
+      },
+      "higherContrast": {
+       "backgroundBase": {
+        "alpha": 255,
+        "blue": 83,
+        "green": 55,
+        "red": 0
+       },
+       "backgroundTintedBase": {
+        "alpha": 255,
+        "blue": 120,
+        "green": 90,
+        "red": 42
+       },
+       "textBase": {
+        "alpha": 255,
+        "blue": 255,
+        "green": 255,
+        "red": 255
+       },
+       "textBrightAccent": {
+        "alpha": 255,
+        "blue": 96,
+        "green": 215,
+        "red": 30
+       },
+       "textSubdued": {
+        "alpha": 255,
+        "blue": 251,
+        "green": 217,
+        "red": 124
+       }
+      },
+      "minContrast": {
+       "backgroundBase": {
+        "alpha": 255,
+        "blue": 204,
+        "green": 165,
+        "red": 14
+       },
+       "backgroundTintedBase": {
+        "alpha": 255,
+        "blue": 177,
+        "green": 138,
+        "red": 0
+       },
+       "textBase": {
+        "alpha": 255,
+        "blue": 255,
+        "green": 255,
+        "red": 255
+       },
+       "textBrightAccent": {
+        "alpha": 255,
+        "blue": 255,
+        "green": 255,
+        "red": 255
+       },
+       "textSubdued": {
+        "alpha": 255,
+        "blue": 255,
+        "green": 255,
+        "red": 255
+       }
+      }
+     }
+    }
+   },
+   "albumOfTrack": {
+    "copyright": {
+     "items": [
+      {
+       "text": "(P) 1987 Sony Music Entertainment UK Limited under exclusive license to BMG Rights Management (UK) Limited",
+       "type": "P"
+      }
+     ],
+     "totalCount": 1
+    },
+    "courtesyLine": "",
+    "id": "6N9PS4QXF1D0OWPk0Sxtb4",
+    "date": {
+     "isoString": "1987-11-12T00:00:00Z",
+     "precision": "DAY",
+     "year": 1987
+    },
+    "name": "Whenever You Need Somebody",
+    "playability": {
+     "playable": true
+    },
+    "sharingInfo": {
+     "shareId": "jymydwhTR9-cWF4Ze2TFVA",
+     "shareUrl": "https://open.spotify.com/album/6N9PS4QXF1D0OWPk0Sxtb4?si=jymydwhTR9-cWF4Ze2TFVA"
+    },
+    "tracks": {
+     "items": [
+      {
+       "track": {
+        "trackNumber": 1,
+        "uri": "spotify:track:4uLU6hMCjMI75M1A2tKUQC"
+       }
+      },
+      {
+       "track": {
+        "trackNumber": 2,
+        "uri": "spotify:track:6aiKIFjPwa3UvDCD5ecoJj"
+       }
+      },
+      {
+       "track": {
+        "trackNumber": 3,
+        "uri": "spotify:track:76QJgXPE3oc1cnkE4PFHEn"
+       }
+      },
+      {
+       "track": {
+        "trackNumber": 4,
+        "uri": "spotify:track:0lBiKGR22BDbGppvf0oqNP"
+       }
+      },
+      {
+       "track": {
+        "trackNumber": 5,
+        "uri": "spotify:track:1wJuO2d0TKiwlGegrkEmfN"
+       }
+      },
+      {
+       "track": {
+        "trackNumber": 6,
+        "uri": "spotify:track:3xmdHhPcf37mGh31NH7jLT"
+       }
+      },
+      {
+       "track": {
+        "trackNumber": 7,
+        "uri": "spotify:track:0n65kXgCMLQjF4tmAhVBoh"
+       }
+      },
+      {
+       "track": {
+        "trackNumber": 8,
+        "uri": "spotify:track:5cR72f2kZlQBQ6LSOMcq48"
+       }
+      },
+      {
+       "track": {
+        "trackNumber": 9,
+        "uri": "spotify:track:5D6y101AHavzc26WgZsY1Q"
+       }
+      },
+      {
+       "track": {
+        "trackNumber": 10,
+        "uri": "spotify:track:4IUYyOxm7ujsmNRdDBqXKu"
+       }
+      }
+     ],
+     "totalCount": 10
+    },
+    "type": "ALBUM",
+    "uri": "spotify:album:6N9PS4QXF1D0OWPk0Sxtb4",
+    "coverArt": {
+     "extractedColors": {
+      "colorRaw": {
+       "hex": "#18A8D0"
+      }
+     },
+     "sources": [
+      {
+       "height": 300,
+       "url": "https://i.scdn.co/image/ab67616d00001e02255e131abc1410833be95673",
+       "width": 300
+      },
+      {
+       "height": 64,
+       "url": "https://i.scdn.co/image/ab67616d00004851255e131abc1410833be95673",
+       "width": 64
+      },
+      {
+       "height": 640,
+       "url": "https://i.scdn.co/image/ab67616d0000b273255e131abc1410833be95673",
+       "width": 640
+      }
+     ]
+    }
+   },
+   "firstArtist": {
+    "items": [
+     {
+      "id": "0gxyHStUsqpMadRV0Di1Qt",
+      "uri": "spotify:artist:0gxyHStUsqpMadRV0Di1Qt",
+      "profile": {
+       "name": "Rick Astley"
+      }
+     }
+    ]
+   },
+   "otherArtists": {
+    "items": []
+   }
+  }
+ }
+}

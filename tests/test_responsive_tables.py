@@ -96,11 +96,11 @@ async def test_flex_columns_use_the_whole_panel():
         t = app._render_tracks_table("[b]P[/b]", rows_n(3), [False] * 3, profile="playlist")
         for _ in range(3):
             await pilot.pause()
-        w = col_widths(t)   # [heart, title, artist, album, dur, added]
+        w = col_widths(t)   # [dl, heart, title, artist, album, dur, added]
         panel = content_w(app)
         check("columns reach the right edge of a wide panel",
               sum(w) + 4 + 2 * len(w) == panel, f"w={w} panel={panel}")
-        check("Title grows past the old 42 cap on a wide terminal", w[1] > 42, f"title={w[1]}")
+        check("Title grows past the old 42 cap on a wide terminal", w[2] > 42, f"title={w[2]}")
 
 
 async def test_title_weighted_wider_than_artist():
@@ -109,8 +109,8 @@ async def test_title_weighted_wider_than_artist():
         await pilot.pause(); pause_intervals(app)
         t = app._render_tracks_table("[b]P[/b]", rows_n(3), [False] * 3, profile="playlist")
         await pilot.pause()
-        w = col_widths(t)   # [heart, title, artist, album, dur, added]
-        check("Title is weighted wider than Artist", len(w) == 6 and w[1] > w[2],
+        w = col_widths(t)   # [dl, heart, title, artist, album, dur, added]
+        check("Title is weighted wider than Artist", len(w) == 7 and w[2] > w[3],
               f"w={w}")
 
 
@@ -149,8 +149,8 @@ async def test_no_manual_resize_widget():
         await pilot.pause(); pause_intervals(app)
         t = app._render_tracks_table("[b]P[/b]", rows_n(3), [False] * 3, profile="playlist")
         await pilot.pause()
-        check("tracks table is a plain DataTable (no resize subclass)",
-              type(t).__name__ == "DataTable", f"type={type(t).__name__}")
+        check("tracks table is a WrapTable (DataTable with wrap-around, no resize subclass)",
+              type(t).__name__ == "WrapTable", f"type={type(t).__name__}")
 
 
 async def test_column_profiles():
@@ -160,12 +160,12 @@ async def test_column_profiles():
         alb = app._render_tracks_table("[b]A[/b]", rows_n(2), None, profile="album")
         await pilot.pause()
         check("album profile drops Album and Added",
-              col_labels(alb) == ["♥", "Title", "Artist", "Duration"], f"cols={col_labels(alb)}")
+              col_labels(alb) == ["↓", "♥", "Title", "Artist", "Duration"], f"cols={col_labels(alb)}")
         app.action_escape_to_menu(); await pilot.pause()
         rec = app._render_tracks_table("[b]R[/b]", rows_n(2), None, profile="recent")
         await pilot.pause()
         check("recent profile shows a Played column",
-              col_labels(rec) == ["♥", "Title", "Artist", "Album", "Duration", "Played"], f"cols={col_labels(rec)}")
+              col_labels(rec) == ["↓", "♥", "Title", "Artist", "Album", "Duration", "Played"], f"cols={col_labels(rec)}")
         app.action_escape_to_menu(); await pilot.pause()
         arows = [{"type": "album", "id": "a", "uri": "u", "title": "N", "artist": "Ar", "album": "", "dur": "", "raw": {}}]
         sa = app._render_search_table("[b]SA[/b]", arows, check_saved=False, layout="albums")

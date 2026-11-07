@@ -6,6 +6,7 @@ late worker never paints.
 Run standalone:  python tests/test_lyrics_cleanup.py
 """
 import os, sys, asyncio, threading, tempfile, shutil, traceback
+os.environ.setdefault("SPT_SPICY_LYRICS", "off")   # never reach the real API from a suite
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
