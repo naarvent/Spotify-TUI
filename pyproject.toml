@@ -36,6 +36,18 @@ dependencies = [
     "pyfiglet>=1.0",
 ]
 
+# Optional providers. Each one also needs the `mpv` binary for playback (not a
+# Python package). Without these extras the provider is disabled with a clear
+# message instead of crashing.
+[project.optional-dependencies]
+subsonic = [
+    "keyring>=24",
+]
+ytmusic = [
+    "ytmusicapi>=1.8",
+    "yt-dlp>=2024.1",
+]
+
 [project.urls]
 Homepage = "https://github.com/naarvent/Spotify-TUI"
 Repository = "https://github.com/naarvent/Spotify-TUI"

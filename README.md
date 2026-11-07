@@ -1,12 +1,12 @@
 # Spotify-TUI
 
-[![Version](https://img.shields.io/badge/version-0.2.3-blue.svg)](https://github.com/naarvent/Spotify-TUI/releases) [![Python](https://img.shields.io/badge/python-3.9%2B-blue.svg)](https://www.python.org/) [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE) [![Textual](https://img.shields.io/badge/Textual-8.x-5a4fcf.svg)](https://github.com/Textualize/textual)
+[![Version](https://img.shields.io/badge/version-1.0.0-blue.svg)](https://github.com/naarvent/Spotify-TUI/releases) [![Python](https://img.shields.io/badge/python-3.9%2B-blue.svg)](https://www.python.org/) [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE) [![Textual](https://img.shields.io/badge/Textual-8.x-5a4fcf.svg)](https://github.com/Textualize/textual)
 
 A fast keyboard-driven Spotify client for the terminal, built with [Textual](https://github.com/Textualize/textual).
 
 Search Spotify, browse your library and playlists, control playback, follow synced lyrics, manage your queue and devices, all from the keyboard.
 
-**Status:** `v0.2.3` (early release). The application includes responsive search and tables, reliable cached library and playlist loading, synchronized lyrics, visible action feedback, an experimental built-in local player and a one-click Windows installer, backed by an extensive offline regression suite. APIs and behaviour may still change before `1.0`.
+**Status:** `v1.0.0` (first stable release). The application includes responsive search and tables, reliable cached library and playlist loading, synchronized lyrics, visible action feedback, an experimental built-in local player and a one-click Windows installer, backed by an extensive offline regression suite.
 
 <p align="center">
   <img alt="Spotify-TUI interface" src="https://github.com/user-attachments/assets/35ab7ab0-43a7-43f3-b8b6-056d45521255" />
@@ -17,6 +17,7 @@ Search Spotify, browse your library and playlists, control playback, follow sync
 ## Contents
 
 - [Features](#features)
+- [What's New in v1.0.0](#whats-new-in-v100)
 - [What's New in v0.2.3](#whats-new-in-v023)
 - [Requirements](#requirements)
 - [Installation](#installation)
@@ -24,6 +25,7 @@ Search Spotify, browse your library and playlists, control playback, follow sync
 - [Running](#running)
 - [Search](#search)
 - [Keyboard Shortcuts](#keyboard-shortcuts)
+- [Providers](#providers)
 - [Local player (experimental)](#local-player-experimental)
 - [Caching](#caching)
 - [Architecture](#architecture)
@@ -50,6 +52,8 @@ Search Spotify, browse your library and playlists, control playback, follow sync
 - **Queue** for viewing the current queue and adding selected tracks.
 - **Add to playlist** for tracks, episodes and complete albums, artists, playlists or podcasts, with confirmation for large additions.
 - **Devices** for listing Spotify devices and transferring playback.
+- **Multiple providers** (see [Providers](#providers)): Spotify (default), Spotify Free through the browser player (MPRIS), Subsonic / OpenSubsonic servers such as Navidrome, and YouTube Music. The UI hides or disables what the active provider cannot do and says why on the status line.
+- **Spotify Free degraded mode**: a non-Premium account is detected, playback keys are disabled with a clear notice, and search, library, likes and playlists keep working.
 - **Visible action feedback** through a status line above the active content.
 - **Collapsible sidebar** to give more room to the content area when needed.
 - **Responsive tables** with automatic column sizing and no manual mouse-driven column resizing.
@@ -58,6 +62,19 @@ Search Spotify, browse your library and playlists, control playback, follow sync
 - **Built-in help view** with keyboard scrolling.
 - **Responsive welcome screen** with layouts adapted to the available terminal size.
 - **Offline regression suites** covering navigation, search, library loading, playback, lyrics, caching and responsive layouts.
+
+## What's New in v1.0.0
+
+v1.0.0 is the first stable release. It turns Spotify-TUI into a multi-provider player:
+
+- **Providers**: Spotify, YouTube Music (no account), Subsonic/Navidrome and Spotify via MPRIS, switchable at runtime with `P`.
+- **Local library**: likes, saved albums/artists and playlists kept on disk for providers without an account; Import from Spotify.
+- **Offline downloads** (`o` / `O`), **radio** (`R`), **artist pages**, a `/` list filter and wrap-around Up/Down in track lists.
+- **Lyrics**: karaoke mode (`k`) and optional word-by-word timings from the Spicy Lyrics API (your own free key, kept in the keyring or `SPT_SPICY_LYRICS_KEY`).
+- **Visualizer** (`v`, needs `cava`) with a configurable default mode and frame rate.
+- Full-screen Queue, Devices, Help and Add to playlist views; Create Playlist asks only what each provider supports.
+
+See [CHANGELOG.md](CHANGELOG.md) for the details.
 
 ## What's New in v0.2.3
 
@@ -94,7 +111,15 @@ v0.2.3 adds playlist sorting and makes the queue, Settings and lyrics noticeably
 - A **Spotify Developer application** for the Client ID, Client Secret and Redirect URI.
 - An **active Spotify device**, such as the desktop application, a phone or a compatible speaker, for playback operations.
 
-Browsing, searching and some library operations may work with a free Spotify account, but playback-control endpoints require Premium.
+Browsing, searching and some library operations may work with a free Spotify account, but playback-control endpoints require Premium. With a Free account SPT-TUI switches to a degraded mode automatically (playback keys disabled with a notice), or you can use the `spotify_mpris` provider to control the Spotify web player in your browser.
+
+Optional, per provider (see [Providers](#providers)):
+
+- **`spotify_mpris`**: [`playerctl`](https://github.com/altdesktop/playerctl) (Linux, MPRIS) and an opener command for URLs — `abrir` by default, configurable with `open_command` / `SPT_OPEN_COMMAND`.
+- **`subsonic`**: the [`mpv`](https://mpv.io) binary for playback; optionally `pip install "Spotify-TUI[subsonic]"` (adds `keyring` to store the password in the system keyring; libsecret's `secret-tool` also works).
+- **`ytmusic`**: `pip install "Spotify-TUI[ytmusic]"` (`ytmusicapi` + `yt-dlp`) and the `mpv` binary.
+
+A missing optional dependency never crashes the app: the provider is disabled (falling back to Spotify) or its playback is disabled, with a message explaining what to install.
 
 ## Installation
 
@@ -286,10 +311,185 @@ These shortcuts reflect the application's current bindings.
 | `Tab` / `Shift+Tab` | Cycle focus across Search, Help, Library, Playlists and the open content (without entering a section) |
 | `Left` / `Right` | Move between the menu and the active view |
 | `Enter` | Open, select or play the focused item |
-| `/` | Focus the search input |
+| `/` | Focus the search input; on an open list (playlist, album, Liked Songs, search results, artist) filter its loaded rows instead — see below |
 | `Escape` | Return to the main menu |
 | `?` / `F1` | Open or close Help |
 | `Ctrl+Q` | Quit |
+
+### Filtering the open list (`/`)
+
+With a track list or result table focused, `/` opens a one-line filter box above it.
+Typing narrows the rows **already loaded** (no new search) by title, artist or album:
+every word must appear, case and accents ignored (`beyonce` finds `Beyoncé`). The frame
+title shows `filter “…”: N of M`. `Enter` or `↓` goes back to the list and keeps the
+filter; `Esc` clears it (a second `Esc` goes back to the menu as usual).
+
+- It works with the playlist sort (`s` / `S`): sorting keeps the filter.
+- Playing a filtered row starts it at its **real** position in the playlist/album,
+  not at its row on screen; `f`, `Ctrl+D`, `c` and Multi-Add (`Ctrl+A` selects what is
+  visible) act on the highlighted track too.
+- Pages that are still streaming in are filtered as they arrive.
+
+### Artist page
+
+Enter on an artist (search results, Saved Artists, a related artist) opens one list with
+four sections, marked in the **Type** column: `TOP` (top tracks), `ALB` (albums), `SNG`
+(singles / EPs) and `REL` (related or similar artists); with Spotify, playlists published
+by the artist's own account appear as `PLY`. The frame title counts each section.
+Enter on a top track plays the top tracks from that one; on an album or single it opens
+it; on a related artist it opens their page. `/` filters this list too.
+
+What each provider can show:
+
+| Provider | Top tracks | Albums / singles | Related |
+| --- | --- | --- | --- |
+| YouTube Music | yes (artist page songs) | yes (full list when YouTube offers it) | yes |
+| Subsonic / Navidrome | `getTopSongs` (Navidrome takes it from Last.fm; empty without it) | `getArtist`; singles/EPs split only with OpenSubsonic `releaseTypes` | `getArtistInfo2` (only artists in your library) |
+| Spotify / `spotify_mpris` | tried; Spotify **removed** `artists/{id}/top-tracks` for development-mode apps (Feb 2026) | yes | tried; **removed** for development-mode apps since Nov 2024 |
+
+A section the provider cannot give is left out and the status line says why; the rest
+of the page still loads.
+
+### Radio (`R`)
+
+`R` (Shift+R) opens a **radio**: tracks like the highlighted track, artist or sidebar
+playlist (with nothing usable highlighted, like the track that is playing). It opens as
+a normal list, `Radio: <seed>`; it does not start playing by itself — Enter plays from
+that row and the rest of the radio follows. `Ctrl+R` asks for a fresh radio.
+
+| Provider | How |
+| --- | --- |
+| YouTube Music | `get_watch_playlist` (YouTube Music's own "Start radio"); artist = their radio, playlist = playlist radio, a local playlist = radio of its first song |
+| Subsonic / Navidrome | `getSimilarSongs` (track), `getSimilarSongs2` (artist), playlist = songs similar to its first 3; Navidrome needs Last.fm for this |
+| Spotify / `spotify_mpris` | `/recommendations` is tried, but Spotify **removed** it for development-mode apps (Nov 2024): the status line says so |
+
+Albums and podcasts are not radio seeds (the status line says what is).
+
+### Offline downloads (`o` / `O`) — YouTube Music and Subsonic
+
+- `o` on a song: download it for offline play (`o` again deletes the copy). `O`: download every
+  song of the open list (only the rows on screen when the `/` filter is on). One download at a
+  time; the status line shows progress and, at the end, the space used.
+- Every song list (playlists, albums, Liked Songs, search results, artist page, radio, Queue) has a
+  1-cell column **before the heart**: `↓` downloaded, `⇣` downloading, `·` waiting, empty otherwise.
+  It is there with every provider; with Spotify / `spotify_mpris` its header is dimmed and `o`/`O`
+  explain why (the Web API has no download endpoint and Premium downloads only exist inside Spotify's
+  own apps, under DRM — pending). On a very narrow terminal it is the first column to go.
+- **Library > Downloaded** lists them, with an Added (download date) column. `s` / `S` sort it like a
+  playlist (Default = newest download first, Title, Artist, Album, Duration, Date added, Size), remembered
+  separately (`downloaded_sort`); songs without a known duration go last. Copies saved by older versions
+  without a duration get it filled in in the background the first time you open it (no re-download).
+- Playing a downloaded song hands mpv the local file: no stream URL, no yt-dlp, no request to the
+  server. (Metadata calls still happen when you open an online playlist or album, and Subsonic
+  still scrobbles if the server is reachable.)
+- Where: `<data folder>/offline/ytmusic/` and `<data folder>/offline/subsonic/<server>_<user>-<hash>/`
+  (the data folder is `~/Documents/naarvent's projects/Spotify_TUI/` or `$SPT_TUI_CACHE_DIR`), one
+  audio file per song plus `index.json`. Downloads go to `.partial/` first.
+- Space: **Settings > Offline downloads > Offline space** (`offline_max_bytes`, default `1 GB`,
+  50 MB – 64 GB). When it is full, the least recently played copies are deleted first.
+- YouTube Music keeps the best audio YouTube gives without an account (usually Opus ~137 kbps,
+  `.webm`, no re-encoding). Subsonic downloads the original file (`download`); if your user has no
+  download permission it falls back to the server's `stream` (transcoded).
+
+### Karaoke lyrics (`k` in the lyrics view)
+
+The lyrics view (`l`) keeps its line-by-line mode by default. Press `k` inside it to switch to
+**karaoke** (remembered as `lyrics_mode` in `spt_config.json`; `k` again goes back):
+
+- the current line lights up word by word (a character wipe inside the current word), the
+  other lines fade with their distance to it, and instrumental gaps show as `● ● ●` filling up;
+- the status line under the title says how good the timing is: **`≈ approximate word timing`**
+  when the lyrics only have line times (LRCLIB's usual LRC: each line's time is split between its
+  words by length), or **`word-synced`** when the lyrics carry real word times;
+- `]` / `[` move the lyrics ±0.25 s for the current song, `}` / `{` ±1 s (on top of the file's own
+  `[offset:]`); the offset shows in the status. It works in the line view too.
+
+Real word times come from **enhanced LRC** (`[00:12.00]<00:12.00>Hel<00:12.40>lo`, if LRCLIB has it)
+or from **your own files**: put `<track id>.ttml` / `.lrc`, or `<Artist> - <Title>.ttml` / `.lrc`, in
+`<data folder>/lyrics/` (`~/Documents/naarvent's projects/Spotify_TUI/lyrics/`). They win over LRCLIB.
+TTML: `<p begin end ttm:agent>` lines with `<span begin end>` words; background vocals
+(`ttm:role="x-bg"`), duets (`v1` left, `v2` right) and romanisation (`ttm:role="x-roman"` or the head's
+`<transliteration>`) are shown. Files with a DOCTYPE/ENTITY are refused.
+
+#### Word-by-word lyrics from Spicy Lyrics (optional, needs your own free key)
+
+With a key, the lyrics view asks the Spicy Lyrics developer API first (source order: **your files > Spicy Lyrics >
+LRCLIB**). It returns real **syllable** times (the karaoke wipe follows them), line times, duets and background vocals.
+Without a key nothing changes: no request, no error, LRCLIB as before.
+
+- Get a free key at developers.spicylyrics.org (one account per person; every copy of this app needs its own key).
+- Keyring (Linux): `secret-tool store --label='SPT-TUI (spicy-lyrics)' service spt-tui username spicy-lyrics` (it asks
+  for the key), or `python -m keyring set spt-tui spicy-lyrics`; or the environment variable `SPT_SPICY_LYRICS_KEY`.
+  The key is never written to `spt_config.json`, the log or the cache.
+- Settings (`<`) > Lyrics: **Use Spicy Lyrics when a key is found** / **Off** (`spicy_lyrics` in the config; also
+  `SPT_SPICY_LYRICS=off`). Settings says whether a key was found, never its value.
+- Spotify tracks use their id; YouTube Music, Subsonic and MPRIS tracks are first matched with the API's search by
+  title/artist/album/duration and only a result it rates `exact` (with a matching length) is accepted.
+- **Credit**: the lyrics always show where they came from on the last rows of the lyrics box: `Lyrics: Spicy Lyrics`
+  (plus the uploader and the maker with their profile links when it is a community sync), `Apple Music`, `Spotify`,
+  `LRCLIB` or `Local file`.
+- Cache: `<data folder>/lyrics/spicy_cache/`, **30 days at most** (an older copy is never used and is deleted). The app
+  keeps under the API's limit (50 requests / 50 s here) and never exports or saves the data in any other form.
+- Network, 401 or 429 problems fall back to LRCLIB with a one-line notice. "Static" (untimed) answers are only used when
+  LRCLIB has nothing.
+
+Fixed layout: the karaoke frame is built as exactly as many one-row lines as the box has (nothing
+wraps), so the title and the status line never move, and the current line always sits on the middle
+row while the lyrics scroll past it (like Spicy Lyrics). A long line takes at most 2 rows and ends
+with `…`; background vocals go under it in grey italics, romanisation under that. The wipe has a
+soft truecolor edge; neighbours fade with their distance. What a terminal cannot do: real blur,
+different font sizes for the current line, and pixel-smooth scrolling (it moves row by row).
+
+Performance (measured headless with Textual's test driver, one core): karaoke while playing
+repaints ~8 times/s and used about 5–8 % CPU; paused it drops back to the 0.4 s tick (~0.2–0.6 %);
+the line view used 2–5 %. Frames that would look the same are skipped, and frames do not trigger
+a layout pass. Inspired by the idea of Spicy Lyrics; no code from it.
+
+### Queue view (`Ctrl+C`)
+
+The queue opens like a playlist: the list takes the whole panel (title `Queue · N songs` on the frame),
+with `↓` and `♥`, `/` to filter and Enter to jump to a song. Sections stay as header rows ("Next in
+queue", "Next from: …"); the Source column says where each song comes from (Playlist, Downloaded,
+`Radio`, Artist…). YouTube Music / Subsonic list up to `queue_context_limit` songs (default 300).
+With Spotify, `/me/player/queue` returns only a short list and has no paging: it is shown as
+"Spotify queue", and when the context is a playlist or album and shuffle is off, the rest of that
+playlist is added below it as "Deduced" (the frame title says so). With shuffle on nothing is deduced.
+
+### Visualizer (`v`)
+
+`v` opens a **Visualizer** over the whole content panel: bars from `cava` listening to the
+real system audio (so it works with every provider), coloured with a gradient of the accent colour,
+with the song header of the lyrics view (big title / artist) at a fixed position on top. `v` again or Esc closes it (and kills cava); Shift+M
+switches to mirrored bars (`m` stays Mute). While nothing plays, cava is paused (no CPU). The number
+of bars follows the panel width; the frame rate is `visualizer_fps` (default 30, 10–60; change it in Settings > Visualizer FPS
+or in `spt_config.json`; it applies at once). The audio source is taken from `[input] method/source` of `~/.config/cava/config` if you set
+them (that file is only read). Without `cava` installed, `v` says so. This replaces the idea of
+Rigellute/spotify-tui's Analysis view, whose Spotify Audio Analysis API is closed to new apps.
+Measured: cava itself ~1 % CPU at 30 fps; spt ~11 % of one core while repainting 30 times/s
+(headless test driver), ~0.1 % when paused.
+
+### Devices (`d`)
+
+Devices open in the same full-panel frame (`Devices · N`): `●` marks the active one, Enter transfers
+playback, `/` filters, and the list refreshes every 5 s without moving the cursor.
+
+### Local player: first time
+
+The first time you choose **SPT-TUI Local (start)** in Devices, librespot needs you to log in once: spt opens
+the link with `open_command` / `SPT_OPEN_COMMAND` (default `abrir`; the system browser if that is missing) and
+the status line says *Authorize SPT-TUI Local in your browser… Waiting* until you do (up to 2 minutes). If the
+browser cannot be opened it says why and shows the link (also in the log).
+
+### Esc
+
+Esc first cancels whatever is pending in the current view (removing a track, Multi-Add, the `/` filter,
+the "add N tracks?" confirmation, deleting a playlist, a running Spotify import) and stays there; with
+nothing left to cancel it goes back to the menu.
+
+### Title bar
+
+Settings > Appearance can hide the title bar at the top (`show_header`); it applies at once and the
+content takes the freed row.
 
 ### Multi-panel Search
 
@@ -327,7 +527,7 @@ The search dashboard has two navigation levels.
 | `-` / `+` | Volume down or up |
 | `m` | Mute or unmute |
 | `Ctrl+Left` / `Ctrl+Right` | Seek backward or forward |
-| `<` | Open settings (volume steps, seek jump times, lyrics cache size) |
+| `<` | Open settings (volume steps, seek jump times, lyrics cache size, transparent/opaque background) |
 
 ### Library, Queue and Tools
 
@@ -336,6 +536,11 @@ The search dashboard has two navigation levels.
 | `f` | Like, unlike, follow or save the selected item |
 | `l` | Toggle the lyrics view |
 | `c` | Add the selected track to the queue |
+| `o` / `O` | Download the highlighted song / every song of the list for offline play (YouTube Music, Subsonic) |
+| `k` (lyrics view) | Line-by-line ⇄ karaoke lyrics |
+| `[` / `]`, `{` / `}` (lyrics view) | Lyrics offset −/+0.25 s, −/+1 s |
+| `v` | Visualizer (cava); `v`/Esc close it, Shift+M mirrored |
+| `R` (Shift+R) | Radio from the highlighted track, artist or playlist (see [Radio](#radio-r)) |
 | `Ctrl+C` | Open Queue |
 | `d` | Open Devices |
 | `Ctrl+L` | Toggle multi-add mode |
@@ -344,10 +549,12 @@ The search dashboard has two navigation levels.
 | `Ctrl+Shift+P` | Add to a playlist: the selected track/episode, or every track of a selected album, artist, playlist or podcast (large adds ask to confirm) |
 | `Ctrl+T` | Import a playlist |
 | `Ctrl+D` | Delete or remove the selected item (press again to confirm a track removal, `Esc` to cancel) |
+| `Ctrl+E` | Rename the selected sidebar playlist (local-library playlists) |
 | `s` | Sort the open playlist: Default (playlist order) → Title → Artist → Album → Duration → Date added. View only; the choice is remembered in `spt_config.json` |
 | `S` (`Shift+S`) | Reverse the playlist sort (ascending / descending) |
 | `Ctrl+R` | Refresh the active view |
 | `Ctrl+B` | Hide/show the left sidebar (gives its width to the content) |
+| `P` (`Shift+P`) | Choose the music provider (switches live, see [Providers](#providers)) |
 
 ### Help View
 
@@ -359,6 +566,101 @@ While Help is open:
 | `PageUp` / `PageDown` | Scroll by page |
 | `Home` / `End` | Jump to the beginning or end |
 | `Escape` | Close Help |
+
+## Providers
+
+SPT-TUI talks to a *provider*, not to Spotify directly. At startup the active one is chosen, in priority order, by:
+
+1. the `SPT_PROVIDER` environment variable;
+2. `"provider"` in `spt_config.json` (written by the provider picker);
+3. the default, `spotify`.
+
+### Settings and the provider picker
+
+**Settings** (`<`) is one scrollable form in sections — *Playback* (volume steps, seek times), *Lyrics* (cache size), *Visualizer* (FPS), *Music provider* (the provider list) and *Subsonic / Navidrome* (URL, user, password) — each field with a short help line. Enter saves a field, `↑`/`↓` and `Tab`/`Shift+Tab` move between fields (Tab leaves the form after the last one), `Esc` goes back. If you click or Tab away to the sidebar, Search or Help, `→` (or Tab) brings you back to the field you were editing; the same holds for Import Playlists, Rename and Devices. On narrow terminals labels stack above their fields.
+
+The provider picker (**`P`**) is a modal window: `↑`/`↓` choose, Enter applies, Esc closes. The active provider is marked `●` / **ACTIVE**; each entry shows its status in colour (green available, amber something missing, red cannot start, with the reason).
+
+Both use the app's teal palette as a Textual theme (`spt-teal`), so they follow the same colours as the rest of the interface.
+
+### Switching provider (live)
+
+Press **`P`** (Shift+P) from any view — or open **Settings** (`<`) — to get the provider list. Each entry shows its readiness: `available`, or what is missing (`missing mpv (no playback)`, `missing ytmusicapi`, `missing playerctl`, `missing config (server URL / user)`...). Pick one with Enter and it is switched **without a restart**:
+
+- the new provider is created first; if it cannot start, the current one stays and the status line says why;
+- otherwise the current provider's resources are released (mpv, sockets, librespot), the session state is reset (playlist and library caches, queue, now-playing state, open views) and the active view is reloaded on the new provider (a search is re-run, a Liked Songs / Saved Albums view reopened; a specific playlist or album of the old provider goes back to the menu);
+- if anything fails after the old provider was closed, a fresh instance of the previous provider is restored, with a notice;
+- the choice is saved to `spt_config.json`. If `SPT_PROVIDER` is set it still wins at the next start, so the picker warns about it and the switch applies to this session only (nothing is saved).
+
+Picking the active provider again reloads it (useful after editing the Subsonic server in Settings).
+
+| Provider | Search / browse | Playback | Likes | Edit playlists | Needs |
+| --- | --- | --- | --- | --- | --- |
+| `spotify` | Web API | Spotify Connect (Premium) | yes | yes | Spotify Developer app |
+| `spotify_mpris` | Web API | your own browser / desktop player via MPRIS | yes | yes | Developer app, `playerctl`, `abrir` |
+| `subsonic` | `search3`, playlists | local `mpv` (`stream`) | `star` / `unstar` | yes | server URL, user, password, `mpv` |
+| `ytmusic` | `ytmusicapi` (anonymous) | local `mpv` + `yt-dlp` | local library | local playlists + followed public ones | `[ytmusic]` extra, `mpv` |
+
+Each provider declares capabilities (`can_play`, `can_control_playback`, `can_seek`, `can_set_volume`, `can_control_queue`, `can_like`, `can_edit_playlists`, `can_list_devices`, ...). Keys for an unsupported action show a status-line notice instead of failing, and Spotify-only views (podcasts, episodes, followed artists) are disabled elsewhere.
+
+If the chosen provider cannot start (missing package or configuration), SPT-TUI falls back to Spotify and shows the reason.
+
+### Spotify Free
+
+The account tier is read once at startup (`product` of the current user, and again if Spotify answers `PREMIUM_REQUIRED`). With a Free account, play / pause / next / previous / seek / volume / queue / shuffle / repeat / devices and the local librespot player are disabled with a notice; search, library, likes and playlists work as usual.
+
+### Spotify Free via MPRIS (`spotify_mpris`)
+
+For Free accounts that want playback from the terminal, this mode **only controls the player you opened yourself**:
+
+- `Enter` on a track opens `https://open.spotify.com/track/<id>` with `abrir <url>` (configurable: `open_command` / `SPT_OPEN_COMMAND`); press play there.
+- Space / `n` / `p` / seek / volume are sent through `playerctl` to the Spotify web player (or desktop client). The player is auto-detected (a player named `spotify`, or one whose URL is on `open.spotify.com`); force one with `mpris_player` / `SPT_MPRIS_PLAYER`.
+- Now playing, position and synced lyrics come from the MPRIS metadata.
+
+It deliberately does **not** automate or run a headless browser, use the `sp_dc` cookie, call internal Spotify endpoints, decrypt streams or skip ads — that would break Spotify's terms of use. Without `playerctl` it still opens links and shows a notice.
+
+### Subsonic / Navidrome (`subsonic`)
+
+```json
+{ "provider": "subsonic", "subsonic_url": "https://music.example.org", "subsonic_user": "alice" }
+```
+
+(or `SPT_SUBSONIC_URL` / `SPT_SUBSONIC_USER`; the URL and user can also be entered in Settings). The password is **never stored in `spt_config.json`**: enter it in Settings and it goes to the system keyring (`keyring` package or `secret-tool`); without a keyring, export `SPT_SUBSONIC_PASSWORD` (which also takes precedence). Requests use token authentication (`u`, `t = md5(password + salt)`, `s`, `v`, `c`, `f=json`), so the password is not sent either.
+
+Supported: `search3` search, playlists (open, play, create, add, remove one entry, delete), favourites as Liked Songs / Saved Albums (`star` / `unstar`), `scrobble` (now playing on start, a submission after half the track or 4 minutes) and audio through `stream`, played by `mpv`.
+
+### YouTube Music (`ytmusic`)
+
+Anonymous: search and **public** playlists through `ytmusicapi`, audio through `mpv` + `yt-dlp`. There is no account, so likes, saved albums, followed artists, your own playlists and the play history live in the **local library** (below). Follow a public playlist with `f` on it (search results, or `f` again on the sidebar entry to drop it) or with **Import Playlists** (paste `https://music.youtube.com/playlist?list=...` or the id); followed playlists are stored as `ytmusic_playlists` in `spt_config.json`.
+
+Uploads by ordinary channels are shown with the artist taken from the title (`JOJI - Song` by channel *2Restarted* becomes *Song — JOJI*), and `<Artist> - Topic` channels are shown as `<Artist>`. mpv only plays what the TUI queued: a watch URL is never expanded into a playlist and nothing autoplays after the queue.
+
+### Local library
+
+For providers without an account (YouTube Music) the hearts and the Library sections work from a **local library**: a JSON file per provider next to `spt_config.json` (`local_library_ytmusic.json`; Subsonic only keeps its play history there), never mixed with Spotify.
+
+- `f` on a song / album or single / artist saves, follows or removes it: **Liked Songs**, **Saved Albums**, **Saved Artists** list them, with the same hearts as Spotify (following artists is its own capability, `can_follow_artists`, separate from podcasts).
+- **Create Playlist** creates a local playlist (`local:<uuid>`) shown in the sidebar *Playlists* with the followed ones; **Add to Playlist** (`Ctrl+Shift+P`) adds tracks, `Ctrl+D` removes one entry (or deletes the selected sidebar playlist), **`Ctrl+E`** renames it, and `Enter` plays it.
+- **Recently Played** is a local history (last 50 tracks actually played).
+- Each entry stores a minimal copy of its metadata (id, name, artists, album, duration), so everything still lists without the network.
+- When something disappears upstream — a video removed or made private, an album gone, a followed playlist made private or deleted, no network, a provider switch — **nothing is deleted**: the entry is marked *(unavailable)*, an unavailable track is skipped with a status-line notice while the rest keeps playing, and the mark clears when it works again. `f` / `Ctrl+D` still remove it (from the local store only).
+- Writes are atomic (unique temp file + rename); a corrupt file is kept aside as `*.corrupt-<time>`.
+
+### Import from Spotify
+
+With YouTube Music active and Spotify credentials configured, **Import from Spotify** appears at the end of the Library menu (and in the `P` picker). It copies your Spotify library into the local library:
+
+- Mark what to import (Space): Liked Songs, Saved Albums, Followed Artists and each playlist, then the *Import selected* button.
+- Each track is searched on YouTube Music (`"title artist"`, songs filter) and scored on the normalised title (no `(feat. …)`, `- Remastered 2011`, `- From … Soundtrack`), the artist, the duration (±3 s) and the album; below the doubt threshold a second, laxer search (songs and videos) is tried. Matches are imported; **doubtful** matches are imported marked *(? check match)*; not-found ones are skipped.
+- Playlists become local playlists with their original name (re-importing refreshes the same one), Liked Songs go to the local Liked Songs, albums and artists are matched by search into Saved Albums / Saved Artists.
+- It runs in the background with progress on the status line, pauses between searches, and `Esc` cancels; results are cached (`import_match_cache.json`), so a re-run resumes without searching again and retries what failed for network reasons.
+- At the end: a summary (matched / doubtful / not found) and `import_report.json` next to `spt_config.json` with every doubtful and not-found track.
+
+Spotify keeps using its real account; nothing changes there. The Library menu only shows what the provider supports: *Saved Podcasts* / *Saved Episodes* only with Spotify, *Import Playlists* not with Subsonic (its playlists are the server's own).
+
+### Shared mpv player
+
+`subsonic` and `ytmusic` play audio with one `mpv --idle --no-video` subprocess driven over its JSON IPC socket (`spt_tui/players/mpv.py`): queue, pause, seek, volume, repeat, position/duration for the progress bar. It is started on first playback and stopped when SPT-TUI exits.
 
 ## Local player (experimental)
 
@@ -454,7 +756,18 @@ Spotify-TUI/
 │   ├── __main__.py          python -m spt_tui and spt-tui entry point
 │   ├── config.py            Paths, logging and credentials
 │   ├── constants.py         Welcome content, glyphs and library entries
-│   ├── spotify_client.py    Spotify API wrapper and rate limiter
+│   ├── spotify_client.py    Backward-compatible import of SpotifyClient
+│   ├── secret_store.py      Passwords: env var, keyring or secret-tool
+│   ├── providers/
+│   │   ├── __init__.py      Provider selection (SPT_PROVIDER / config) and fallback
+│   │   ├── base.py          Provider, Capabilities, Spotify-shaped adapter
+│   │   ├── spotify.py       SpotifyProvider (Web API, OAuth, Free detection)
+│   │   ├── mpris.py         Spotify Free: control the user's player via playerctl
+│   │   ├── mpv_backed.py    Shared mpv playback for local-audio providers
+│   │   ├── subsonic.py      Subsonic / OpenSubsonic (Navidrome)
+│   │   └── ytmusic.py       YouTube Music (ytmusicapi + yt-dlp)
+│   ├── players/
+│   │   └── mpv.py           mpv subprocess + JSON IPC controller
 │   ├── widgets.py           Help scrolling and multi-panel search widgets
 │   └── app/
 │       ├── __init__.py      SptPy composition and Textual CSS
@@ -499,7 +812,7 @@ Spotify-TUI/
 
 `SptPy` is composed through multiple inheritance from focused mixins. At runtime, the application is still a single Textual `App` subclass, while its implementation is separated into modules by responsibility.
 
-The 28 standalone regression suites protect application behaviour introduced during and after the refactor.
+The standalone regression suites protect application behaviour introduced during and after the refactor.
 
 ## Tests
 
@@ -560,11 +873,24 @@ Current coverage includes:
 - Now Playing spacing
 - Application teardown
 - Worker error handling
+- Provider selection, capabilities and the Spotify-shaped adapter
+- Spotify Free detection and the playback gates in the UI
+- Subsonic (auth token, search, playlists, star/unstar, scrobble, stream) with a fake HTTP session
+- YouTube Music (missing dependency, mapping, imported playlists) with a fake client
+- MPRIS mode with a fake `playerctl` and opener
+- The mpv controller with a fake process and IPC socket
+- Password storage (env / keyring / secret-tool)
+- The provider picker, live switching with rollback, and `SPT_PROVIDER` precedence
 
 ## Limitations
 
 - Spotify Web API access and a valid Spotify Developer application are required.
-- Playback control requires Spotify Premium and an active device.
+- Playback control through the Spotify Web API requires Spotify Premium and an active device. Free accounts get a degraded mode, or can use `spotify_mpris`.
+- `spotify_mpris` needs MPRIS (Linux) and `playerctl`; it opens tracks in the browser and controls that player, it does not stream audio itself. Opening a track inside a playlist plays that track, not necessarily the rest of the playlist.
+- The mpv backend (Subsonic, YouTube Music) needs a Unix IPC socket, so it is not available on Windows. Shuffle reorders mpv's own queue.
+- Subsonic has no podcasts; its likes / saved albums / followed artists are server stars and Recently Played is a local history. YouTube Music works without an account (the local library replaces likes and playlists, which therefore do not sync anywhere) and depends on `ytmusicapi` / `yt-dlp` keeping up with YouTube changes.
+- Only local-library playlists can be renamed (`Ctrl+E`). Devices stay reachable with `d` for every provider (it lists the mpv device for Subsonic / YouTube Music); only the Library menu entries are hidden per provider.
+- A provider switch resets the session (queue, caches, open view); a Spotify provider that has never been signed in still needs a restart to run the sign-in.
 - Lyrics depend on a third-party lyrics provider and may not be available for every track.
 - Spotify may return unavailable or incomplete library objects for removed albums, episodes or regional content.
 - Behaviour may be affected by upstream changes in Spotify, Spotipy or Textual.
@@ -622,7 +948,7 @@ git diff --check
 
 ## Release notes
 
-The latest release is described in [What's New in v0.2.3](#whats-new-in-v023). Earlier releases are summarised below; the full record is in [CHANGELOG.md](CHANGELOG.md).
+The latest release is described in [What's New in v1.0.0](#whats-new-in-v100). Earlier releases are summarised below; the full record is in [CHANGELOG.md](CHANGELOG.md).
 
 ### v0.2.2
 
