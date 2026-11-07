@@ -459,8 +459,9 @@ playlist is added below it as "Deduced" (the frame title says so). With shuffle 
 
 `v` opens a **Visualizer** over the whole content panel: bars from `cava` listening to the
 real system audio (so it works with every provider), coloured with a gradient of the accent colour,
-with the song header of the lyrics view (big title / artist) at a fixed position on top. `v` again or Esc closes it (and kills cava); Shift+M
-switches to mirrored bars (`m` stays Mute). While nothing plays, cava is paused (no CPU). The number
+with the song header of the lyrics view (big title / artist) at a fixed position on top. `v` again or Esc closes it (and kills cava). It opens in **mirrored** mode by
+default (bass in the middle); choose the default mode (`visualizer_mode`: `mirrored` or `bars`) in Settings > Visualizer, and press Shift+M to switch it for the
+current session (`m` stays Mute). While nothing plays, cava is paused (no CPU). The number
 of bars follows the panel width; the frame rate is `visualizer_fps` (default 30, 10–60; change it in Settings > Visualizer FPS
 or in `spt_config.json`; it applies at once). The audio source is taken from `[input] method/source` of `~/.config/cava/config` if you set
 them (that file is only read). Without `cava` installed, `v` says so. This replaces the idea of
