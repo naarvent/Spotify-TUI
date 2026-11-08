@@ -250,6 +250,7 @@ class LibraryMixin:
             classes='settings-provider-select')
         self.spicy_select.highlighted = 0 if on else 1
         self.spicy_key_status = Static('Key: checking…', classes='settings-help settings-help-wide')
+        self.spicy_key_input = Input(placeholder='paste your key and press Enter (empty = keep)', password=True)
 
         def probe():
             key, where = sl.resolve_key()
@@ -265,7 +266,10 @@ class LibraryMixin:
         return [Static('Word-by-word lyrics source (Spicy Lyrics API; needs your own free key). '
                        'Order: your files > Spicy Lyrics > LRCLIB. Pick one and press Enter.',
                        classes='settings-help settings-help-wide'),
-                self.spicy_select, self.spicy_key_status]
+                self.spicy_select, self.spicy_key_status,
+                *self._settings_field('API key', self.spicy_key_input,
+                                      'Stored in the system keyring, never in spt_config.json '
+                                      '(no keyring: export SPT_SPICY_LYRICS_KEY). Free key: developers.spicylyrics.org')]
 
     def _set_spicy_key_status(self, text: str) -> None:
         w = getattr(self, 'spicy_key_status', None)

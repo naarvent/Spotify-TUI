@@ -964,6 +964,9 @@ class CoreMixin:
                     try: nxt.focus()
                     except Exception: pass
                 return
+            if getattr(self, 'spicy_key_input', None) is event.input:
+                self._save_spicy_key(event.value or "")
+                return
             if getattr(self, 'subsonic_password_input', None) is event.input:
                 if not self._save_subsonic_password(event.value or ""):
                     return
@@ -1437,13 +1440,38 @@ class CoreMixin:
         self._provider_settings_changed = True
         return True
 
+    def _save_spicy_key(self, value: str) -> None:
+        """Hand the Spicy Lyrics key to the keyring (never to spt_config.json) and make the
+        lyrics service pick it up now. Empty input keeps the current key."""
+        from .. import spicy_lyrics as sl
+        value = (value or "").strip()
+        if not value:
+            return
+        backend = sl.store_key(value)
+        if backend is None:
+            try:
+                self._notify('[b]No system keyring available: the key was NOT saved.[/b] '
+                             f'Export {sl.KEY_ENV} instead.', warn=True, seconds=10.0)
+            except Exception:
+                pass
+            return
+        svc = getattr(self, '_spicy_svc', None)
+        if svc is not None:
+            svc._key, svc._key_checked = None, 0.0     # re-read the keyring on the next lookup
+        try:
+            self.spicy_key_input.value = ""
+            self._set_spicy_key_status('Key: found (keyring).')
+            self._notify('[b]Spicy Lyrics key saved in the keyring.[/b]')
+        except Exception:
+            logger.exception('spicy key saved but the Settings view could not be updated')
+
     def _finish_settings(self) -> None:
         """Tear down the settings-wizard inputs and bounce back to the menu."""
         for a in ('seek_vol_down_input', 'seek_vol_up_input', 'seek_track_input',
                   'seek_episode_input', 'lyrics_cache_input', 'provider_select',
                   'subsonic_url_input', 'subsonic_user_input', 'subsonic_password_input',
                   'appearance_select', 'accent_select', 'accent_input', 'hints_select', 'header_select',
-                  'offline_cap_input', 'visualizer_fps_input', 'visualizer_mode_select', 'spicy_select', 'spicy_key_status'):
+                  'offline_cap_input', 'visualizer_fps_input', 'visualizer_mode_select', 'spicy_select', 'spicy_key_status', 'spicy_key_input'):
             try: delattr(self, a)
             except Exception: pass
         msg = '[b]Settings saved![/b]'

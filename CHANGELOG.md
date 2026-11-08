@@ -12,9 +12,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Missing Spotify credentials now show a clear message instead of 401 errors, and the first-run form appears if the config file has none.
 - `AttributeError: '_bar_last_track'` in the Now Playing bar when nothing had been played yet.
 
+### Added
+
+- Settings > Lyrics has an **API key** field for Spicy Lyrics (hidden input, stored in the system keyring, never in `spt_config.json`).
+
 ### Tests
 
-- New tests for the missing-credentials message and the Now Playing default.
+- New tests for the Spicy Lyrics key field, the missing-credentials message and the Now Playing default.
 
 ## [v1.0.0] - 2026-11-07
 
