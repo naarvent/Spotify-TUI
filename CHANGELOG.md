@@ -5,6 +5,13 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- Missing Spotify credentials now show a clear message ("Spotify credentials missing (client_id, ...)") instead of silently using an unauthenticated client that answered 401 to everything. The first-run form is also shown when `spt_config.json` exists but has no credentials.
+- `AttributeError: '_bar_last_track'` in the Now Playing bar when nothing had been played yet and the playback requests failed.
+
 ## [v1.0.0] - 2026-11-07
 
 First stable release: multi-provider (Spotify, YouTube Music, Subsonic/Navidrome, MPRIS), local library, offline downloads, radio, artist pages, karaoke lyrics with Spicy Lyrics word timings, audio visualizer.

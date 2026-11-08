@@ -295,7 +295,7 @@ class CoreMixin:
         try:
             if not self.spotify.has_cached_token():
                 try:
-                    if not config.CONFIG_LOADED:
+                    if not config.CONFIG_LOADED or not config.has_spotify_credentials():
                         self._show_credentials_prompt(self._clear_right())
                     else:
                         try:

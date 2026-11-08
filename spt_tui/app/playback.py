@@ -27,6 +27,9 @@ from ..constants import USE_ASCII
 from ..providers.spotify import SpotifyClient
 
 class PlaybackMixin:
+    # Last track shown in the Now Playing bar; read before any playback has been
+    # seen (e.g. while every request fails), so it needs a default.
+    _bar_last_track = None
     # Only draw the ASCII-art artist banner when the panel is at least this
     # big; below it we fall back to the plain one-line header.
     _LYRICS_ART_MIN_W = 72
