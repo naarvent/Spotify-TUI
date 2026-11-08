@@ -173,7 +173,7 @@ class CoreMixin:
                 self.np_title = Static("[dim]Now Playing: —[/dim]", id="np_title")
                 yield self.np_title
                 with Container(id="now_row_bar"):
-                    self.np_bar_full = Static("[" + ("-" * 30) + "]", id="np_bar_full", markup=False)
+                    self.np_bar_full = Static("-" * 30, id="np_bar_full", markup=False)
                     yield self.np_bar_full
                 self.np_times = Static("--:--", id="np_times")
                 yield self.np_times
@@ -804,9 +804,7 @@ class CoreMixin:
                         self._notify("[b]All fields are required. Fill in all three and press Enter on the Redirect URI.[/b]")
                         return
 
-                    cfg = {"client_id": cid, "client_secret": csec, "redirect_uri": ruri}
-                    config.save_local_config(cfg)
-                    config.CLIENT_ID = cid; config.CLIENT_SECRET = csec; config.REDIRECT_URI = ruri; config.CONFIG_LOADED = True
+                    config.save_credentials(cid, csec, ruri)
 
                     right = self._clear_right()
                     auth_url = self.spotify.prepare_authorize_url()
