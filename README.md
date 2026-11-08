@@ -98,14 +98,30 @@ Keep what you listen to on your own disk, in the same interface:
 
 **Windows**: download `SPT-TUI-Setup-<version>.exe` from the [Releases page](https://github.com/naarvent/Spotify-TUI/releases). No Python needed.
 
-**Linux / macOS**:
+**Linux / macOS** (with [pipx](https://pipx.pypa.io)). Pick the line that matches what you use:
 
 ```bash
-pipx install git+https://github.com/naarvent/Spotify-TUI.git
+pipx install git+https://github.com/naarvent/Spotify-TUI.git                              # Spotify only
+pipx install "spotify-tui[ytmusic,subsonic] @ git+https://github.com/naarvent/Spotify-TUI.git"   # + YouTube Music and Subsonic
 spt
 ```
 
-Optional pieces, depending on what you use: `mpv` (YouTube Music and Subsonic playback), `yt-dlp` and the `ytmusic` / `subsonic` extras for those providers, `cava` (visualizer) and `librespot` (local Spotify player).
+The Python parts of each provider are **extras**. Without them the provider shows as *unavailable* in `P`.
+Already installed? Add them to the same environment (a separate `pipx install ytmusicapi` does not work, it creates a different one):
+
+```bash
+pipx inject spotify-tui ytmusicapi keyring
+```
+
+| You want | Python extra | Programs (not Python packages) |
+| --- | --- | --- |
+| Spotify | included | `librespot` for the local player (optional, Premium) |
+| YouTube Music | `ytmusic` (`ytmusicapi`, `yt-dlp`) | `mpv`, and `yt-dlp` on your `PATH` (`pipx install yt-dlp`) |
+| Subsonic / Navidrome | `subsonic` (`keyring`) | `mpv` |
+| Spotify through MPRIS | included | `playerctl` |
+| Visualizer | included | `cava` |
+
+On Arch: `sudo pacman -S mpv yt-dlp cava playerctl`. Upgrade later with `pipx upgrade spotify-tui`.
 Full steps, including running from source: [Installation](https://github.com/naarvent/Spotify-TUI/wiki/Installation).
 
 ## First steps
