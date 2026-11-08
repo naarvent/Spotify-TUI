@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 First stable release: multi-provider (Spotify, YouTube Music, Subsonic/Navidrome, MPRIS), local library, offline downloads, radio, artist pages, karaoke lyrics with Spicy Lyrics word timings, audio visualizer.
 
+### Changed
+
+- Now Playing: the progress bar no longer has `[ ]` around it; Repeat is `↻` (`↻¹` for one track) and Shuffle `⇄`, bold when active and dim when off (before, Repeat off and Shuffle off shared the same `↪`).
+
+### Fixed
+
+- Saving a setting right after entering the Spotify credentials no longer wipes `client_id`, `client_secret` and `redirect_uri` from `spt_config.json` (the form now updates the in-memory config, and saving never drops credentials already on disk). Reported in #9.
+
 ### Added
 
 - Create Playlist only asks what the provider supports (`playlist_visibility`, `playlist_description` capabilities): Spotify = public + collaborative + description, YouTube Music = description, Subsonic = name only.
