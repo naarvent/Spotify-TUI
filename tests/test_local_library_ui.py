@@ -308,8 +308,8 @@ async def test_now_playing_layout():
                     title = str(app.np_title.render()).splitlines()[0]
                     bar = str(app.np_bar_full.render()).splitlines()[0]
                     tw = app.query_one("#np_title").content_size.width
-                    ok = (cell_len(title) == cell_len(bar) == tw and title.endswith("Shuffle: ↪")
-                          and bar.endswith("]"))
+                    ok = (cell_len(title) == cell_len(bar) == tw and title.endswith("Shuffle: ⇄")
+                          and not bar.startswith("[") and not bar.endswith("]"))
                     check(f"w={width} {label}: indicators flush with the bar's right edge",
                           ok, f"title={cell_len(title)} bar={cell_len(bar)} widget={tw} {title[-30:]!r}")
                     if cell_len(f"Now Playing: {item['name']}") > tw - 25:

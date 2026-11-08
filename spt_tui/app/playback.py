@@ -228,6 +228,23 @@ class PlaybackMixin:
             out.append(ch); used += w
         return "".join(out).rstrip() + "…"
 
+    @staticmethod
+    def _np_mode_indicators(repeat_state: str, shuffle_on: bool):
+        """Repeat / Shuffle indicators for the Now Playing line: (plain text for measuring,
+        markup for painting). Active = bold, inactive = dim; repeat-one carries a small ¹."""
+        if USE_ASCII:
+            rep = {'track': 'one', 'context': 'all'}.get(repeat_state, 'off')
+            shf = 'on' if shuffle_on else 'off'
+        else:
+            rep = {'track': '↻¹', 'context': '↻'}.get(repeat_state, '↻')
+            shf = '⇄'
+        rep_on = repeat_state in ('track', 'context')
+        def tag(txt, on):
+            return f"[b]{txt}[/b]" if on else f"[dim]{txt}[/dim]"
+        plain = f"Repeat: {rep}  Shuffle: {shf}"
+        markup = f"Repeat: {tag(rep, rep_on)}  Shuffle: {tag(shf, shuffle_on)}"
+        return plain, markup
+
     def _np_full_bar_width(self) -> int:
         try:
             bar = self.query_one("#np_bar_full", Static)
@@ -236,7 +253,7 @@ class PlaybackMixin:
                 w = int(getattr(cs, "width", 0) or 0)
             else:
                 w = int(getattr(bar.size, "width", 0) or 0)
-            if w > 0: return max(1, w - 2)
+            if w > 0: return max(1, w)
         except Exception: pass
         try:
             scr_w = int(getattr(self.size, "width", 100) or 100)
@@ -249,7 +266,7 @@ class PlaybackMixin:
         if dur_ms <= 0:
             left, right = "0:00", "0:00"
             empty = "-" if USE_ASCII else "░"
-            return left, f"[{(empty * width)[:width]}]", right
+            return left, (empty * width)[:width], right
         frac = max(0.0, min(1.0, float(pos_ms) / float(dur_ms)))
         filled = max(0, min(width, int(round(frac * width))))
         fill  = "#" if USE_ASCII else "█"
@@ -259,7 +276,7 @@ class PlaybackMixin:
             inside = (inside + empty * width)[:width]
         left = SpotifyClient.fmt_duration(pos_ms)
         right = SpotifyClient.fmt_duration(dur_ms)
-        return left, f"[{inside}]", right
+        return left, inside, right
 
     def _cached_pos_ms(self) -> int:
         """Estimated playback position from cached state + wall clock — no
@@ -310,7 +327,7 @@ class PlaybackMixin:
                             bar_width = int(self._np_full_bar_width() or 0)
                         except Exception:
                             bar_width = 0
-                        bar_right_len = max(0, bar_width + 2)
+                        bar_right_len = max(0, bar_width)
                         if item:
                             name = (item.get("name") or item.get("title") or
                                     (item.get("track") or {}).get("name") or
@@ -334,20 +351,10 @@ class PlaybackMixin:
                             raw_title = f"Now Playing: {name}"
                             if artists:
                                 raw_title = f"Now Playing: {name} — {artists}"
-                            try:
-                                repeat_state = getattr(self, '_now_repeat_state', 'off') or 'off'
-                                shuffle_on = bool(getattr(self, '_now_shuffle', False))
-                                if repeat_state == 'track':
-                                    repeat_icon = '⟳'
-                                elif repeat_state == 'context':
-                                    repeat_icon = '↳↰'
-                                else:
-                                    repeat_icon = '↪'
-                                shuffle_icon = '⇄' if shuffle_on else '↪'
-                            except Exception:
-                                repeat_icon = '↪'; shuffle_icon = '↪'
+                            repeat_state = getattr(self, '_now_repeat_state', 'off') or 'off'
+                            shuffle_on = bool(getattr(self, '_now_shuffle', False))
+                            labeled, labeled_markup = self._np_mode_indicators(repeat_state, shuffle_on)
 
-                            labeled = f"Repeat: {repeat_icon}  Shuffle: {shuffle_icon}"
                             # The indicators sit flush with the right edge of the
                             # line, which is the same edge as the progress bar's
                             # closing "]" and the total time. Measured in terminal
@@ -357,7 +364,7 @@ class PlaybackMixin:
                             icon_len = cell_len(labeled)
                             ell = self._fit_cells(raw_title, max(1, line_w - icon_len - 1))
                             pad = max(1, line_w - cell_len(ell) - icon_len)
-                            title_line = f"[b]{rich_escape(ell)}[/b]" + (" " * pad) + labeled
+                            title_line = f"[b]{rich_escape(ell)}[/b]" + (" " * pad) + labeled_markup
                         else:
                             title_line = "[dim]Now Playing: —[/dim]"
                         if getattr(self, "np_title", None) is not None:
@@ -368,7 +375,7 @@ class PlaybackMixin:
                             _, bar_str, _ = self._progress_components(pos_ms, dur_ms, bar_width)
                         else:
                             empty = "-" if USE_ASCII else "░"
-                            bar_str = "[" + (empty * bar_width) + "]"
+                            bar_str = empty * bar_width
                         if getattr(self, "np_bar_full", None) is not None:
                             try:
                                 self.np_bar_full.update(str(bar_str))
