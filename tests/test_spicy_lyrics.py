@@ -675,6 +675,34 @@ async def test_settings():
             sel.highlighted = 0
             sel.action_select(); await pilot.pause()
             check("choosing 'on' saves true", config.LOCAL_CFG.get("spicy_lyrics") is True)
+
+            # API key field: goes to the (fake) keyring, never to spt_config.json
+            from textual.widgets import Input
+            from spt_tui import secret_store
+            class _Store:
+                def __init__(self): self.d = {}
+                def set(self, acct, val): self.d[acct] = val; return "fake"
+                def get(self, acct): return self.d.get(acct)
+            fake = _Store()
+            orig_ds = secret_store.default_store
+            secret_store.default_store = lambda: fake
+            try:
+                ki = getattr(app, "spicy_key_input", None)
+                check("Settings has a hidden API key field", isinstance(ki, Input) and ki.password is True)
+                check("the key field is part of the Tab/arrow form", ki in app._right_form_fields())
+                saved.clear()
+                app.on_input_submitted(type("Ev", (), {"input": ki, "value": "  " + FAKE_KEY + " "})())
+                await pilot.pause()
+                check("submitting stores the key in the keyring", fake.d.get(sl.KEY_ACCOUNT) == FAKE_KEY, str(fake.d))
+                check("the key never reaches spt_config.json", FAKE_KEY not in json.dumps(config.LOCAL_CFG) and
+                      FAKE_KEY not in json.dumps(saved))
+                check("the field is cleared after saving", ki.value == "")
+                fake.d.clear()
+                app.on_input_submitted(type("Ev", (), {"input": ki, "value": ""})())
+                check("empty input keeps the current key (stores nothing)", not fake.d)
+                check("store_key rejects an empty value", sl.store_key("   ", store=fake) is None)
+            finally:
+                secret_store.default_store = orig_ds
     finally:
         config.save_local_config = orig_save
         config.LOCAL_CFG = {}

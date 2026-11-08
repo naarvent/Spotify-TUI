@@ -5,6 +5,21 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v1.0.1] - 2026-11-08
+
+### Fixed
+
+- Missing Spotify credentials now show a clear message instead of 401 errors, and the first-run form appears if the config file has none.
+- `AttributeError: '_bar_last_track'` in the Now Playing bar when nothing had been played yet.
+
+### Added
+
+- Settings > Lyrics has an **API key** field for Spicy Lyrics (hidden input, stored in the system keyring, never in `spt_config.json`).
+
+### Tests
+
+- New tests for the Spicy Lyrics key field, the missing-credentials message and the Now Playing default.
+
 ## [v1.0.0] - 2026-11-07
 
 First stable release: multi-provider (Spotify, YouTube Music, Subsonic/Navidrome, MPRIS), local library, offline downloads, radio, artist pages, karaoke lyrics with Spicy Lyrics word timings, audio visualizer.

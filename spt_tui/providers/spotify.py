@@ -50,6 +50,10 @@ def is_premium_required_error(exc: BaseException) -> bool:
     return "PREMIUM_REQUIRED" in reason or "PREMIUM_REQUIRED" in str(exc) \
         or "Premium required" in str(exc)
 
+class MissingCredentialsError(ProviderError):
+    """client_id / client_secret / redirect_uri are not set."""
+
+
 class RateLimiter:
     def __init__(self, max_calls: int = 25, period: float = 1.0) -> None:
         self.max_calls = max(1, int(max_calls))
@@ -195,6 +199,15 @@ class SpotifyProvider(Provider):
         with self._ensure_lock:
             if self.sp is not None:
                 return self.sp
+            if not config.has_spotify_credentials():
+                # Without them SpotifyOAuth cannot be built, and an unauthenticated
+                # client only produces confusing 401s: say what is missing.
+                missing = [n for n, v in (("client_id", config.CLIENT_ID),
+                                          ("client_secret", config.CLIENT_SECRET),
+                                          ("redirect_uri", config.REDIRECT_URI)) if not v]
+                raise MissingCredentialsError(
+                    "Spotify credentials missing (" + ", ".join(missing) + "). Enter them in the app "
+                    "or set SPOTIPY_CLIENT_ID / SPOTIPY_CLIENT_SECRET / SPOTIPY_REDIRECT_URI.")
             try:
                 open_browser_flag = threading.current_thread() is threading.main_thread()
                 logger.debug("SpotifyClient.ensure: creating/refreshing SpotifyOAuth (open_browser=%s, thread=%s)", open_browser_flag, threading.current_thread().name)

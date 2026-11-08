@@ -119,6 +119,11 @@ LOCAL_CFG = load_local_config()
 CONFIG_LOADED = bool(LOCAL_CFG)
 
 
+def has_spotify_credentials() -> bool:
+    """True when client id, secret and redirect URI are all set (env or JSON)."""
+    return bool(CLIENT_ID and CLIENT_SECRET and REDIRECT_URI)
+
+
 def save_credentials(client_id: str, client_secret: str, redirect_uri: str) -> None:
     """Persist the Spotify credentials, keeping every other setting and keeping
     the in-memory LOCAL_CFG in sync (later saves dump LOCAL_CFG whole)."""

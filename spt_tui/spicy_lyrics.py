@@ -95,6 +95,22 @@ def resolve_key(store=None, *, env=None) -> Tuple[Optional[str], Optional[str]]:
     return (v, "keyring") if v else (None, None)
 
 
+def store_key(value: str, store=None) -> Optional[str]:
+    """Put the key in the keyring (never in spt_config.json). Returns the backend
+    used, or None if there is no secure place for it or the value is empty."""
+    value = (value or "").strip()
+    if not value:
+        return None
+    try:
+        if store is None:
+            from .secret_store import default_store
+            store = default_store()
+        return store.set(KEY_ACCOUNT, value)
+    except Exception:
+        logger.exception("spicy lyrics: storing the key failed")   # never log the value
+        return None
+
+
 def key_hint() -> str:
     """One line telling how to add the key (shown in Settings)."""
     return ("Add your key to the keyring: secret-tool store --label='SPT-TUI (spicy-lyrics)' "

@@ -86,7 +86,7 @@ async def test_settings_focus_round_trip():
         check("Tab from the sidebar reaches the open Settings form", reached, where(app))
 
         fields = app._right_form_fields()
-        check("the form exposes all 17 fields (6 inputs (incl. visualizer FPS), Spicy Lyrics list, visualizer mode list, appearance + colour lists, custom colour, key hints + title bar lists, provider list, 3 Subsonic)", len(fields) == 17,
+        check("the form exposes all 18 fields (6 inputs (incl. visualizer FPS), Spicy Lyrics list + API key, visualizer mode list, appearance + colour lists, custom colour, key hints + title bar lists, provider list, 3 Subsonic)", len(fields) == 18,
               repr([type(f).__name__ for f in fields]))
         fields[0].focus(); await settle(pilot)
         order = []
@@ -107,7 +107,10 @@ async def test_settings_focus_round_trip():
             if app.focused is not app.spicy_select:
                 break
             await pilot.press("down"); await settle(pilot)
-        check("Down from the Spicy Lyrics list reaches the Visualizer FPS field", app.focused is app.visualizer_fps_input,
+        check("Down from the Spicy Lyrics list reaches the API key field", app.focused is app.spicy_key_input,
+              where(app))
+        await pilot.press("down"); await settle(pilot)
+        check("Down from the API key field reaches the Visualizer FPS field", app.focused is app.visualizer_fps_input,
               where(app))
         await pilot.press("down"); await settle(pilot)
         check("Down from the Visualizer FPS field reaches the visualizer mode list",
