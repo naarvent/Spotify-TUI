@@ -531,7 +531,39 @@ async def test_saved_artists_error_vs_empty():
               f"right={right_text(app2)!r}")
 
 
-ALL = [test_immediate_feedback_non_blocking, test_progressive_paint,
+async def test_remount_same_id_while_old_removal_pending():
+    # _clear_right() removes the old #tracks_table asynchronously. Re-rendering
+    # before that removal finished used to raise DuplicateIds and leave a
+    # never-started zombie table (stale rows found first by queries, and every
+    # pilot.pause() then waited 30 s on it): the intermittent hang of
+    # test_superseded_worker_stops_and_does_not_paint under CPU load.
+    fake = Fake(total=10); app = TApp(fake)
+    rows = lambda n: [{"id": f"t{i}", "uri": f"u{i}", "title": f"s{i}", "artist": "a",
+                       "album": "al", "dur": "0:01", "added": ""} for i in range(n)]
+    async with app.run_test(size=(120, 20)) as pilot:
+        await pilot.pause(); pause_intervals(app)
+        app._render_tracks_table("A", rows(5))
+        await pilot.pause()
+        err = None
+        try:
+            app._render_tracks_table("B1", rows(7))   # A's removal still pending
+            app._render_tracks_table("B2", rows(9))   # supersedes B1 in the same tick
+        except Exception as e:
+            err = e
+        check("re-render while the old table is being removed does not raise", err is None, repr(err))
+        try:
+            await asyncio.wait_for(pilot.pause(), 5.0)
+            idle = True
+        except Exception:
+            idle = False
+        check("app reaches idle (no zombie widget blocking pilot.pause)", idle)
+        tabs = await poll(lambda: [nrows(t) for t in app.query("#tracks_table")] == [9] or None, timeout=3.0)
+        check("only the newest table is mounted", bool(tabs),
+              f"tables={[nrows(t) for t in app.query('#tracks_table')]}")
+
+
+ALL = [test_remount_same_id_while_old_removal_pending,
+       test_immediate_feedback_non_blocking, test_progressive_paint,
        test_superseded_worker_stops_and_does_not_paint, test_leaving_view_prevents_paint,
        test_partial_on_error_keeps_rows, test_empty_vs_error,
        test_cache_shows_before_network_and_ctrlr_reloads,

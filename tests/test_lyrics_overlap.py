@@ -4,6 +4,7 @@ must not crash with DuplicateIds('lyrics_box'). Offline: fake client.
 Run standalone:  python tests/test_lyrics_overlap.py
 """
 import os, sys, asyncio, tempfile, itertools, traceback
+os.environ.setdefault("SPT_SPICY_LYRICS", "off")   # never reach the real API from a suite
 
 os.environ.setdefault("SPT_TUI_CACHE_DIR", tempfile.mkdtemp(prefix="spt_lov_"))
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))

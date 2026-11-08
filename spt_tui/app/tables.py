@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import time
 import threading
+import unicodedata
 from typing import Dict, List, Optional
 
 from textual.widgets import DataTable
+from ..widgets import WrapTable
 from textual.css.query import NoMatches
 from textual.coordinate import Coordinate
 from rich.markup import escape as rich_escape
@@ -24,6 +26,10 @@ except Exception:
 from ..config import logger
 from ..constants import GLYPHS
 
+class _SkipRow(Exception):
+    """Internal: a row the view filter hides (see _append_track_rows)."""
+
+
 class TablesMixin:
     # Colour used to mark the row that is currently playing.
     PLAYING_STYLE = "bold #b388ff"
@@ -32,12 +38,16 @@ class TablesMixin:
     # field catalogue below, so the same column means the same thing in every
     # table and the fitter can reason about it by name.
     _TRACKS_PROFILES = {
-        "playlist": (["♥", "Title", "Artist", "Album", "Duration", "Added"],
-                     ["heart", "title", "artist", "album", "dur", "added"]),
-        "recent":   (["♥", "Title", "Artist", "Album", "Duration", "Played"],
-                     ["heart", "title", "artist", "album", "dur", "added"]),
-        "album":    (["♥", "Title", "Artist", "Duration"],
-                     ["heart", "title", "artist", "dur"]),
+        # "dl": the 1-cell offline column (↓ downloaded, ⇣ downloading,
+        # · queued), always before the heart (app/offline.py).
+        "playlist": (["↓", "♥", "Title", "Artist", "Album", "Duration", "Added"],
+                     ["dl", "heart", "title", "artist", "album", "dur", "added"]),
+        "recent":   (["↓", "♥", "Title", "Artist", "Album", "Duration", "Played"],
+                     ["dl", "heart", "title", "artist", "album", "dur", "added"]),
+        "album":    (["↓", "♥", "Title", "Artist", "Duration"],
+                     ["dl", "heart", "title", "artist", "dur"]),
+        "radio":    (["↓", "♥", "Title", "Artist", "Album", "Duration"],
+                     ["dl", "heart", "title", "artist", "album", "dur"]),
     }
 
     def _track_cells(self, r: Dict, liked: bool, playing: bool, fields):
@@ -51,6 +61,7 @@ class TablesMixin:
             return Text(val, style=style) if style else val
 
         cell_map = {
+            "dl": self._dl_cell(r),
             "heart": heart,
             "title": c(r.get("title", "")),
             "artist": c(r.get("artist", "")),
@@ -100,9 +111,10 @@ class TablesMixin:
         table = self._create_table_with_full_width(
             col_labels, fields, widget_id="tracks_table", fields_attr="_track_fields",
         )
-        table._col_heart = 0
-        # The heart never gets dropped, so the surviving set still starts with it.
+        # The heart's column index depends on whether the narrow fit kept the
+        # "dl" column; _heart_col looks it up from the surviving fields.
         fields = getattr(table, "_track_fields", fields)
+        table._col_heart = self._heart_col(table)
         table.row_to_uri = {}; table.row_to_title = {}; table.row_to_id = {}
         playing_id = getattr(self, "_now_internal_track_id", None)
         for i, r in enumerate(rows):
@@ -121,9 +133,10 @@ class TablesMixin:
         self.right_panel.add_class("table-view")
         table._view_title = title
         self._refresh_table_title(table)
-        right.mount(table)
-        table.focus()
-        self._refit_after_mount(table)
+        def _after_mount():
+            table.focus()
+            self._refit_after_mount(table)
+        self._mount_in_right(right, table, _after_mount)
         self.level = self.LVL_VIEW
         return table
 
@@ -149,13 +162,24 @@ class TablesMixin:
         start = len(model)
         playing_id = getattr(self, "_now_internal_track_id", None)
         fields = getattr(table, "_track_fields",
-                         ["heart", "title", "artist", "album", "dur", "added"])
+                         ["dl", "heart", "title", "artist", "album", "dur", "added"])
+        tokens = self._filter_tokens(getattr(table, "_filter_query", "") or "")
+        vis = getattr(table, "_filter_rows", None)
+        if tokens and vis is None:
+            vis = table._filter_rows = []
         for j, r in enumerate(new_rows):
             i = start + j
             liked = bool(liked_map.get(i, False))
             playing = bool(r.get("id") and r.get("id") == playing_id)
+            shown = (not tokens) or self._row_matches_filter(r, tokens)
+            if shown and tokens:
+                vis.append(i)
             try:
+                if not shown:
+                    raise _SkipRow
                 table.add_row(*self._track_cells(r, liked, playing, fields), key=i)
+            except _SkipRow:
+                pass
             except Exception:
                 heart = Text("❤", style="bold red") if liked else Text("")
                 try:
@@ -171,8 +195,279 @@ class TablesMixin:
         ctx = getattr(table, "_context_uris", None)
         if ctx is not None:
             ctx.extend(r.get("uri") for r in new_rows)
+        if tokens:
+            self._refresh_table_title(table)
         try: table.refresh()
         except Exception: pass
+
+    # --- "/" filter over the rows already loaded ---------------------------- #
+    # Row keys and every row_to_* map stay keyed by the MODEL index; the filter
+    # only decides which of those rows are added to the DataTable. The display
+    # row -> model index translation lives in _get_cursor_row (navigation.py),
+    # so Enter, f, Ctrl+D, Multi-Add… keep addressing the real track and a
+    # filtered row plays from its real position in the playlist/album.
+    FILTERABLE_TABLES = ("tracks_table", "search_table", "queue_table", "devices_table")
+
+    def _normalize_id_safe(self, uri):
+        try:
+            return self.spotify._normalize_track_id(uri) if uri else None
+        except Exception:
+            return None
+    # Typing repaints after this pause, not on every key (a long playlist
+    # re-adds thousands of rows per repaint).
+    FILTER_DEBOUNCE_S = 0.12
+
+    @staticmethod
+    def _fold_text(s) -> str:
+        """Lower-case, accent-free text for matching ("Beyoncé" ~ "beyonce")."""
+        s = unicodedata.normalize("NFKD", str(s or ""))
+        return "".join(ch for ch in s if not unicodedata.combining(ch)).casefold()
+
+    @classmethod
+    def _filter_tokens(cls, query) -> List[str]:
+        return cls._fold_text(query).split()
+
+    @classmethod
+    def _row_matches_filter(cls, row, tokens) -> bool:
+        """Every word of the filter appears in the row's title, artist or album."""
+        if not tokens:
+            return True
+        if not isinstance(row, dict):
+            return False
+        hay = cls._fold_text(" ".join(str(row.get(k) or "") for k in ("title", "artist", "album")))
+        return all(t in hay for t in tokens)
+
+    def _visible_indices(self, table, rows) -> Optional[List[int]]:
+        """Model indices that pass the table's filter, or None when unfiltered."""
+        tokens = self._filter_tokens(getattr(table, "_filter_query", "") or "")
+        if not tokens:
+            return None
+        return [i for i, r in enumerate(rows or []) if self._row_matches_filter(r, tokens)]
+
+    def _model_to_display_row(self, table, model_idx) -> Optional[int]:
+        """Where model row ``model_idx`` sits on screen (None if filtered out)."""
+        vis = getattr(table, "_filter_rows", None)
+        if vis is None:
+            return model_idx
+        try:
+            return vis.index(model_idx)
+        except ValueError:
+            return None
+
+    def _filterable_table(self, widget=None):
+        """The content table "/" filters: the focused one, else the one on screen."""
+        w = widget if widget is not None else getattr(self, "focused", None)
+        if isinstance(w, DataTable) and getattr(w, "id", "") in self.FILTERABLE_TABLES \
+                and hasattr(w, "_model_rows"):
+            return w
+        if isinstance(w, DataTable):
+            return None
+        for tid in self.FILTERABLE_TABLES:
+            try:
+                t = self.query_one(f"#{tid}", DataTable)
+            except Exception:
+                continue
+            if hasattr(t, "_model_rows") and getattr(t, "parent", None) is getattr(self, "right_panel", None):
+                return t
+        return None
+
+    def _filter_input_for(self, table):
+        inp = getattr(table, "_filter_input", None)
+        if inp is not None and getattr(inp, "parent", None) is not None:
+            return inp
+        return None
+
+    def _open_view_filter(self, table=None) -> bool:
+        """`/` on a content table: show (or re-focus) its filter box."""
+        table = table if table is not None else self._filterable_table()
+        if table is None:
+            return False
+        from ..widgets import ViewFilterInput
+        inp = self._filter_input_for(table)
+        if inp is None:
+            inp = ViewFilterInput(placeholder="Filter loaded rows (title, artist, album)  ·  "
+                                              "Enter/↓ keep  ·  Esc clear",
+                                  classes="view-filter")
+            inp._filter_table = table
+            table._filter_input = inp
+            parent = getattr(table, "parent", None)
+            if parent is None:
+                return False
+            try:
+                parent.mount(inp, before=table)
+            except Exception:
+                logger.exception("mounting the view filter failed")
+                return False
+            inp.value = getattr(table, "_filter_query", "") or ""
+        try:
+            inp.focus()
+        except Exception:
+            pass
+        self._notify("[b]Filter:[/b] type to narrow the loaded rows. Enter/↓ back to the list, Esc clears.")
+        return True
+
+    def _schedule_view_filter(self, inp, value: str) -> None:
+        """Input.Changed on the filter box: repaint after a short pause."""
+        table = getattr(inp, "_filter_table", None)
+        if table is None:
+            return
+        old = getattr(self, "_filter_timer", None)
+        if old is not None:
+            try: old.stop()
+            except Exception: pass
+        self._filter_timer = self.set_timer(
+            self.FILTER_DEBOUNCE_S, lambda: self._apply_view_filter(table, value))
+
+    def _apply_view_filter(self, table, query: str, *, announce: bool = True) -> None:
+        """Set the filter text of ``table`` and repaint only the matching rows."""
+        self._filter_timer = None
+        query = (query or "").strip()
+        if (getattr(table, "_filter_query", "") or "") == query and \
+                getattr(table, "_filter_applied", False):
+            return
+        table._filter_query = query
+        table._filter_applied = True
+        self._repaint_rows_from_model(table)
+        try:
+            if table.row_count:
+                col = int(getattr(getattr(table, "cursor_coordinate", None), "column", 0) or 0)
+                table.move_cursor(row=0, column=col, animate=False, scroll=True)
+        except Exception:
+            pass
+        self._refresh_table_title(table)
+        if announce and query:
+            shown = len(getattr(table, "_filter_rows", None) or [])
+            total = len(getattr(table, "_model_rows", None) or [])
+            if shown == 0:
+                self._notify(f"[b]Filter:[/b] no loaded row matches “{rich_escape(query)}”.", warn=True)
+            else:
+                self._notify(f"[b]Filter:[/b] {shown} of {total} rows.")
+
+    def _filter_hint(self, table) -> str:
+        # Plain text: the border title is parsed as markup, so "[/ …]" would be
+        # read as a closing tag and swallow the hint.
+        query = getattr(table, "_filter_query", "") or ""
+        vis = getattr(table, "_filter_rows", None)
+        if not query or vis is None:
+            return ""
+        total = len(getattr(table, "_model_rows", None) or [])
+        return f"   · filter “{rich_escape(query)}”: {len(vis)} of {total}"
+
+    def _leave_view_filter(self) -> None:
+        """Enter/↓ in the filter box: apply now and go back to the table."""
+        inp = self.focused
+        table = getattr(inp, "_filter_table", None)
+        if table is None:
+            return
+        old = getattr(self, "_filter_timer", None)
+        if old is not None:
+            try: old.stop()
+            except Exception: pass
+        value = getattr(inp, "value", "") or ""
+        self._apply_view_filter(table, value, announce=False)
+        if not value.strip():
+            self._close_view_filter(table)
+            return
+        try:
+            table.focus()
+        except Exception:
+            pass
+
+    def _close_view_filter(self, table=None) -> bool:
+        """Esc: drop the filter, remove its box and show every row again.
+
+        Returns False when there was nothing to clear, so Esc keeps its usual
+        meaning (back to the menu)."""
+        if table is None:
+            w = getattr(self, "focused", None)
+            table = getattr(w, "_filter_table", None) or self._filterable_table(w)
+        if table is None:
+            return False
+        inp = self._filter_input_for(table)
+        had = bool(getattr(table, "_filter_query", "")) or inp is not None
+        if not had:
+            return False
+        old = getattr(self, "_filter_timer", None)
+        if old is not None:
+            try: old.stop()
+            except Exception: pass
+            self._filter_timer = None
+        # Keep the highlighted track highlighted once every row is back.
+        cur_model = None
+        try:
+            cur_model = self._get_cursor_row(table)
+        except Exception:
+            cur_model = None
+        table._filter_query = ""
+        table._filter_applied = False
+        table._filter_input = None
+        if inp is not None:
+            try: inp.remove()
+            except Exception: pass
+        self._repaint_rows_from_model(table)
+        if cur_model is not None:
+            try:
+                col = int(getattr(getattr(table, "cursor_coordinate", None), "column", 0) or 0)
+                table.move_cursor(row=int(cur_model), column=col, animate=False, scroll=True)
+            except Exception:
+                pass
+        self._refresh_table_title(table)
+        try:
+            table.focus()
+        except Exception:
+            pass
+        self._notify("[b]Filter cleared.[/b]")
+        return True
+
+    def _fill_track_likes(self, table, rows, still_current) -> None:
+        """Paint the hearts of a tracks table whose rows came without liked
+        state (Downloaded, Radio). One ``check_saved_tracks`` call for all ids
+        (the provider batches it). A local library (YouTube Music) answers from
+        memory, so it runs right away; otherwise on a worker thread. Skipped
+        when the provider has no likes. ``still_current()`` guards a late
+        answer against a newer view."""
+        try:
+            if not self._cap("can_like"):
+                return
+        except Exception:
+            pass
+        ids = [r.get("id") for r in rows if isinstance(r, dict) and r.get("id")]
+        if not ids:
+            return
+
+        def apply(id_to_liked):
+            # Not "is the same rows list": s/S replace the model; the map is by id.
+            if not still_current() or getattr(table, "parent", None) is None:
+                return
+            # Map by id, so it holds whatever order s/S or the "/" filter put the rows in.
+            table._liked_map = {i: bool(id_to_liked.get(r.get("id"), False))
+                                for i, r in enumerate(table._model_rows)}
+            self._repaint_rows_from_model(table)
+
+        def lookup():
+            try:
+                return dict(zip(ids, self.spotify.check_saved_tracks(ids) or []))
+            except Exception:
+                logger.debug("liked lookup failed")
+                return None
+
+        caps = getattr(getattr(self, "spotify", None), "capabilities", None)
+        if getattr(caps, "local_library", False) is True:
+            res = lookup()
+            if res is not None:
+                apply(res)
+            return
+
+        def worker():
+            res = lookup()
+            if res is None:
+                return
+            try:
+                self.call_from_thread(apply, res)
+            except Exception:
+                if not getattr(self, "_closing", False):
+                    logger.debug("liked repaint dropped")
+        threading.Thread(target=worker, daemon=True).start()
 
     def _open_album_table(self, album_item: dict, push_stack: bool = True):
         try:
@@ -262,106 +557,136 @@ class TablesMixin:
             right = self._clear_right()
             right.update(f"[b]Loading artist:[/b] {rich_escape(artist_name)} …")
             def worker():
-                rows = []
-
-                try:
-                    albums_page = self.spotify.ensure().artist_albums(artist_id, album_type="album", limit=50)
-                    albums = albums_page.get("items", [])
-                except Exception:
-                    albums = []
-
-                seen_albums = set()
-                for a in albums:
-                    if not a: continue
-                    aid = a.get("id")
-                    if not aid or aid in seen_albums: continue
-                    seen_albums.add(aid)
-                    rows.append({
-                        "type": "album",
-                        "id": aid,
-                        "uri": a.get("uri"),
-                        "title": a.get("name","(no title)"),
-                        "artist": ", ".join([x.get("name","") for x in (a.get("artists") or [])]),
-                        "album": "",
-                        "dur": "",
-                        "raw": a,
-                    })
-
-                try:
-                    pls_res = self.spotify.ensure().search(artist_name, type="playlist", limit=50) or {}
-                    pls = (pls_res.get("playlists") or {}).get("items", [])
-                except Exception:
-                    pls = []
-
-                def _norm(s: Optional[str]) -> str:
-                    return (s or "").strip().lower()
-
-                filtered = []
-                artist_name_norm = _norm(artist_name)
-                artist_id_norm = _norm(artist_id)
-                for p in pls:
-                    if not p:
-                        continue
-                    owner = p.get("owner") or {}
-                    owner_id = _norm(owner.get("id"))
-                    owner_name = _norm(owner.get("display_name") or owner.get("id"))
-
-                    if owner_id and artist_id_norm and owner_id == artist_id_norm:
-                        filtered.append(p); continue
-
-                    if owner_name and artist_name_norm and owner_name == artist_name_norm:
-                        filtered.append(p); continue
-
-                    if owner_id and artist_name_norm.replace(" ", "") in owner_id:
-                        filtered.append(p); continue
-
-                pls_to_add = filtered
-                for p in pls_to_add:
-                    rows.append({
-                        "type": "playlist",
-                        "id": p.get("id"),
-                        "uri": p.get("uri"),
-                        "title": p.get("name","(sin nombre)"),
-                        "artist": (p.get("owner") or {}).get("display_name", ""),
-                        "album": "",
-                        "dur": "",
-                        "raw": p,
-                    })
-
-                try:
-                    singles_page = self.spotify.ensure().artist_albums(artist_id, album_type="single", limit=50)
-                    singles = singles_page.get("items", [])
-                except Exception:
-                    singles = []
-                seen_singles = set()
-                for s in singles:
-                    if not s: continue
-                    sid = s.get("id")
-                    if not sid or sid in seen_singles: continue
-                    seen_singles.add(sid)
-                    rows.append({
-                        "type": "single",
-                        "id": sid,
-                        "uri": s.get("uri"),
-                        "title": s.get("name","(no title)"),
-                        "artist": ", ".join([x.get("name","") for x in (s.get("artists") or [])]),
-                        "album": "",
-                        "dur": "",
-                        "raw": s,
-                    })
+                ov = self._artist_overview(artist_id, artist_name)
+                rows = self._artist_page_rows(ov)
+                rows.extend(self._artist_owned_playlists(artist_id, artist_name))
+                n_top = sum(1 for r in rows if r.get("_section") == "top")
 
                 def paint():
                     if not self._is_current_view("artist", artist_id, token): return
-                    title = f"[b]Profile of:[/b] {rich_escape(artist_name)}"
-                    # Every item here is by this one artist, so the full search
-                    # layout left Artist/Owner redundant and Album/Duration blank.
-                    # Use the compact heart/type/name layout instead.
-                    self._render_search_table(title, rows, layout="artists")
+                    title = f"[b]Artist:[/b] {rich_escape(artist_name)}" + self._artist_counts(ov)
+                    table = self._render_search_table(title, rows, layout="artist_page")
+                    # Top tracks come first, so their model indices ARE their
+                    # positions in this list: Enter on one plays the top tracks
+                    # from there (see _play_row's range guard for other rows).
+                    table._context_uris = [r["uri"] for r in rows[:n_top]] if n_top else None
+                    table._artist_overview_notes = list(ov.get("notes") or [])
+                    table._queue_name = f"{artist_name} · top tracks"
+                    if not rows:
+                        self._notify(f"[b]Nothing to show for[/b] {rich_escape(artist_name)}.", warn=True)
+                    if ov.get("notes"):
+                        self._notify("  ·  ".join(rich_escape(n) for n in ov["notes"]), warn=True,
+                                     seconds=7.0)
 
                 self.call_from_thread(paint)
             threading.Thread(target=worker, daemon=True).start()
         except Exception:
             logger.exception("_open_artist_table failed")
+
+    # --- Artist page ------------------------------------------------------- #
+    # Section label shown in the Type column of the artist page.
+    _ARTIST_SECTION_LABELS = {"top": "TOP", "album": "ALB", "single": "SNG",
+                              "playlist": "PLY", "related": "REL"}
+
+    def _artist_overview(self, artist_id, artist_name) -> dict:
+        """The provider's artist_overview, or the generic per-section build
+        for objects without one (test fakes, adapters)."""
+        from ..providers.base import build_artist_overview
+        fn = getattr(self.spotify, "artist_overview", None)
+        try:
+            ov = fn(artist_id, artist_name=artist_name) if callable(fn) else \
+                build_artist_overview(self.spotify, artist_id, artist_name)
+        except Exception as exc:
+            logger.exception("artist overview failed")
+            ov = {"notes": [f"The artist page could not be loaded ({type(exc).__name__})."]}
+        for k in ("top_tracks", "albums", "singles", "related", "notes"):
+            ov.setdefault(k, [])
+        return ov
+
+    @staticmethod
+    def _artist_counts(ov) -> str:
+        parts = []
+        for key, label in (("top_tracks", "top tracks"), ("albums", "albums"),
+                           ("singles", "singles"), ("related", "related")):
+            n = len(ov.get(key) or [])
+            if n:
+                parts.append(f"{n} {label}")
+        return ("  —  " + " · ".join(parts)) if parts else ""
+
+    def _artist_page_rows(self, ov) -> List[Dict]:
+        """Rows for the artist page, in section order: top tracks, albums,
+        singles, related artists. Each row keeps its real type (Enter plays a
+        track, opens an album or another artist) and a section label."""
+        rows: List[Dict] = []
+        fmt = getattr(self.spotify, "fmt_duration", None)
+        seen = set()
+        for t in ov.get("top_tracks") or []:
+            if not isinstance(t, dict) or not t.get("uri") or t.get("uri") in seen:
+                continue
+            seen.add(t.get("uri"))
+            rows.append({
+                "type": "track", "_section": "top", "type_label": self._ARTIST_SECTION_LABELS["top"],
+                "id": t.get("id"), "uri": t.get("uri"), "title": t.get("name", "(no title)"),
+                "artist": ", ".join(a.get("name", "") for a in (t.get("artists") or []) if isinstance(a, dict)),
+                "album": (t.get("album") or {}).get("name", "") if isinstance(t.get("album"), dict) else "",
+                "dur": fmt(t.get("duration_ms") or 0) if callable(fmt) else "",
+                "raw": t,
+            })
+        for key, rtype in (("albums", "album"), ("singles", "single")):
+            for a in ov.get(key) or []:
+                if not isinstance(a, dict) or not a.get("id") or ("a", a.get("id")) in seen:
+                    continue
+                seen.add(("a", a.get("id")))
+                year = str(a.get("release_date") or "")[:4]
+                rows.append({
+                    "type": rtype, "_section": rtype, "type_label": self._ARTIST_SECTION_LABELS[rtype],
+                    "id": a.get("id"), "uri": a.get("uri"), "title": a.get("name", "(no title)"),
+                    "artist": ", ".join(x.get("name", "") for x in (a.get("artists") or []) if isinstance(x, dict)),
+                    "album": year, "dur": "", "raw": a,
+                })
+        for a in ov.get("related") or []:
+            if not isinstance(a, dict) or not a.get("id") or ("r", a.get("id")) in seen:
+                continue
+            seen.add(("r", a.get("id")))
+            rows.append({
+                "type": "artist", "_section": "related", "type_label": self._ARTIST_SECTION_LABELS["related"],
+                "id": a.get("id"), "uri": a.get("uri"), "title": a.get("name", "(no name)"),
+                "artist": "", "album": a.get("_info", "") or ", ".join((a.get("genres") or [])[:2]),
+                "dur": "", "raw": a,
+            })
+        return rows
+
+    def _artist_owned_playlists(self, artist_id, artist_name) -> List[Dict]:
+        """Playlists published by the artist's own account (Spotify-style
+        search filtered by owner). Best effort: any failure is just no rows.
+        limit=10: the February 2026 Web API change caps search at 10 for
+        development-mode apps (a bigger limit is a 400)."""
+        try:
+            pls_res = self.spotify.ensure().search(artist_name, type="playlist", limit=10) or {}
+            pls = (pls_res.get("playlists") or {}).get("items", []) or []
+        except Exception:
+            return []
+
+        def _norm(s: Optional[str]) -> str:
+            return (s or "").strip().lower()
+
+        name_n, id_n = _norm(artist_name), _norm(artist_id)
+        out = []
+        for p in pls:
+            if not p:
+                continue
+            owner = p.get("owner") or {}
+            oid = _norm(owner.get("id"))
+            oname = _norm(owner.get("display_name") or owner.get("id"))
+            if (oid and id_n and oid == id_n) or (oname and name_n and oname == name_n) \
+                    or (oid and name_n and name_n.replace(" ", "") in oid):
+                out.append({
+                    "type": "playlist", "_section": "playlist",
+                    "type_label": self._ARTIST_SECTION_LABELS["playlist"],
+                    "id": p.get("id"), "uri": p.get("uri"), "title": p.get("name", "(no name)"),
+                    "artist": owner.get("display_name", ""), "album": "", "dur": "", "raw": p,
+                })
+        return out
 
     def _open_podcast_table(self, show_item: dict, push_stack: bool = True):
         try:
@@ -444,7 +769,7 @@ class TablesMixin:
                 return
             sp = self.spotify.ensure()
 
-            by_type = {"artist": [], "album": [], "episode": [], "podcast": [], "track": []}
+            by_type = {"artist": [], "album": [], "episode": [], "podcast": [], "track": [], "playlist": []}
             row_for = {}
             for rk in row_keys:
                 rtype = getattr(table, 'row_to_type', {}).get(rk) or ''
@@ -468,6 +793,8 @@ class TablesMixin:
                     by_type['artist'].append(rid); row_for.setdefault(('artist', rid), []).append(rk)
                 elif rtype in ('track', 'single'):
                     by_type['track'].append(rid); row_for.setdefault(('track', rid), []).append(rk)
+                elif rtype == 'playlist' and hasattr(sp, 'current_user_follows_playlists_contains'):
+                    by_type['playlist'].append(rid); row_for.setdefault(('playlist', rid), []).append(rk)
 
             results = {}
             logger.debug("_revalidate_saved_column: checking %d rows", len(row_keys))
@@ -500,6 +827,13 @@ class TablesMixin:
                         results[('episode', rid)] = bool(val)
             except Exception:
                 logger.exception('_revalidate_saved_column: episodes contains failed')
+            try:
+                if by_type['playlist']:
+                    vals = sp.current_user_follows_playlists_contains(by_type['playlist'])
+                    for rid, val in zip(by_type['playlist'], vals or []):
+                        results[('playlist', rid)] = bool(val)
+            except Exception:
+                logger.exception('_revalidate_saved_column: playlists contains failed')
             try:
                 if by_type['artist']:
                     followed = set()
@@ -584,12 +918,18 @@ class TablesMixin:
         if getattr(table, "id", "") == "search_table":
             return
         cell = Text("❤", style="bold red") if liked else Text("")
-        col = int(getattr(table, "_col_heart", 0) or 0)
+        col = self._heart_col(table)
         try:
             row = table.get_row_index(row_key)
         except Exception:
-            # Rows are keyed by their position, so the key doubles as the index.
-            row = row_key if isinstance(row_key, int) else None
+            # Rows are keyed by their position, so the key doubles as the index
+            # — unless the "/" filter hides rows: then a missing key is a row
+            # that is not on screen, and there is nothing to repaint.
+            if getattr(table, "_filter_rows", None) is not None:
+                key = getattr(row_key, "value", row_key)
+                row = self._model_to_display_row(table, key) if isinstance(key, int) else None
+            else:
+                row = row_key if isinstance(row_key, int) else None
         if row is None:
             return
         try:
@@ -652,9 +992,15 @@ class TablesMixin:
         if getattr(table, "id", "") == "search_table":
             fields = getattr(table, "_search_fields",
                              ["saved", "type", "title", "artist", "album", "dur", "source"])
+            vis = table._filter_rows = self._visible_indices(table, rows)
+            shown = None if vis is None else set(vis)
             for i, r in enumerate(rows):
                 try:
+                    if shown is not None and i not in shown:
+                        raise _SkipRow
                     table.add_row(*self._search_cells(r, fields), key=i)
+                except _SkipRow:
+                    pass
                 except Exception:
                     saved_cell = Text("❤", style="bold red") if r.get('saved', False) else Text("")
                     try:
@@ -669,22 +1015,54 @@ class TablesMixin:
                 table.row_to_obj[i] = r.get("raw")
             try: table.refresh()
             except Exception: pass
-            self._restore_table_view(table, cur_coord, saved_y, len(rows))
+            self._restore_table_view(table, cur_coord, saved_y, len(rows) if vis is None else len(vis))
+            return
+
+        if getattr(table, "id", "") == "devices_table":
+            fields = getattr(table, "_device_fields", None) or ["mark", "title", "device_type"]
+            vis = table._filter_rows = self._visible_indices(table, rows)
+            shown = None if vis is None else set(vis)
+            for i, r in enumerate(rows):
+                if shown is None or i in shown:
+                    try:
+                        table.add_row(*[r.get(f, "") for f in fields], key=i)
+                    except Exception:
+                        pass
+            try: table.refresh()
+            except Exception: pass
+            self._restore_table_view(table, cur_coord, saved_y, len(rows) if vis is None else len(vis))
             return
 
         if getattr(table, "id", "") == "queue_table":
             fields = getattr(table, "_queue_fields", None) or [
-                "num", "heart", "title", "artist", "album", "dur", "source"]
+                "num", "dl", "heart", "title", "artist", "album", "dur", "source"]
+            # Position among the real tracks (headers excluded) = what the
+            # provider's queue() lists; keyed by model index like every map.
+            table.row_to_qpos = {}
+            n = 0
             for i, r in enumerate(rows):
-                try:
-                    table.add_row(*self._queue_cells(r, i, fields), key=i)
-                except Exception:
-                    pass
+                if not r.get("_header"):
+                    table.row_to_qpos[i] = n
+                    n += 1
+            vis = table._filter_rows = self._visible_indices(table, rows)
+            shown = None if vis is None else set(vis)
+            liked_map = getattr(table, "_liked_map", {}) or {}
+            for i, r in enumerate(rows):
+                if liked_map.get(i) is not None and not r.get("_header"):
+                    r["liked"] = bool(liked_map[i])
+                if shown is None or i in shown:
+                    try:
+                        table.add_row(*self._queue_cells(r, i, fields), key=i)
+                    except Exception:
+                        pass
                 table.row_to_uri[i] = r.get("uri")
                 table.row_to_title[i] = f"{r.get('title','')} {GLYPHS['sep']} {r.get('artist','')}"
+                tid = r.get("id") or self._normalize_id_safe(r.get("uri"))
+                if tid and not r.get("_header"):
+                    table.row_to_id[i] = tid
             try: table.refresh()
             except Exception: pass
-            self._restore_table_view(table, cur_coord, saved_y, len(rows))
+            self._restore_table_view(table, cur_coord, saved_y, len(rows) if vis is None else len(vis))
             return
 
         if getattr(table, "_panel_key", None) == "songs":
@@ -711,13 +1089,41 @@ class TablesMixin:
             self._restore_table_view(table, cur_coord, saved_y, len(rows))
             return
 
+        if getattr(table, "_panel_key", None) in ("artists", "albums", "playlists"):
+            # Combined-search Artists / Albums / Playlists panels: ONE column with the name (no heart).
+            # They used to fall through to the generic track layout below, whose several cells did not
+            # fit the single column: every row failed to add and the panel came back EMPTY after a
+            # like / follow / save.
+            pk = table._panel_key
+            for i, r in enumerate(rows):
+                try:
+                    table.add_row(self._grid_line(pk, r), key=i)
+                except Exception:
+                    logger.exception("search panel row repaint failed")
+                table.row_to_uri[i] = r.get("uri")
+                table.row_to_title[i] = f"{r.get('title','')} {GLYPHS['sep']} {r.get('artist','')}"
+                if r.get("id"):
+                    table.row_to_id[i] = r.get("id")
+                table.row_to_type[i] = r.get("type")
+                table.row_to_obj[i] = r.get("raw")
+            try: table.refresh()
+            except Exception: pass
+            self._restore_table_view(table, cur_coord, saved_y, len(rows))
+            return
+
         playing_id = getattr(self, "_now_internal_track_id", None)
-        fields = getattr(table, "_track_fields", ["heart", "title", "artist", "album", "dur", "added"])
+        fields = getattr(table, "_track_fields", ["dl", "heart", "title", "artist", "album", "dur", "added"])
+        vis = table._filter_rows = self._visible_indices(table, rows)
+        shown = None if vis is None else set(vis)
         for i, r in enumerate(rows):
             liked = bool(liked_map.get(i, False))
             playing = bool(r.get("id") and r.get("id") == playing_id)
             try:
+                if shown is not None and i not in shown:
+                    raise _SkipRow
                 table.add_row(*self._track_cells(r, liked, playing, fields), key=i)
+            except _SkipRow:
+                pass
             except Exception:
                 heart = Text("❤", style="bold red") if liked else Text("")
                 try:
@@ -729,7 +1135,7 @@ class TablesMixin:
             if r.get("id"):
                 table.row_to_id[i] = r.get("id")
 
-        self._restore_table_view(table, cur_coord, saved_y, len(rows))
+        self._restore_table_view(table, cur_coord, saved_y, len(rows) if vis is None else len(vis))
 
         try: table.refresh()
         except Exception: pass
@@ -739,7 +1145,7 @@ class TablesMixin:
     # devices), keyed by field name rather than by position.
 
     # Identity columns: their content has a known size, so they never stretch.
-    _FIXED_W = {"heart": 3, "saved": 3, "num": 3, "mark": 3, "type": 7,
+    _FIXED_W = {"dl": 1, "heart": 3, "saved": 3, "num": 3, "mark": 3, "type": 7,
                 "dur": 9, "added": 12, "device_type": 14}
     # Everything else splits what is left. Title carries the most weight.
     _FLEX_WEIGHT = {"title": 1.4}
@@ -750,7 +1156,9 @@ class TablesMixin:
     _FLEX_DEFAULT_MIN = 10
     # Which columns may be dropped on a narrow terminal, least useful first.
     # Anything absent here (heart, Title, Duration, Type) always survives.
-    _DROP_ORDER = ("source", "added", "album", "artist")
+    # The 1-cell download column goes first: on a very narrow terminal a
+    # title is worth more than the ↓ mark.
+    _DROP_ORDER = ("dl", "source", "added", "album", "artist")
 
     def _panel_width(self) -> int:
         """Width available to a content table (the right panel's content area)."""
@@ -847,7 +1255,9 @@ class TablesMixin:
             return ""
         col_labels, fields = spec
         kept = set(getattr(table, "_fit_fields", []) or [])
-        hidden = [lbl for lbl, f in zip(col_labels, fields) if f not in kept]
+        # The 1-cell download column is the first to go and says nothing as a
+        # hint ("hidden: ↓"), so it is left out of it.
+        hidden = [lbl for lbl, f in zip(col_labels, fields) if f not in kept and f != "dl"]
         return f"   (hidden: {', '.join(hidden)})" if hidden else ""
 
     def _refresh_table_title(self, table: DataTable) -> None:
@@ -858,11 +1268,41 @@ class TablesMixin:
             return
         try:
             self.right_panel.border_title = (self._content_title(title)
-                                             + self._hidden_columns_hint(table))
+                                             + self._hidden_columns_hint(table)
+                                             + self._filter_hint(table))
         except Exception:
             logger.debug("refreshing the table title failed")
 
+    DL_LABEL = "↓"
+
+    def _heart_col(self, table) -> int:
+        """Index of the heart / saved column among the columns on screen."""
+        attr = getattr(table, "_fields_attr", None)
+        fields = getattr(table, attr, None) if attr else None
+        fields = fields or getattr(table, "_fit_fields", None) or []
+        for name in ("heart", "saved"):
+            if name in fields:
+                return fields.index(name)
+        return int(getattr(table, "_col_heart", 0) or 0)
+
     def _apply_columns(self, table: DataTable, keep_labels: List[str], widths: List[int]) -> None:
+        # The download column's header is dimmed when the provider cannot
+        # download (the column stays, the action explains why on the status line).
+        can_dl = True
+        try:
+            can_dl = bool(self._cap("can_download"))
+        except Exception:
+            pass
+        # Same for the heart when the provider has no likes: dimmed, and its
+        # cells stay empty (no lookups) instead of reading as "not liked".
+        can_like = True
+        try:
+            can_like = bool(self._cap("can_like"))
+        except Exception:
+            pass
+        keep_labels = [Text(lbl, style=("bold cyan" if can_dl else "#555555")) if lbl == self.DL_LABEL
+                       else (Text(lbl, style="#555555") if lbl == "♥" and not can_like else lbl)
+                       for lbl in keep_labels]
         for lbl, wd in zip(keep_labels, widths):
             try:
                 table.add_column(lbl, width=int(wd))
@@ -886,7 +1326,7 @@ class TablesMixin:
                                       fields_attr: Optional[str] = None) -> DataTable:
         try:
             keep_fields, keep_labels, widths = self._fit_columns(fields, col_labels)
-            table = DataTable(zebra_stripes=True, id=(widget_id or "table"))
+            table = WrapTable(zebra_stripes=True, id=(widget_id or "table"))
             table.show_cursor = True; table.cursor_type = "row"
             # Remember the *full* column set so a widening resize can bring a
             # dropped column back without the caller being involved.
@@ -901,7 +1341,7 @@ class TablesMixin:
         except Exception:
             logger.exception("_create_table_with_full_width failed")
             try:
-                t = DataTable(zebra_stripes=True, id=(widget_id or "table"))
+                t = WrapTable(zebra_stripes=True, id=(widget_id or "table"))
                 for lbl in col_labels:
                     try: t.add_column(lbl)
                     except Exception: pass
@@ -980,46 +1420,32 @@ class TablesMixin:
             logger.exception("_rebuild_columns failed")
 
     def _open_url_in_browser(self, url: str) -> bool:
+        """Open ``url`` with the shared opener (open_command / SPT_OPEN_COMMAND,
+        default `abrir`; webbrowser as a last resort). False (logged) if
+        nothing could open it — callers then show the URL instead."""
         if not url:
             return False
+        from ..opener import OpenURLError, open_url
         try:
-            import webbrowser, os, subprocess, platform
-            try:
-                opened = webbrowser.open(url, new=2)
-                if opened:
-                    return True
-            except Exception:
-                logger.exception("webbrowser.open failed")
-            plat = platform.system()
-            if plat == 'Windows':
-                try:
-                    os.startfile(url)
-                    return True
-                except Exception:
-                    logger.exception("os.startfile failed to open URL")
-            elif plat == 'Darwin':
-                try:
-                    subprocess.Popen(['open', url])
-                    return True
-                except Exception:
-                    logger.exception("open failed to open URL")
-            else:
-                try:
-                    subprocess.Popen(['xdg-open', url])
-                    return True
-                except Exception:
-                    logger.exception("xdg-open failed to open URL")
-            return False
-        except Exception:
-            logger.exception("_open_url_in_browser failed")
+            open_url(url)
+            return True
+        except OpenURLError as exc:
+            logger.warning("could not open %s: %s", url.split("?")[0], exc)
+            self._last_open_error = str(exc)
             return False
 
     def _play_row(self, row_key, table: DataTable):
+        req = getattr(self, "_require_cap", None)
+        if callable(req) and not req("can_play"):
+            return
         try:
             ctx_uri = getattr(table, "_context_uri", None)
             ctx_list = getattr(table, "_context_uris", None)
 
             def resolve_index(rk):
+                # DataTable.RowSelected hands a RowKey; its value is the model
+                # index (rows are keyed by it, filtered or not).
+                rk = getattr(rk, "value", rk)
                 try:
                     return int(rk)
                 except Exception:
@@ -1085,7 +1511,19 @@ class TablesMixin:
                 except Exception:
                     pass
 
+            # What the queue view calls the context ("Next from: <name>", its Source label).
+            try:
+                # A view can name itself for the queue ("Downloaded", "Radio: X",
+                # the artist) instead of its full frame title with counters.
+                ctx_name = getattr(table, '_queue_name', None) or self._content_title(
+                    getattr(table, '_pl_base_title', None) or getattr(table, '_view_title', None) or '')
+                play_context = {'name': ctx_name, 'source': self._queue_source_label(table) or 'Playlist'}
+            except Exception:
+                play_context = None
+
             def worker():
+                if play_context is not None:
+                    self._play_context = play_context
                 try:
                     if ctx_uri is not None:
                         try:
@@ -1096,7 +1534,14 @@ class TablesMixin:
                         except Exception:
                             logger.exception("start_playback with context_uri failed; falling back")
 
-                    if ctx_list:
+                    # A context list that does not cover this row (the artist
+                    # page: only its top tracks form the list) plays just the row.
+                    in_ctx = True
+                    try:
+                        in_ctx = 0 <= int(idx) < len(ctx_list or [])
+                    except Exception:
+                        in_ctx = True
+                    if ctx_list and in_ctx:
                         try:
                             ordered = ctx_list[int(idx):] + ctx_list[:int(idx)]
                         except Exception:

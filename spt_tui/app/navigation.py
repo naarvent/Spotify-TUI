@@ -20,7 +20,7 @@ except Exception:
 
 from ..config import logger
 from ..constants import WELCOME
-from ..spotify_client import SpotifyClient
+from ..providers.spotify import SpotifyClient
 
 class NavigationMixin:
     def _new_view_token(self, kind: str, ident: str = "") -> int:
@@ -32,12 +32,6 @@ class NavigationMixin:
                 self._clear_status_line()
             except Exception:
                 pass
-        prev = getattr(self, "_right_view", None)
-        if prev:
-            try:
-                self._view_stack.append(prev)
-            except Exception:
-                logger.exception("_new_view_token: failed pushing prev view on stack")
         self._view_counter += 1
         token = self._view_counter
 
@@ -93,23 +87,216 @@ class NavigationMixin:
         except Exception:
             pass
 
+    def _in_right_panel(self, widget) -> bool:
+        rp = getattr(self, "right_panel", None)
+        node = widget
+        while node is not None:
+            if node is rp:
+                return True
+            node = getattr(node, "parent", None)
+        return False
+
+    def _right_form_fields(self) -> list:
+        """Focusable form widgets of the right panel, in screen order."""
+        from textual.widgets import Button, OptionList
+        rp = getattr(self, "right_panel", None)
+        if rp is None:
+            return []
+        out = []
+        for w in rp.query("*"):
+            # Buttons too (e.g. "Import selected"): without them Tab left the form
+            # at its last list instead of reaching the button.
+            if isinstance(w, (Input, OptionList, Button)) and getattr(w, "focusable", False):
+                out.append(w)
+        return out
+
+    def _focus_adjacent_form_field(self, widget, step: int) -> bool:
+        """Move focus from ``widget`` to the next (step=1) / previous (step=-1) field of the open
+        right-panel form. At either end of the form it does nothing (no wrapping) and still returns
+        True, so a list's arrow key is consumed instead of wrapping inside the list. Returns False
+        only when ``widget`` is not a field of the form."""
+        fields = self._right_form_fields()
+        idx = next((i for i, w in enumerate(fields) if w is widget), None)
+        if idx is None:
+            return False
+        j = idx + step
+        if 0 <= j < len(fields):
+            try:
+                fields[j].focus()
+            except Exception:
+                logger.exception("moving focus to the adjacent form field failed")
+        return True
+
+    # Search bar feedback ---------------------------------------------------------------
+    _SPIN = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
+    _SEARCH_HINT = "⏎ search · esc leave"
+
+    def _search_subtitle(self, text: str) -> None:
+        try:
+            self.query_one("#search_wrap").border_subtitle = text
+        except Exception:
+            pass
+
+    def _start_search_spinner(self, token: int, raw: str) -> None:
+        """Enter pressed in Search: the bar's frame turns 'busy' and its hint spins until the results
+        for ``token`` are up (then a green ✓ for a moment), or the search is superseded / fails."""
+        self._stop_search_spinner()
+        self._spin_token = token
+        self._spin_i = 0
+        try:
+            w = self.query_one("#search_wrap")
+            w.remove_class("-done"); w.add_class("-searching")
+        except Exception:
+            return
+        self._search_subtitle(f"{self._SPIN[0]} searching…")
+        try:
+            self._spin_timer = self.set_interval(0.09, self._search_spinner_tick, pause=False)
+        except Exception:
+            self._spin_timer = None
+
+    def _search_spinner_tick(self) -> None:
+        token = getattr(self, "_spin_token", None)
+        if getattr(self, "_closing", False):
+            return self._stop_search_spinner()
+        if getattr(self, "_search_rendered_token", None) == token and token is not None:
+            return self._finish_search_spinner(ok=getattr(self, "_searching_token", None) == token)
+        if getattr(self, "_last_search_worker", None) != token:      # a newer search took over
+            return self._stop_search_spinner()
+        if getattr(self, "_searching_token", None) != token:
+            # Something cleared the view (_clear_right resets _searching_token: Esc, another
+            # playlist, a menu...): nobody will ever render these results, stop spinning.
+            return self._abandon_search_spinner()
+        self._spin_i = (getattr(self, "_spin_i", 0) + 1) % len(self._SPIN)
+        self._search_subtitle(f"{self._SPIN[self._spin_i]} searching…")
+
+    def _abandon_search_spinner(self) -> None:
+        """The search was cancelled / superseded by another view: stop the spinner and leave the
+        bar as at rest (hint only while it has the focus). Idempotent."""
+        self._stop_search_spinner()
+        try:
+            w = self.query_one("#search_wrap")
+            w.remove_class("-done")
+        except Exception:
+            pass
+        try:
+            focused = self.focused
+        except Exception:
+            focused = None
+        self._search_subtitle(self._SEARCH_HINT if focused is getattr(self, "search_input", None) else "")
+
+    def _search_in_flight(self) -> bool:
+        tok = getattr(self, "_last_search_worker", None)
+        return tok is not None and getattr(self, "_search_rendered_token", None) != tok \
+            and (getattr(self, "_spin_timer", None) is not None
+                 or getattr(self, "_searching_token", None) == tok)
+
+    def _cancel_search(self) -> None:
+        """Esc while a search runs: its results are discarded when they arrive (the workers check
+        the tokens), the bar goes back to rest and the panel says so."""
+        self._last_search_worker = None
+        self._searching_token = None
+        self._abandon_search_spinner()
+        prev_title = getattr(self, "_search_prev_title", None)
+        try:
+            if len(self.query("#search_grid")) > 0 or len(self.query("#search_table")) > 0:
+                if prev_title is not None:
+                    self.right_panel.border_title = prev_title
+            else:
+                self._clear_right().update("[b]Search cancelled.[/b]  [dim](Esc: menu)[/dim]")
+        except Exception:
+            logger.exception("_cancel_search: repainting the panel failed")
+        self._notify("[b]Search cancelled.[/b]")
+
+    def _stop_search_spinner(self) -> None:
+        t = getattr(self, "_spin_timer", None)
+        if t is not None:
+            try: t.stop()
+            except Exception: pass
+            self._spin_timer = None
+        try:
+            w = self.query_one("#search_wrap")
+            w.remove_class("-searching")
+        except Exception:
+            pass
+
+    def _finish_search_spinner(self, ok: bool = True) -> None:
+        self._stop_search_spinner()
+        try:
+            w = self.query_one("#search_wrap")
+            if ok:
+                w.add_class("-done")
+        except Exception:
+            return
+        self._search_subtitle("✓ results" if ok else "")
+
+        def _clear():
+            try: self.query_one("#search_wrap").remove_class("-done")
+            except Exception: pass
+            # This timer can fire while the app is shutting down (a test that
+            # ends <1.2 s after a search): App.focused then raises
+            # ScreenStackError, which getattr's default does not catch.
+            try:
+                focused = self.focused
+            except Exception:
+                return
+            self._search_subtitle(self._SEARCH_HINT if focused is getattr(self, "search_input", None) else "")
+        try:
+            self.set_timer(1.2, _clear)
+        except Exception:
+            _clear()
+
+    def on_descendant_blur(self, event) -> None:
+        if getattr(event, "control", None) is getattr(self, "search_input", None) \
+                and getattr(self, "_spin_timer", None) is None:
+            self._search_subtitle("")
+
+    def on_descendant_focus(self, event) -> None:
+        """Remember the last widget focused inside the right panel, so focus can
+        come back to the same field of a form view (Settings, Import, Rename…)
+        after visiting the sidebar, Search or Help."""
+        w = getattr(event, "control", None)
+        if w is not None and w is getattr(self, "search_input", None) \
+                and getattr(self, "_spin_timer", None) is None:
+            self._search_subtitle(self._SEARCH_HINT)
+        # Whatever way the sidebar lists get focus (Enter, Tab, arrows, mouse), their current item
+        # must look selected.
+        if w is not None and w in (getattr(self, "pl_list", None), getattr(self, "lib_list", None)):
+            self._ensure_list_highlight(w)
+        try:
+            if w is not None and self._in_right_panel(w):
+                self._last_right_widget = w
+        except Exception:
+            pass
+
     def _focus_right_view(self) -> bool:
-        """Focus the content view open on the right (tracks table / list) so its
-        rows can be navigated again. Returns False if nothing focusable is open."""
+        """Focus the content view open on the right so it can be used again:
+        its table / list first (as before), otherwise the field that last had
+        focus there (forms such as Settings), otherwise its first focusable
+        widget (Input, OptionList, the Help scroll…). Returns False if nothing
+        focusable is open."""
         right = getattr(self, "right_panel", None)
         if right is None:
             return False
+
+        def _go(w) -> bool:
+            self.level = self.LVL_VIEW
+            try:
+                w.focus()
+            except Exception:
+                self.set_focus(w)
+            return True
         try:
             for wtype in (DataTable, ListView):
                 nodes = list(right.query(wtype))
                 if nodes:
-                    w = nodes[0]
-                    self.level = self.LVL_VIEW
-                    try:
-                        w.focus()
-                    except Exception:
-                        self.set_focus(w)
-                    return True
+                    return _go(nodes[0])
+            last = getattr(self, "_last_right_widget", None)
+            if last is not None and getattr(last, "is_attached", False) \
+                    and self._in_right_panel(last) and getattr(last, "focusable", False):
+                return _go(last)
+            for w in right.query("*"):
+                if getattr(w, "focusable", False):
+                    return _go(w)
         except Exception:
             logger.exception("_focus_right_view failed")
         return False
@@ -204,6 +391,13 @@ class NavigationMixin:
             logger.exception("action_cursor_down failed")
 
     def on_key(self, event: Key) -> None:
+        # A modal screen (the provider picker) owns the keyboard: none of the
+        # main-screen navigation below (Esc -> menu, arrows, Tab) applies.
+        try:
+            if len(self.screen_stack) > 1:
+                return
+        except Exception:
+            pass
         try:
             if getattr(self, "_search_capture_next", False):
                 k = event.key
@@ -229,13 +423,38 @@ class NavigationMixin:
             # the search grid's own panels consume Tab before this (widgets.py),
             # so this never fires while cycling result panels.
             if getattr(event, "key", "") in ("tab", "shift+tab", "backtab"):
-                if isinstance(focused, Input) and focused is not getattr(self, "search_input", None):
-                    return
                 step = -1 if event.key in ("shift+tab", "backtab") else 1
+                # A form view on the right (Settings, Import, Rename, Create…):
+                # Tab walks every field in order, then leaves to the next stop;
+                # Shift+Tab on the first field goes back. Never trapped.
+                if self._in_right_panel(focused) and not isinstance(focused, DataTable):
+                    fields = self._right_form_fields()
+                    if focused in fields:
+                        j = fields.index(focused) + step
+                        if 0 <= j < len(fields):
+                            try: event.stop(); event.prevent_default()
+                            except Exception: pass
+                            fields[j].focus()
+                            return
+                elif isinstance(focused, Input) and focused is not getattr(self, "search_input", None):
+                    return
                 try: event.stop(); event.prevent_default()
                 except Exception: pass
                 self._cycle_tab(step)
                 return
+
+            # Up/Down on a Button of a right-panel form (e.g. "Import selected") walk the form's fields.
+            # A Button does not use the arrows, so they used to reach the app binding and throw the
+            # focus out to the sidebar sections.
+            try:
+                from textual.widgets import Button
+                if getattr(event, "key", "") in ("up", "down") and isinstance(focused, Button) \
+                        and self._in_right_panel(focused) \
+                        and self._focus_adjacent_form_field(focused, 1 if event.key == "down" else -1):
+                    event.stop(); event.prevent_default()
+                    return
+            except Exception:
+                logger.exception("arrow on a form button failed")
 
             # RIGHT arrow behaviour:
             #  - inside an open view (LVL_VIEW): do nothing, never steal focus out.
@@ -244,6 +463,13 @@ class NavigationMixin:
             try:
                 if getattr(event, "key", "") == "right" and not getattr(event, "ctrl", False) and not getattr(self, "_help_focused", False):
                     if self.level == self.LVL_VIEW:
+                        # Inside the open view: never steal focus out. But if the
+                        # focus was moved elsewhere (a click on Playlists /
+                        # Library / Search) while the view stays open, Right
+                        # brings it back — it used to do nothing and the view
+                        # (e.g. Settings) could not be reached again.
+                        if not self._in_right_panel(focused):
+                            self._focus_right_view()
                         event.stop(); return
                     if self.level in (self.LVL_SECTIONS, self.LVL_SECTION_CONTENT):
                         if self.level == self.LVL_SECTIONS and self.section_order[self.section_idx] == "search":
@@ -252,6 +478,21 @@ class NavigationMixin:
                             event.stop(); return
             except Exception:
                 logger.exception("right-arrow navigation failed")
+
+            # RIGHT while on the Help box with a view open on the right (e.g.
+            # Settings): back into that view.
+            try:
+                if getattr(event, "key", "") == "right" and not getattr(event, "ctrl", False) \
+                        and getattr(self, "_help_focused", False) and getattr(self, "_right_view", None):
+                    if self._focus_right_view():
+                        self._help_focused = False
+                        try:
+                            self._update_section_highlight(None)
+                        except Exception:
+                            pass
+                        event.stop(); return
+            except Exception:
+                logger.exception("right-arrow from Help failed")
 
             # LEFT while on the Help box -> back to the Search section.
             try:
@@ -270,8 +511,9 @@ class NavigationMixin:
                     key = getattr(event, 'key', None)
                     inputs = []
                     try:
-                        inputs = [getattr(self, 'seek_vol_down_input', None), getattr(self, 'seek_vol_up_input', None), getattr(self, 'seek_track_input', None), getattr(self, 'seek_episode_input', None), getattr(self, 'lyrics_cache_input', None)]
-                        inputs = [i for i in inputs if i is not None]
+                        # Every field of the form, in screen order (the numeric
+                        # ones, the provider list and the Subsonic fields).
+                        inputs = self._right_form_fields()
                     except Exception:
                         inputs = []
                     try:
@@ -599,7 +841,11 @@ class NavigationMixin:
                         return
                     try:
                         candidates = list(getattr(table, 'row_to_uri', {}).keys())
-                        if not candidates and hasattr(table, '_model_rows'):
+                        # With a "/" filter, Ctrl+A selects what is on screen.
+                        vis = getattr(table, '_filter_rows', None)
+                        if vis is not None:
+                            candidates = list(vis)
+                        if not candidates and vis is None and hasattr(table, '_model_rows'):
                             candidates = list(range(len(getattr(table, '_model_rows', []))))
                     except Exception:
                         candidates = []
@@ -641,7 +887,9 @@ class NavigationMixin:
                         return
 
                 try:
-                    if isinstance(focused, DataTable):
+                    # Only Enter toggles a row (what the notice says). Any other key used
+                    # to toggle it too — `s` in Multi-Add selected the row AND sorted.
+                    if event.key == "enter" and isinstance(focused, DataTable):
                         table = focused
                         row = self._get_cursor_row(table)
                         if row is None:
@@ -775,7 +1023,12 @@ class NavigationMixin:
                 self.action_open(); event.stop(); return
 
             if event.key == "escape":
-                self.action_escape_to_menu(); event.stop(); return
+                # One physical Esc = ONE action_escape_to_menu: the app binding
+                # ("escape", "escape_to_menu") runs it after this handler anyway
+                # (event.stop() does not prevent that). Calling it here too made
+                # every "cancel something" Esc (remove a track, Multi-Add, the "/"
+                # filter, an import…) cancel AND go back to the menu.
+                return
 
             if event.key in ("up", "down", "j", "k") and self.level == self.LVL_SECTIONS:
                 event.stop()
@@ -812,11 +1065,72 @@ class NavigationMixin:
             except Exception:
                 logger.debug("repainting the welcome after collapsing failed")
 
+    def _esc_cancel_pending(self) -> bool:
+        """Cancel the innermost pending thing (in this order) and return True,
+        or return False when there is nothing to cancel."""
+        # A search still running: cancel it (the bar must not stay on "searching…").
+        if self._search_in_flight():
+            self._cancel_search()
+            return True
+        # Multi-Add mode: leave the mode, keep the view.
+        if getattr(self, "_multi_add_mode", False):
+            self._multi_add_mode = False
+            try: self._multi_add_selected_rows.clear()
+            except Exception: pass
+            self._multi_add_table = None
+            self._pending_multi_add_uris = None
+            self._notify("[b]Multi-Add cancelled.[/b]")
+            return True
+        # The "/" filter on the content table.
+        try:
+            closer = getattr(self, "_close_view_filter", None)
+            if callable(closer) and closer():
+                return True
+        except Exception:
+            logger.exception("clearing the view filter failed")
+        # "Add N tracks from <album/playlist>?" confirmation screen.
+        rv = getattr(self, "_right_view", None)
+        if getattr(self, "_pending_container_add", None) and rv and rv[0] == "confirm_bulk_add":
+            self._pending_container_add = None
+            self._clear_right().update("[b]Cancelled:[/b] nothing was added.  [dim](Esc: menu)[/dim]")
+            self._notify("[b]Add cancelled.[/b]")
+            return True
+        # Ctrl+D on a sidebar playlist: "type the name" / "are you sure (y/N)".
+        if getattr(self, "_pending_delete_playlist", None):
+            for attr in ("confirm_delete_input", "confirm_delete_confirm_input"):
+                w = getattr(self, attr, None)
+                if w is not None:
+                    try: w.remove()
+                    except Exception: pass
+                    try: delattr(self, attr)
+                    except Exception: pass
+            try: del self._pending_delete_playlist
+            except Exception: pass
+            self._clear_right().update("[b]Playlist deletion cancelled.[/b]  [dim](Esc: menu)[/dim]")
+            self._notify("[b]Deletion cancelled.[/b]")
+            return True
+        return False
+
     def action_escape_to_menu(self) -> None:
+        # A running Spotify import: Esc cancels it (the view stays until it
+        # reports what was done).
+        cancel = getattr(self, "_cancel_spotify_import", None)
+        if callable(cancel) and cancel():
+            return
         # Escape backs out of an armed removal instead of leaving the view.
         if getattr(self, "_pending_remove_track", None):
             self._cancel_remove_track()
             return
+        # Every Esc that cancels something stays where it is; only an Esc with
+        # nothing left to cancel goes back to the menu (the next one).
+        if self._esc_cancel_pending():
+            return
+        self._go_to_menu()
+
+    def _go_to_menu(self) -> None:
+        """Back to the menu with no Esc cancel chain: for programmatic callers
+        (closing Help/Devices/lyrics, finishing a rename…) that must neither
+        stop the pending state of another view nor cancel a running import."""
         try:
             self.right_panel.remove_class("lyrics-mode")
         except Exception: pass
@@ -900,6 +1214,20 @@ class NavigationMixin:
             pass
 
     def action_focus_search(self) -> None:
+        # "/" on a content table (open playlist, album, Liked Songs, search
+        # results…) filters the rows already loaded instead of starting a new
+        # search. Anywhere else it is still "go to Search".
+        try:
+            focused = getattr(self, "focused", None)
+            if getattr(focused, "_filter_table", None) is not None:
+                return  # already typing in the filter box
+            opener = getattr(self, "_open_view_filter", None)
+            if isinstance(focused, DataTable) and callable(opener) \
+                    and self._filterable_table(focused) is not None:
+                if opener(focused):
+                    return
+        except Exception:
+            logger.exception("opening the view filter failed")
         try:
 
             try:
@@ -1082,6 +1410,9 @@ class NavigationMixin:
             logger.exception('action_toggle_multi_add failed')
 
     def action_delete(self) -> None:
+        req = getattr(self, "_require_cap", None)
+        if callable(req) and not req("can_edit_playlists"):
+            return
         try:
             # A removal is armed: this second press is the confirmation.
             if getattr(self, "_pending_remove_track", None):
@@ -1289,11 +1620,27 @@ class NavigationMixin:
         return best
 
     def _get_cursor_row(self, table: DataTable):
+        """Model index of the highlighted row.
+
+        Without a "/" filter the display row IS the model index. With one, only
+        the matching rows are on screen (``table._filter_rows`` lists their
+        model indices), so the display row is translated back: every caller
+        (Enter, f, Ctrl+D, Multi-Add, sort) keeps addressing the real track."""
         row = getattr(table, "cursor_row", None)
-        if row is not None: return row
-        coord = getattr(table, "cursor_coordinate", None)
-        if coord is not None and hasattr(coord, "row"): return coord.row
-        return None
+        if row is None:
+            coord = getattr(table, "cursor_coordinate", None)
+            if coord is not None and hasattr(coord, "row"):
+                row = coord.row
+        if row is None:
+            return None
+        vis = getattr(table, "_filter_rows", None)
+        if vis is not None:
+            try:
+                r = int(row)
+            except Exception:
+                return None
+            return vis[r] if 0 <= r < len(vis) else None
+        return row
 
     def action_open(self):
         if getattr(self, "_help_focused", False):
@@ -1307,8 +1654,15 @@ class NavigationMixin:
             self._enter_section(); return
         focused = self.focused
         which = self.section_order[self.section_idx]
-        if self.level == self.LVL_SECTION_CONTENT:
-            if which == "search":
+        # The Visualizer has no focusable widget: opened from the sidebar it leaves the focus in the
+        # list but sets LVL_VIEW, and Enter did nothing. With it open, a focused sidebar list opens
+        # its item whatever self.level says.
+        in_sidebar_list = (getattr(self, "_vis_on", False) and isinstance(focused, ListView)
+                           and focused.id in ("lib_list", "pl_list"))
+        if self.level == self.LVL_SECTION_CONTENT or in_sidebar_list:
+            if in_sidebar_list:
+                which = "lib" if focused.id == "lib_list" else "pl"
+            if which == "search" and self.level == self.LVL_SECTION_CONTENT:
                 self.search_input.focus(); return
             if which == "lib" and isinstance(focused, ListView) and focused.id == "lib_list" and focused.index is not None:
                 li: ListItem = focused.children[focused.index]
@@ -1325,6 +1679,9 @@ class NavigationMixin:
             if fid == "tracks_table" and hasattr(focused, "row_to_uri"):
                 row = self._get_cursor_row(focused)
                 if row is not None: self._play_row(row, focused)
+            elif fid == "queue_table":
+                row = self._get_cursor_row(focused)
+                if row is not None: self._play_queue_row(row, focused)
             elif fid in ("search_table", "songs_table", "artists_table",
                          "albums_table", "playlists_table") and hasattr(focused, "row_to_type"):
                 row = self._get_cursor_row(focused)
@@ -1361,8 +1718,28 @@ class NavigationMixin:
                 if row is not None:
                     dev_id = focused.row_to_device.get(row)
                     if dev_id:
-                        threading.Thread(target=lambda: self.spotify.transfer(dev_id, force_play=True), daemon=True).start()
+                        # Same route as RowSelected (debounced there): it knows the
+                        # local player's "(start)" row. Transferring that sentinel id
+                        # straight to Spotify was the "404 Device not found".
+                        self._select_device(dev_id)
                         self._back_one_level()
+
+    @staticmethod
+    def _ensure_list_highlight(lv) -> None:
+        """Paint the highlight of the list's current item. A ListView whose index was already 0 when
+        its items were added (the first Playlists entry) never got the `-highlight` class, because
+        Textual only applies it when the index CHANGES: the first entry looked unselected until you
+        moved down and back up."""
+        try:
+            idx = lv.index
+            kids = list(lv.children)
+            if idx is None or not (0 <= idx < len(kids)):
+                return
+            for i, c in enumerate(kids):
+                if hasattr(c, "highlighted"):
+                    c.highlighted = (i == idx)
+        except Exception:
+            logger.exception("_ensure_list_highlight failed")
 
     def _enter_section(self):
         which = self.section_order[self.section_idx]
@@ -1372,10 +1749,12 @@ class NavigationMixin:
         elif which == "lib":
             if self.lib_list.index is None and self.lib_list.children:
                 self._suppress_first_selection = True; self.lib_list.index = 0
+            self._ensure_list_highlight(self.lib_list)
             self.lib_list.focus()
         elif which == "pl":
             if self.pl_list.index is None and self.pl_list.children:
                 self._suppress_first_selection = True; self.pl_list.index = 0
+            self._ensure_list_highlight(self.pl_list)
             self.pl_list.focus()
 
     def _back_one_level(self):
@@ -1383,29 +1762,13 @@ class NavigationMixin:
         # running (e.g. the post-transfer exit path). Idempotent no-op otherwise.
         self._stop_devices_interval()
 
-        try:
-            if getattr(self, "_view_stack", None):
-                prev = None
-                try:
-                    prev = self._view_stack.pop()
-                except Exception:
-                    prev = None
-                if prev:
-                    try:
-                        self._restore_view(prev)
-                        return
-                    except Exception:
-                        logger.exception("_back_one_level: failed restoring previous view")
-        except Exception:
-            logger.exception("_back_one_level: error checking view_stack")
-
         if self.level == self.LVL_VIEW:
             self.right_panel.update(WELCOME)
             self.level = self.LVL_SECTION_CONTENT
             which = self.section_order[self.section_idx]
             if which == "search": self.search_input.focus()
-            elif which == "lib": self.lib_list.focus()
-            else: self.pl_list.focus()
+            elif which == "lib": self._ensure_list_highlight(self.lib_list); self.lib_list.focus()
+            else: self._ensure_list_highlight(self.pl_list); self.pl_list.focus()
             return
         if self.level == self.LVL_SECTION_CONTENT:
             self._focus_section_by_idx(self.section_idx)

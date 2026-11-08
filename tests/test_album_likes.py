@@ -106,7 +106,7 @@ def atbl(app):
 
 def heart_at(table, row):
     try:
-        cell = table.get_cell_at(Coordinate(row, 0))
+        cell = table.get_cell_at(Coordinate(row, ((table._fit_fields.index('heart') if 'heart' in table._fit_fields else table._fit_fields.index('saved')) if getattr(table, '_fit_fields', None) else 0)))
         return getattr(cell, "plain", str(cell))
     except Exception:
         return None

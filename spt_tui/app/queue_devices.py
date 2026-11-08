@@ -20,9 +20,11 @@ except Exception:
 
 from textual.css.query import NoMatches
 
+from .. import config
 from ..config import logger
 from ..constants import GLYPHS
-from ..spotify_client import SpotifyClient
+from ..providers.base import Provider
+from ..providers.spotify import SpotifyClient
 from ..local_player import LOCAL_START_SENTINEL
 
 class QueueDevicesMixin:
@@ -53,6 +55,8 @@ class QueueDevicesMixin:
         "podcasts": "Saved Podcasts",
         "episodes": "Saved Episodes",
         "queue": "Queue",
+        "downloaded": "Downloaded",
+        "radio": "Radio",
     }
 
     def _queue_source_label(self, table) -> str:
@@ -64,6 +68,9 @@ class QueueDevicesMixin:
         return self._QUEUE_SOURCE_LABELS.get(wid, "")
 
     def action_queue_track(self):
+        req = getattr(self, "_require_cap", None)
+        if callable(req) and not req("can_control_queue"):
+            return
         try:
             focused = self.focused
             if not isinstance(focused, DataTable):
@@ -132,6 +139,12 @@ class QueueDevicesMixin:
                     self.call_from_thread(lambda: self._notify(f"[b]Added to queue:[/b] {rich_escape(title)}"))
                 except Exception:
                     pass
+                rv = getattr(self, "_right_view", None)
+                if rv and rv[0] == "queue":
+                    try:
+                        self.call_from_thread(self._refresh_queue_table)
+                    except Exception:
+                        pass
             threading.Thread(target=worker, daemon=True).start()
         except Exception as e:
             err_msg = rich_escape(str(e))
@@ -142,6 +155,9 @@ class QueueDevicesMixin:
             logger.exception("queue_track failed")
 
     def action_add_to_playlist(self):
+        req = getattr(self, "_require_cap", None)
+        if callable(req) and not req("can_edit_playlists"):
+            return
         try:
             focused = self.focused
             if isinstance(focused, ListView) and getattr(focused, "id", "") == "multi_review_list":
@@ -393,6 +409,9 @@ class QueueDevicesMixin:
         self.level = self.LVL_VIEW
 
     def action_open_queue(self):
+        req = getattr(self, "_require_cap", None)
+        if callable(req) and not req("can_control_queue"):
+            return
         # Ctrl+C held down (auto-repeat) fires this dozens of times. Ignore it
         # while a mount is in flight and, if the queue is already on screen,
         # just refresh it: never remount #queue_table (DuplicateIds).
@@ -452,14 +471,18 @@ class QueueDevicesMixin:
             logger.exception('remove_children before queue mount failed')
         if not self._is_current_view("queue", "", token):
             return  # another view took over while we waited
-        right.mount(Static("[b]Queue[/b]", markup=True))
-
+        # Same frame as an open playlist: the table borrows #right's border and
+        # title (no "Queue" box inside the panel), so the rows fill the panel.
         table = self._create_table_with_full_width(
-            ["#", "♥", "Title", "Artist", "Album", "Duration", "Source"],
-            ["num", "heart", "title", "artist", "album", "dur", "source"],
+            ["#", "↓", "♥", "Title", "Artist", "Album", "Duration", "Source"],
+            ["num", "dl", "heart", "title", "artist", "album", "dur", "source"],
             widget_id="queue_table", fields_attr="_queue_fields",
         )
         table.row_to_uri = {}; table.row_to_title = {}; table.row_to_id = {}
+        table._model_rows = []
+        self.right_panel.add_class("table-view")
+        table._view_title = "Queue"
+        self._refresh_table_title(table)
         right.mount(table)
         try: table.focus()
         except Exception: pass
@@ -514,7 +537,10 @@ class QueueDevicesMixin:
 
             self._new_view_token('add_to_playlist', '')
             right = self._clear_right()
-            right.mount(Static('[b]Add to playlist[/b]\nSelect a playlist and press Enter.', markup=True))
+            # Same frame as a playlist / Queue / Devices: the title on #right's border, no header
+            # text or box inside the panel.
+            right.add_class("table-view")
+            right.border_title = "Add to playlist  (Enter: add · Esc: cancel)"
             pls = self.playlists_cache or []
             if not pls:
                 try:
@@ -530,7 +556,7 @@ class QueueDevicesMixin:
                 li.data = {'type': 'playlist', 'id': p.get('id'), 'name': p.get('name')}
                 items.append(li)
             if not items:
-                right.mount(Static('[dim]No playlists found.[/dim]'))
+                right.mount(Static('[dim]No playlists found.[/dim]', classes='view-note'))
                 return
             self.add_pl_list = ListView(*items, id='add_pl_list')
             right.mount(self.add_pl_list)
@@ -540,6 +566,9 @@ class QueueDevicesMixin:
             logger.exception('_show_playlists_for_adding failed')
 
     def action_manage_devices(self):
+        req = getattr(self, "_require_cap", None)
+        if callable(req) and not req("can_list_devices"):
+            return
         self._leave_lyrics_mode()
         try:
             if getattr(self, 'level', None) == self.LVL_VIEW:
@@ -549,7 +578,7 @@ class QueueDevicesMixin:
                     tbl = None
                 if tbl is not None:
                     try:
-                        self.action_escape_to_menu()
+                        self._go_to_menu()
                         return
                     except Exception:
                         pass
@@ -567,22 +596,28 @@ class QueueDevicesMixin:
 
     def _open_devices_view(self):
         right = self._clear_right()
-        try:
-            table = self.query_one("#devices_table", DataTable)
-        except NoMatches:
-            table = None
-        if table is None:
-            table = self._create_table_with_full_width(
-                ["", "Name", "Type"], ["mark", "title", "device_type"],
-                widget_id="devices_table", fields_attr="_device_fields")
-            right.mount(Static("[b]Devices[/b] (Press Enter to transfer)", markup=True))
-            right.mount(table)
-        table.focus()
-        self._refresh_devices_table()
+        # _clear_right() is removing any #devices_table already on screen: never reuse it (the
+        # panel ended up empty), mount a new one once that removal is done (_mount_in_right).
+        table = self._create_table_with_full_width(
+            ["", "Name", "Type"], ["mark", "title", "device_type"],
+            widget_id="devices_table", fields_attr="_device_fields")
+        # Same frame as an open playlist or the Queue: the table borrows #right's
+        # border and title, no "Devices" box inside the panel.
+        table._model_rows = []
+        self.right_panel.add_class("table-view")
+        table._view_title = "Devices  (Enter: transfer playback)"
+        self._refresh_table_title(table)
+
+        def ready():
+            try: table.focus()
+            except Exception: pass
+            self._refresh_devices_table()
+        self._mount_in_right(right, table, after_mount=ready)
 
     def _populate_devices_table(self, table: DataTable, devs):
-        table.clear()
-        table.row_to_device = {}
+        """Model rows for the devices (+ the local player's start row), painted
+        through _repaint_rows_from_model: the cursor survives the 5 s refresh
+        and the "/" filter applies. row_to_device is keyed by model index."""
         rows = list(devs or [])
         entries = []  # (mark, name, type, device_id)
 
@@ -598,9 +633,22 @@ class QueueDevicesMixin:
             active = GLYPHS["dot_on"] if d.get("is_active") else GLYPHS["dot_off"]
             entries.append((active, d.get("name", "(no name)"), d.get("type", ""), d.get("id")))
 
-        for i, (mark, name, dtype, dev_id) in enumerate(entries):
-            table.add_row(mark, name, dtype, key=i)
-            table.row_to_device[i] = dev_id
+        table._model_rows = [{"mark": mark, "title": name, "artist": dtype, "device_type": dtype,
+                              "_device": dev_id, "type": "device"}
+                             for mark, name, dtype, dev_id in entries]
+        table.row_to_device = {i: r["_device"] for i, r in enumerate(table._model_rows)}
+        repaint = getattr(self, "_repaint_rows_from_model", None)
+        if callable(repaint):
+            repaint(table)
+        else:                       # bare mixin (unit tests): plain rows
+            table.clear()
+            for i, r in enumerate(table._model_rows):
+                table.add_row(r["mark"], r["title"], r["device_type"], key=i)
+        n = sum(1 for r in table._model_rows if r["_device"] != LOCAL_START_SENTINEL)
+        table._view_title = f"Devices · {n}  (Enter: transfer playback)"
+        retitle = getattr(self, "_refresh_table_title", None)
+        if callable(retitle):
+            retitle(table)
 
     def _stop_devices_interval(self):
         """Pause and drop the devices refresh interval (idempotent). Single exit
@@ -639,13 +687,50 @@ class QueueDevicesMixin:
                 logger.exception("devices paint scheduling failed")
         threading.Thread(target=worker, daemon=True).start()
 
+    def _play_queue_row(self, row_key, table) -> None:
+        """Enter on a Queue row: jump playback to that track (providers that own their queue)."""
+        prov = getattr(self, "spotify", None)
+        fn = getattr(prov, "play_queue_position", None)
+        if not callable(fn):
+            self._notify("[b]Playing from the queue is not supported by this provider.[/b]", warn=True)
+            return
+        try:
+            idx = int(row_key.value if hasattr(row_key, "value") else row_key)
+        except Exception:
+            return
+        pos = getattr(table, "row_to_qpos", {}).get(idx)
+        if pos is None:      # a "Next in queue" / "Next from" header
+            return
+        # Enter fires both the "open" action and DataTable.RowSelected: act once.
+        now = time.time()
+        last = getattr(self, "_last_queue_play", None)
+        if last and last[0] == idx and now - last[1] < 0.8:
+            return
+        self._last_queue_play = (idx, now)
+
+        def work():
+            try:
+                fn(pos)
+            except Exception as exc:
+                logger.exception("play_queue_position failed")
+                msg = rich_escape(str(exc))
+                self.call_from_thread(lambda: self._notify(f"[b]Could not play that entry:[/b] {msg}", warn=True))
+                return
+            self.call_from_thread(self._refresh_queue_table)
+        self.run_worker(work, thread=True, group="queue_play")
+
     def _queue_cells(self, item: dict, index: int, fields):
         """Build one queue row's cells for the surviving field list — the fitter
         drops low-priority columns on a narrow terminal, so the cells have to
         follow the header rather than a fixed order."""
+        if item.get('_header'):
+            # "Next in queue" / "Next from: …": a section title, not a track.
+            return [Text(str(item.get('title', '')), style="bold") if f == "title" else ""
+                    for f in fields]
         heart = Text("❤", style="bold red") if bool(item.get('liked', False)) else Text("")
         cell_map = {
-            "num": str(index + 1),
+            "num": str(item.get('_num') or (index + 1)),
+            "dl": self._dl_cell(item),
             "heart": heart,
             "title": item.get('title', ''),
             "artist": item.get('artist', ''),
@@ -654,6 +739,143 @@ class QueueDevicesMixin:
             "source": item.get('source', ''),
         }
         return [cell_map[f] for f in fields]
+
+    def _provider_queue_rows(self):
+        """Rows for the queue view from a provider that knows its own queue (the mpv-backed ones:
+        YouTube Music, Subsonic), in two parts like Spotify: "Next in queue" (what the user queued,
+        Source "Queue") and "Next from: <context>" (what follows by itself). None when the active
+        provider has no queue of its own (Spotify: its Web API queue is used, as before)."""
+        prov = getattr(self, "spotify", None)
+        if not isinstance(prov, Provider) or type(prov).queue is Provider.queue:
+            return None
+        try:
+            data = prov.queue() or {}
+        except Exception:
+            logger.exception("provider queue() failed")
+            return []
+        items = [t for t in (data.get("queue") or []) if isinstance(t, dict)]
+        ctx = getattr(self, "_play_context", None) or {}
+
+        def row(t, source, num):
+            return {
+                'uri': t.get('uri') or t.get('id'),
+                'id': t.get('id'),
+                'type': 'track',
+                'title': t.get('name') or '',
+                'artist': ', '.join(a.get('name', '') for a in (t.get('artists') or []) if isinstance(a, dict)),
+                'album': (t.get('album') or {}).get('name', '') if isinstance(t.get('album'), dict) else '',
+                'dur': SpotifyClient.fmt_duration(int(t.get('duration_ms') or 0)),
+                'source': source,
+                '_num': num,
+            }
+
+        mine = [t for t in items if t.get('_queued')]
+        rest = [t for t in items if not t.get('_queued')]
+        rows, num = [], 0
+        if mine:
+            rows.append({'_header': True, 'title': 'Next in queue', 'uri': None})
+            for t in mine:
+                num += 1
+                rows.append(row(t, 'Queue', num))
+        if rest:
+            name = ctx.get('name') or ''
+            rows.append({'_header': True, 'uri': None,
+                         'title': f"Next from: {name}" if name else "Next up"})
+            for t in rest:
+                num += 1
+                rows.append(row(t, ctx.get('source') or 'Playlist', num))
+        return rows
+
+    def _queue_view_limit(self) -> int:
+        cfg = config.LOCAL_CFG if isinstance(config.LOCAL_CFG, dict) else {}
+        try:
+            n = int(cfg.get("queue_context_limit") or 300)
+        except (TypeError, ValueError):
+            n = 300
+        return max(20, min(1000, n))
+
+    def _spotify_queue_continuation(self, api_items):
+        """Spotify only: ``GET /me/player/queue`` returns a short list with no
+        paging. When the playback context is a playlist or album and shuffle is
+        OFF, the tracks after the last one Spotify listed are taken from that
+        context, in its order. Returns ``(tracks, header, note)``; with shuffle
+        on (order unknowable) or no loadable context, no tracks and a note."""
+        pb = self.spotify.get_playback() or {}
+        ctx = pb.get('context') or {}
+        uri = ctx.get('uri') or ''
+        kind = (ctx.get('type') or (uri.split(':')[1] if uri.count(':') >= 2 else '')).lower()
+        cur = (pb.get('item') or {}).get('uri')
+        if pb.get('shuffle_state'):
+            return [], None, "shuffle is on: only Spotify's own short queue is known"
+        if kind not in ('playlist', 'album') or not cur:
+            return [], None, "Spotify's queue only (no playlist/album context to continue)"
+        cid = uri.split(':')[-1]
+        limit = self._queue_view_limit()
+        tracks, name = self._queue_context_tracks(kind, cid, uri, cur, pb)
+        uris = [t['uri'] for t in tracks]
+        if cur not in uris:
+            return [], None, "the playing track is not in its context any more"
+        listed = [((t.get('track') if isinstance(t, dict) and t.get('track') else t) or {}).get('uri')
+                  for t in (api_items or [])]
+        # The song may appear several times: of all its positions take the one
+        # after which Spotify's list lines up best with the context order.
+        # Spotify lists user-queued songs first, then the next context tracks,
+        # so the context part is a tail of ``listed`` equal to the head of
+        # ``after`` (matching "anywhere" jumped over hundreds of songs).
+        best_after, best_start = None, -1
+        for p in (i for i, u in enumerate(uris) if u == cur):
+            after = tracks[p + 1:]
+            start = 0
+            for k in range(len(listed) + 1):
+                n = len(listed) - k
+                if n and [t['uri'] for t in after[:n]] == listed[k:]:
+                    start = n
+                    break
+            if start > best_start:
+                best_after, best_start = after, start
+        rest = best_after[best_start:best_start + limit]
+        if not rest:
+            return [], None, "Spotify's queue reaches the end of the context"
+        return rest, f"Then from {name} (deduced from its order, not from Spotify)", \
+            "Spotify lists a short queue; the rest is deduced from the playlist order"
+
+    def _queue_context_tracks(self, kind, cid, ctx_uri, cur, pb):
+        """Tracks of the playing playlist/album and its name. Cached for 2 min
+        per context (the 5 s queue refresh must not re-download it); paged
+        until the playing track is found plus the rows the view can show."""
+        import time as _time
+        cache = getattr(self, '_queue_ctx_cache', None)
+        if cache and cache['uri'] == ctx_uri and _time.time() - cache['t'] < 120 \
+                and any(t['uri'] == cur for t in cache['tracks']):
+            return cache['tracks'], cache['name']
+        limit = self._queue_view_limit()
+        tracks = []
+        found = -1
+        off = 0
+        for _ in range(60):             # safety cap: 6000 tracks
+            if kind == 'playlist':
+                page = self.spotify.playlist_items(cid, limit=100, offset=off) or {}
+            else:
+                page = self.spotify.ensure().album_tracks(cid, limit=50, offset=off) or {}
+            items = page.get('items') or []
+            for e in items:
+                t = SpotifyClient.playlist_entry_track(e) if kind == 'playlist' else e
+                if t and t.get('uri'):
+                    tracks.append(t)
+                    if found < 0 and t['uri'] == cur:
+                        found = len(tracks) - 1
+            if not page.get('next') or not items:
+                break
+            off += len(items)
+            if found >= 0 and len(tracks) - found > limit + 100:
+                break
+        if kind == 'playlist':
+            name = next((p.get('name') for p in (getattr(self, 'playlists_cache', None) or [])
+                         if p.get('id') == cid), None) or 'the playlist'
+        else:
+            name = ((pb.get('item') or {}).get('album') or {}).get('name') or 'the album'
+        self._queue_ctx_cache = {'uri': ctx_uri, 't': _time.time(), 'tracks': tracks, 'name': name}
+        return tracks, name
 
     def _queue_refresh_finished(self):
         """Main thread: release the in-flight guard and run one coalesced
@@ -682,6 +904,7 @@ class QueueDevicesMixin:
                     self._queue_refresh_running = False
 
         def _worker_body():
+            self._queue_note = ''
             try:
                 api_items = None
                 try:
@@ -706,53 +929,73 @@ class QueueDevicesMixin:
                     logger.exception('Queue API attempt failed')
 
                 q = []
-                if api_items:
+                provider_rows = self._provider_queue_rows() if api_items is None else None
+                if provider_rows is not None:
+                    # The provider's own queue is the truth: no stale _local_queue entries, and
+                    # no de-duplication (one song may be both queued and in the playlist).
+                    q = provider_rows
+                elif api_items:
+                    def _sp_row(tr, source):
+                        return {
+                            'uri': tr.get('uri') or tr.get('id'), 'id': tr.get('id'), 'type': 'track',
+                            'title': tr.get('name') or '',
+                            'artist': ', '.join(a.get('name', '') for a in (tr.get('artists') or []) if a),
+                            'album': (tr.get('album') or {}).get('name', '') if isinstance(tr.get('album'), dict) else '',
+                            'dur': SpotifyClient.fmt_duration(int(tr.get('duration_ms') or 0)),
+                            'source': source,
+                        }
+                    # What Spotify itself reports (its queue endpoint has no paging
+                    # and returns only a short list).
+                    q.append({'_header': True, 'uri': None, 'title': 'Spotify queue (from Spotify)'})
                     for t in api_items:
                         try:
                             tr = t.get('track') if isinstance(t, dict) and t.get('track') else t
-                            title = tr.get('name') or ''
-                            artists = ', '.join(a.get('name','') for a in (tr.get('artists') or []) if a)
-                            album = (tr.get('album') or {}).get('name','')
-                            dur = SpotifyClient.fmt_duration(int(tr.get('duration_ms') or 0))
-                            uri = tr.get('uri') or tr.get('id')
-                            q.append({
-                                'uri': uri,
-                                'title': title,
-                                'artist': artists,
-                                'album': album,
-                                'dur': dur,
-                                'source': 'device-queue',
-                            })
+                            q.append(_sp_row(tr, 'Spotify queue'))
                         except Exception:
                             continue
+                    # …then, when it can be known, the rest of the playlist/album
+                    # it is playing from, marked as deduced.
+                    try:
+                        extra, header, self._queue_note = self._spotify_queue_continuation(api_items)
+                    except Exception:
+                        logger.exception('queue continuation failed')
+                        extra, header, self._queue_note = [], None, ''
+                    if header:
+                        q.append({'_header': True, 'uri': None, 'title': header})
+                    for tr in extra:
+                        q.append(_sp_row(tr, 'Deduced'))
                 else:
                     q = list(getattr(self, '_local_queue', []) or [])
 
                 try:
-                    max_items = 50
-                    seen = set()
-                    merged = []
-                    for it in q:
-                        uid = (it.get('uri') or it.get('id') or '').strip()
-                        if uid and uid in seen:
-                            continue
-                        merged.append(it)
-                        if uid: seen.add(uid)
-                        if len(merged) >= max_items:
-                            break
-
-                    if len(merged) < max_items:
-                        local = list(getattr(self, '_local_queue', []) or [])
-                        for lit in reversed(local):
+                    if provider_rows is None:     # Spotify / no provider queue: merge with _local_queue
+                        max_items = self._queue_view_limit() + 4     # + section headers
+                        seen = set()
+                        merged = []
+                        for it in q:
+                            uid = (it.get('uri') or it.get('id') or '').strip()
+                            if it.get('_header'):
+                                merged.append(it)
+                                continue
+                            if uid and uid in seen and it.get('source') != 'Deduced':
+                                continue
+                            merged.append(it)
+                            if uid: seen.add(uid)
                             if len(merged) >= max_items:
                                 break
-                            luid = (lit.get('uri') or lit.get('id') or '').strip()
-                            if luid and luid in seen:
-                                continue
-                            merged.append(lit)
-                            if luid: seen.add(luid)
 
-                    q = merged[:max_items]
+                        if len(merged) < max_items:
+                            local = list(getattr(self, '_local_queue', []) or [])
+                            for lit in reversed(local):
+                                if len(merged) >= max_items:
+                                    break
+                                luid = (lit.get('uri') or lit.get('id') or '').strip()
+                                if luid and luid in seen:
+                                    continue
+                                merged.append(lit)
+                                if luid: seen.add(luid)
+
+                        q = merged[:max_items]
                 except Exception:
                     try:
                         q = (q or [])[:50]
@@ -760,10 +1003,18 @@ class QueueDevicesMixin:
                         pass
 
                 try:
+                    import time as _time
+                    now = _time.time()
+                    lc = getattr(self, '_queue_liked_cache', None)
+                    if lc is None:
+                        lc = self._queue_liked_cache = {}
                     ids = []
                     for it in q:
                         u = (it.get('uri') or it.get('id') or '')
                         tid = None
+                        if it.get('_header') or (isinstance(u, str) and u.startswith('spotify:local:')):
+                            ids.append('')      # headers and local files have no Spotify id
+                            continue
                         try:
                             tid = self.spotify._normalize_track_id(u)
                         except Exception:
@@ -771,24 +1022,30 @@ class QueueDevicesMixin:
                         if not tid and isinstance(u, str) and u:
                             tid = u.split('/')[-1].split('?')[0]
                         ids.append(tid or '')
-                    liked_results = []
-                    try:
-                        liked_results = self.spotify.check_saved_tracks([i for i in ids if i]) if any(ids) else []
-                    except Exception:
-                        liked_results = []
-                    try:
-                        li = 0
-                        for idx, it in enumerate(q):
-                            tid = ids[idx] if idx < len(ids) else ''
-                            if tid and li < len(liked_results):
-                                it['liked'] = bool(liked_results[li])
-                                li += 1
-                            else:
-                                it['liked'] = bool(it.get('liked', False))
-                    except Exception:
-                        pass
+                    # Ask Spotify only for ids not checked in the last 60 s: the
+                    # view now holds hundreds of rows and refreshes every 5 s.
+                    todo = list(dict.fromkeys(i for i in ids if i and (i not in lc or now - lc[i][1] > 60)))
+                    if todo:
+                        try:
+                            res = self.spotify.check_saved_tracks(todo) or []
+                            for i, r in zip(todo, res):
+                                lc[i] = (bool(r), now)
+                        except Exception:
+                            logger.exception('queue liked check failed')
+                    for idx, it in enumerate(q):
+                        tid = ids[idx] if idx < len(ids) else ''
+                        if tid and tid in lc:
+                            it['liked'] = lc[tid][0]
+                        else:
+                            it['liked'] = bool(it.get('liked', False))
                 except Exception:
                     logger.exception('Could not determine liked state for queue items')
+
+                n_row = 0
+                for it in q:       # real position: section headers take no number
+                    if not it.get('_header'):
+                        n_row += 1
+                        it['_num'] = n_row
 
                 def _update():
                     try:
@@ -797,25 +1054,18 @@ class QueueDevicesMixin:
                         except NoMatches: table = None
                         if table is None:
                             return
-                        table.clear()
                         table.row_to_uri = {}
                         table.row_to_title = {}
                         table.row_to_id = {}
                         table._model_rows = list(q)
-                        fields = getattr(table, "_queue_fields", None) or [
-                            "num", "heart", "title", "artist", "album", "dur", "source"]
-                        for i, item in enumerate(q):
-                            try:
-                                table.add_row(*self._queue_cells(item, i, fields), key=i)
-                            except Exception:
-                                try:
-                                    table.add_row(str(i+1), item.get('title',''), key=i)
-                                except Exception:
-                                    pass
-                            table.row_to_uri[i] = item.get('uri')
-                            table.row_to_title[i] = f"{item.get('title','')} {GLYPHS['sep']} {item.get('artist','')}"
-                        try: table.refresh()
-                        except Exception: pass
+                        table._liked_map = {i: bool(it.get('liked')) for i, it in enumerate(q)}
+                        # Same repaint as every content table: keeps the cursor and
+                        # scroll across the 5 s refresh and honours the "/" filter.
+                        self._repaint_rows_from_model(table)
+                        n_real = sum(1 for it in q if not it.get('_header'))
+                        note = getattr(self, '_queue_note', '') or ''
+                        table._view_title = f"Queue · {n_real} songs" + (f"  [dim]({note})[/dim]" if note else "")
+                        self._refresh_table_title(table)
                     except Exception:
                         logger.exception('UI update for queue failed')
 

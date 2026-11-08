@@ -51,7 +51,7 @@ def headers(table):
 
 def cell0(table, row):
     try:
-        c = table.get_cell_at(Coordinate(row, 0))
+        c = table.get_cell_at(Coordinate(row, ((table._fit_fields.index('heart') if 'heart' in table._fit_fields else table._fit_fields.index('saved')) if getattr(table, '_fit_fields', None) else 0)))
         return getattr(c, "plain", str(c))
     except Exception:
         return None
@@ -73,7 +73,7 @@ async def test_no_floppy_and_heart_header():
         t = app._render_search_table("[b]All saved[/b]", rows, check_saved=False, layout="full")
         await pilot.pause()
         h = headers(t)
-        check("first header is a heart, not 'S'", h[0] == "♥", f"headers={h}")
+        check("first header is a heart, not 'S'", h[:2] == ["↓", "♥"], f"headers={h}")
         check("no 'S' header anywhere", "S" not in h, f"headers={h}")
         for i, r in enumerate(rows):
             check(f"saved {r['type']} shows heart", cell0(t, i) == HEART, f"cell={cell0(t,i)!r}")
@@ -81,7 +81,7 @@ async def test_no_floppy_and_heart_header():
         any_floppy = any((cell0(t, i) or "") == FLOPPY for i in range(len(rows)))
         check("no floppy glyph in any saved cell", not any_floppy)
         # Type labels stay distinct (semantics preserved visually).
-        types = [str(t.get_cell_at(Coordinate(i, 1))) for i in range(len(rows))]
+        types = [str(t.get_cell_at(Coordinate(i, t._fit_fields.index("type")))) for i in range(len(rows))]
         check("per-type labels preserved (TRK/ALB/ART/PDC/EPS)",
               types == ["TRK", "ALB", "ART", "PDC", "EPS"], f"types={types}")
 

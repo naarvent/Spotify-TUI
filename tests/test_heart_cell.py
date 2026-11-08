@@ -53,8 +53,9 @@ def rows_n(n):
 def heart_at(table, row):
     """The heart column's rendered text for a row."""
     try:
-        return str(getattr(table.get_cell_at((row, 0)), "plain",
-                           table.get_cell_at((row, 0))))
+        col = ((table._fit_fields.index('heart') if 'heart' in table._fit_fields else table._fit_fields.index('saved')) if getattr(table, '_fit_fields', None) else 0)
+        return str(getattr(table.get_cell_at((row, col)), "plain",
+                           table.get_cell_at((row, col))))
     except Exception as e:
         return f"<err {e}>"
 

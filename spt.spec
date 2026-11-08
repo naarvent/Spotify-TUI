@@ -28,6 +28,10 @@ for _pkg in ("textual", "pyfiglet"):
 
 # Our own package plus libraries imported indirectly.
 hiddenimports += ["spt_tui", "spt_tui.app", "spotipy", "rich", "requests"]
+# Providers are imported by name at runtime (spt_tui.providers.provider_class),
+# so the analyser cannot see them.
+hiddenimports += ["spt_tui.providers.spotify", "spt_tui.providers.mpris",
+                  "spt_tui.providers.subsonic", "spt_tui.providers.ytmusic"]
 
 a = Analysis(
     # A launcher, not spt_tui/__main__.py directly: PyInstaller runs the entry

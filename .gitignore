@@ -40,3 +40,8 @@ Thumbs.db
 
 # Obsidian vault config (README viewed as a vault)
 .obsidian/
+
+# Local-only helper files (personal paths / live network checks)
+PROBAR.md
+tests/check_*_live.py
+docs/superpowers/

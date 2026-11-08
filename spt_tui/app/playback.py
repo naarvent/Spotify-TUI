@@ -5,11 +5,12 @@ from __future__ import annotations
 import time
 import threading
 from time import monotonic as _mono
-from typing import Optional
+from typing import List, Optional
 
 from textual.widgets import Static, DataTable
 from rich.markup import escape as rich_escape
 from rich.text import Text
+from rich.cells import cell_len
 
 try:
     import requests
@@ -23,7 +24,7 @@ except Exception:
 from .. import config
 from ..config import logger
 from ..constants import USE_ASCII
-from ..spotify_client import SpotifyClient
+from ..providers.spotify import SpotifyClient
 
 class PlaybackMixin:
     # Only draw the ASCII-art artist banner when the panel is at least this
@@ -52,8 +53,15 @@ class PlaybackMixin:
         except Exception:
             return 60
 
-    def _render_header(self, big: bool = True) -> str:
-        title = self._lyrics_title or ""
+    def _header_parts(self, big: bool = True, title: Optional[str] = None,
+                      width: Optional[int] = None):
+        """What the song header is made of, as ``[("art", lines, colour) |
+        ("line", markup), ...]``: figlet title / artist blocks (each one a
+        rectangle: all its lines the same width, NOT yet positioned) when
+        there is room, one plain line otherwise. ``title`` is "Song — Artist";
+        by default the lyrics view's current one. Single source for the string
+        header (``_render_header``) and the row header (``_header_rows``)."""
+        title = (self._lyrics_title if title is None else title) or ""
         name = title
         artists = ""
         if " — " in title:
@@ -64,7 +72,7 @@ class PlaybackMixin:
         artist_main = (artists or name or "").split(",")[0].strip()
         song = name.strip()
 
-        w = self._lyrics_panel_width()
+        w = int(width) if width else self._lyrics_panel_width()
         try:
             h = int(getattr(self.size, "height", 0) or 0)
         except Exception:
@@ -73,37 +81,103 @@ class PlaybackMixin:
         if big and pyfiglet is not None and w >= self._LYRICS_ART_MIN_W and h >= self._LYRICS_ART_MIN_H:
             # Song title in ASCII art (primary); artist in art too when the
             # title is short enough and there is vertical room, else as a line.
-            title_art = self._ascii_art_centered(song, w) if song else None
-            artist_art = self._ascii_art_centered(artist_main, w) if artist_main else None
+            title_art = self._ascii_art_block(song, w) if song else None
+            artist_art = self._ascii_art_block(artist_main, w) if artist_main else None
 
             def _nlines(a):
-                return (a.count("\n") + 1) if a else 0
+                return len(a) if a else 0
 
             # Keep ~14 lines free for the lyrics themselves.
             room_for_both = (
                 title_art and artist_art
                 and (_nlines(title_art) + _nlines(artist_art)) <= max(0, h - 14)
             )
+            acc = self._accent_hex()
             if room_for_both:
-                return (f"[b][#e6ff71]{title_art}[/#e6ff71][/b]\n"
-                        f"[b][#27e1c1]{artist_art}[/#27e1c1][/b]\n")
+                return [("art", title_art, "#e6ff71"), ("art", artist_art, acc)]
             if title_art:
-                sub = f"[dim]{rich_escape(artist_main)}[/dim]\n" if artist_main else ""
-                return f"[b][#e6ff71]{title_art}[/#e6ff71][/b]\n{sub}"
+                sub = [("line", f"[dim]{rich_escape(artist_main)}[/dim]")] if artist_main else []
+                return [("art", title_art, "#e6ff71")] + sub
             if artist_art:
-                sub = f"[dim]{rich_escape(song)}[/dim]\n" if song else ""
-                return f"[b][#27e1c1]{artist_art}[/#27e1c1][/b]\n{sub}"
+                sub = [("line", f"[dim]{rich_escape(song)}[/dim]")] if song else []
+                return [("art", artist_art, acc)] + sub
 
         # Fallback (small terminal or no pyfiglet): plain one-line header.
         disp = title or artist_main
-        return f"[b][underline]{rich_escape(disp)}[/underline][/b]"
+        return [("line", f"[b][underline]{rich_escape(disp)}[/underline][/b]")]
 
-    def _ascii_art_centered(self, text: str, width: int) -> Optional[str]:
-        """Render `text` as figlet art, block-centered within `width`.
+    @staticmethod
+    def _art_shift(lines, width: int) -> int:
+        """Left offset that centres the rectangle ``lines`` in ``width``."""
+        return max(0, (int(width) - max((cell_len(ln) for ln in lines), default=0)) // 2)
 
-        Every line is padded to exactly `width` so the panel's per-line
-        centering leaves the block undistorted. Returns None if it won't fit.
+    def _render_header(self, big: bool = True, title: Optional[str] = None,
+                       width: Optional[int] = None) -> str:
+        """The song header of the lyrics view (also the Visualizer's) as
+        markup: figlet title / artist when there is room, one line otherwise.
+        ``title`` is "Song — Artist"; by default the lyrics view's current one."""
+        w = int(width) if width else self._lyrics_panel_width()
+        out = []
+        art = False
+        for part in self._header_parts(big, title, width):
+            if part[0] == "art":
+                art = True
+                _, lines, colour = part
+                shift = self._art_shift(lines, w)
+                body = "\n".join(rich_escape(" " * shift + ln + " " * max(0, w - shift - cell_len(ln)))
+                                 for ln in lines)
+                out.append(f"[b][{colour}]{body}[/{colour}][/b]")
+            else:
+                out.append(part[1])
+        return "\n".join(out) + ("\n" if art else "")
+
+    def _header_rows(self, big: bool = True, title: Optional[str] = None,
+                     width: Optional[int] = None):
+        """The header as one no-wrap, cropped ``Text`` per row, for the fixed
+        frames (karaoke, visualizer). Each figlet block is centred AS A UNIT on
+        ``width`` (every row gets the same left offset, written as real spaces
+        and with ``justify="left"``): Rich's own ``justify="center"`` strips the
+        trailing spaces of every row and re-centres it, which moved each row by
+        a different amount and the whole block off-centre. Plain lines (the
+        small-terminal fallback, the artist sub-line) are centred by Rich."""
+        from rich.text import Text
+        w = int(width) if width else self._lyrics_panel_width()
+        rows = []
+        for part in self._header_parts(big, title, width):
+            if part[0] == "art":
+                _, lines, colour = part
+                shift = self._art_shift(lines, w)
+                for ln in lines:
+                    t = Text(" " * shift + ln + " " * max(0, w - shift - cell_len(ln)),
+                             style=f"bold {colour}", justify="left", no_wrap=True, overflow="crop")
+                    rows.append(t)
+            else:
+                t = Text.from_markup(part[1])
+                t.justify, t.no_wrap, t.overflow = "center", True, "crop"
+                rows.append(t)
+        return rows
+
+    def _ascii_art_block(self, text: str, width: int) -> Optional[List[str]]:
+        """Figlet art of ``text`` as a RECTANGLE: trailing blanks trimmed to
+        measure it, then every line padded on the right to the widest one (not
+        positioned: callers centre the whole block). None if it won't fit.
+
+        Memoised by (text, width): building a Figlet costs ~2 ms and the
+        lyrics view asks for the same header on every tick (10 Hz in karaoke).
         """
+        cache = getattr(self, "_figlet_cache", None)
+        if cache is None:
+            cache = self._figlet_cache = {}
+        key = (text, int(width))
+        if key in cache:
+            return cache[key]
+        out = self._ascii_art_uncached(text, width)
+        if len(cache) > 64:
+            cache.clear()
+        cache[key] = out
+        return out
+
+    def _ascii_art_uncached(self, text: str, width: int) -> Optional[List[str]]:
         try:
             try:
                 fig = pyfiglet.Figlet(font="small", width=max(20, width))
@@ -120,16 +194,56 @@ class PlaybackMixin:
             lines.pop()
         if not lines:
             return None
-        block_w = max(len(ln) for ln in lines)
+        block_w = max(cell_len(ln) for ln in lines)
         if block_w > width:
             return None  # too wide -> caller falls back to plain header
-        shift = (width - block_w) // 2
-        padded = []
-        for ln in lines:
-            ln = (" " * shift) + ln
-            ln = ln + (" " * (width - len(ln)))
-            padded.append(rich_escape(ln))
-        return "\n".join(padded)
+        return [ln + " " * (block_w - cell_len(ln)) for ln in lines]
+
+    def _np_line_width(self, bar_right_len: int = 0, avail: int = 0) -> int:
+        """Cells available on the Now Playing title line: the title widget's
+        own content width; before layout, the bar's width; last, a guess."""
+        try:
+            cs = getattr(self.query_one("#np_title", Static), "content_size", None)
+            w = int(getattr(cs, "width", 0) or 0) if cs is not None else 0
+            if w > 0:
+                return w
+        except Exception:
+            pass
+        if bar_right_len > 0:
+            return int(bar_right_len)
+        return max(24, int(avail or 0))
+
+    @staticmethod
+    def _fit_cells(text: str, width: int) -> str:
+        """``text`` cut to ``width`` terminal cells, ending in "…" if cut."""
+        s = str(text or "")
+        width = max(1, int(width))
+        if cell_len(s) <= width:
+            return s
+        out, used = [], 0
+        for ch in s:
+            w = cell_len(ch)
+            if used + w > width - 1:
+                break
+            out.append(ch); used += w
+        return "".join(out).rstrip() + "…"
+
+    @staticmethod
+    def _np_mode_indicators(repeat_state: str, shuffle_on: bool):
+        """Repeat / Shuffle indicators for the Now Playing line: (plain text for measuring,
+        markup for painting). Active = bold, inactive = dim; repeat-one carries a small ¹."""
+        if USE_ASCII:
+            rep = {'track': 'one', 'context': 'all'}.get(repeat_state, 'off')
+            shf = 'on' if shuffle_on else 'off'
+        else:
+            rep = {'track': '↻¹', 'context': '↻'}.get(repeat_state, '↻')
+            shf = '⇄'
+        rep_on = repeat_state in ('track', 'context')
+        def tag(txt, on):
+            return f"[b]{txt}[/b]" if on else f"[dim]{txt}[/dim]"
+        plain = f"Repeat: {rep}  Shuffle: {shf}"
+        markup = f"Repeat: {tag(rep, rep_on)}  Shuffle: {tag(shf, shuffle_on)}"
+        return plain, markup
 
     def _np_full_bar_width(self) -> int:
         try:
@@ -139,7 +253,7 @@ class PlaybackMixin:
                 w = int(getattr(cs, "width", 0) or 0)
             else:
                 w = int(getattr(bar.size, "width", 0) or 0)
-            if w > 0: return max(1, w - 2)
+            if w > 0: return max(1, w)
         except Exception: pass
         try:
             scr_w = int(getattr(self.size, "width", 100) or 100)
@@ -152,7 +266,7 @@ class PlaybackMixin:
         if dur_ms <= 0:
             left, right = "0:00", "0:00"
             empty = "-" if USE_ASCII else "░"
-            return left, f"[{(empty * width)[:width]}]", right
+            return left, (empty * width)[:width], right
         frac = max(0.0, min(1.0, float(pos_ms) / float(dur_ms)))
         filled = max(0, min(width, int(round(frac * width))))
         fill  = "#" if USE_ASCII else "█"
@@ -162,7 +276,7 @@ class PlaybackMixin:
             inside = (inside + empty * width)[:width]
         left = SpotifyClient.fmt_duration(pos_ms)
         right = SpotifyClient.fmt_duration(dur_ms)
-        return left, f"[{inside}]", right
+        return left, inside, right
 
     def _cached_pos_ms(self) -> int:
         """Estimated playback position from cached state + wall clock — no
@@ -213,7 +327,7 @@ class PlaybackMixin:
                             bar_width = int(self._np_full_bar_width() or 0)
                         except Exception:
                             bar_width = 0
-                        bar_right_len = max(0, bar_width + 2)
+                        bar_right_len = max(0, bar_width)
                         if item:
                             name = (item.get("name") or item.get("title") or
                                     (item.get("track") or {}).get("name") or
@@ -237,27 +351,20 @@ class PlaybackMixin:
                             raw_title = f"Now Playing: {name}"
                             if artists:
                                 raw_title = f"Now Playing: {name} — {artists}"
-                            try:
-                                repeat_state = getattr(self, '_now_repeat_state', 'off') or 'off'
-                                shuffle_on = bool(getattr(self, '_now_shuffle', False))
-                                if repeat_state == 'track':
-                                    repeat_icon = '⟳'
-                                elif repeat_state == 'context':
-                                    repeat_icon = '↳↰'
-                                else:
-                                    repeat_icon = '↪'
-                                shuffle_icon = '⇄' if shuffle_on else '↪'
-                            except Exception:
-                                repeat_icon = '↪'; shuffle_icon = '↪'
+                            repeat_state = getattr(self, '_now_repeat_state', 'off') or 'off'
+                            shuffle_on = bool(getattr(self, '_now_shuffle', False))
+                            labeled, labeled_markup = self._np_mode_indicators(repeat_state, shuffle_on)
 
-                            labeled = f"Repeat: {repeat_icon}  Shuffle: {shuffle_icon}"
-                            icon_len = len(labeled)
-                            target_right = max(avail, bar_right_len)
-                            title_avail = max(1, target_right - icon_len - 1)
-                            ell = self._ellipsis_middle(raw_title, title_avail)
-                            esc = rich_escape(ell)
-                            pad = max(1, target_right - len(ell) - icon_len - 1)
-                            title_line = f"[b]{esc}[/b]" + (" " * pad) + labeled
+                            # The indicators sit flush with the right edge of the
+                            # line, which is the same edge as the progress bar's
+                            # closing "]" and the total time. Measured in terminal
+                            # cells (not len(): wide glyphs), with the title cut
+                            # with "…" so it never pushes the indicators.
+                            line_w = self._np_line_width(bar_right_len, avail)
+                            icon_len = cell_len(labeled)
+                            ell = self._fit_cells(raw_title, max(1, line_w - icon_len - 1))
+                            pad = max(1, line_w - cell_len(ell) - icon_len)
+                            title_line = f"[b]{rich_escape(ell)}[/b]" + (" " * pad) + labeled_markup
                         else:
                             title_line = "[dim]Now Playing: —[/dim]"
                         if getattr(self, "np_title", None) is not None:
@@ -268,7 +375,7 @@ class PlaybackMixin:
                             _, bar_str, _ = self._progress_components(pos_ms, dur_ms, bar_width)
                         else:
                             empty = "-" if USE_ASCII else "░"
-                            bar_str = "[" + (empty * bar_width) + "]"
+                            bar_str = empty * bar_width
                         if getattr(self, "np_bar_full", None) is not None:
                             try:
                                 self.np_bar_full.update(str(bar_str))
@@ -449,6 +556,10 @@ class PlaybackMixin:
         # slow (>1.5s) fetch cannot pile up workers. A sequence number lets a
         # worker drop its result if a newer sync has meanwhile taken over, so an
         # old, slow worker can never overwrite a newer one's published state.
+        # Never poll while the provider is being swapped: the old one is
+        # being closed and its answer would be stale anyway.
+        if getattr(self, "_switching_provider", False):
+            return
         lock = getattr(self, "_sync_worker_lock", None)
         if lock is None:
             self._sync_worker_lock = threading.Lock(); lock = self._sync_worker_lock
@@ -462,10 +573,15 @@ class PlaybackMixin:
             try:
                 started = _mono()
                 self._pb_sample_wall_ms = None
+                prov = self.spotify
                 try:
                     item, pos_ms, dur_ms, is_playing = self._get_current_or_last_track()
                 except Exception:
                     logger.exception("_sync_playback failed")
+                    return
+                self._show_provider_notices(prov)
+                # The provider was swapped while this ran: drop the answer.
+                if prov is not self.spotify:
                     return
                 # Drop stale results: a newer sync has superseded this one.
                 if my_seq != getattr(self, "_sync_seq", my_seq):
@@ -495,6 +611,14 @@ class PlaybackMixin:
                             self._refresh_playing_highlight()
                         except Exception:
                             pass
+                        # The queue on screen must not keep showing the track that just
+                        # started (or a queued one that already played).
+                        rv = getattr(self, "_right_view", None)
+                        if rv and rv[0] == "queue":
+                            try:
+                                self._refresh_queue_table()
+                            except Exception:
+                                logger.exception("refreshing the queue on track change failed")
                     try:
                         self._update_now_bar()
                     except Exception:
@@ -506,6 +630,25 @@ class PlaybackMixin:
             finally:
                 lock.release()
         threading.Thread(target=worker, daemon=True).start()
+
+    def _show_provider_notices(self, prov) -> None:
+        """Background messages from the provider (e.g. an unavailable track
+        mpv skipped) go to the status line."""
+        take = getattr(prov, "take_notices", None)
+        if not callable(take):
+            return
+        try:
+            notes = take()
+        except Exception:
+            logger.exception("take_notices failed")
+            return
+        if not isinstance(notes, list) or not notes:
+            return
+        msg = " · ".join(dict.fromkeys(str(n) for n in notes[-3:]))
+        try:
+            self.call_from_thread(self._notify, f"[b]{rich_escape(msg)}[/b]", warn=True, seconds=6.0)
+        except Exception:
+            logger.debug("provider notice dropped")
 
     def _ellipsis_middle(self, text: str, max_len: int) -> str:
         s = str(text or "")
@@ -539,12 +682,22 @@ class PlaybackMixin:
                     pass
         threading.Thread(target=worker, daemon=True).start()
 
+    def _playback_allowed(self, cap: str) -> bool:
+        """Capability gate for the playback keys (Free/Subsonic/... may not
+        support them). Objects without the helper (bare mixin use) allow all."""
+        req = getattr(self, "_require_cap", None)
+        return req(cap) if callable(req) else True
+
     def action_next(self):
+        if not self._playback_allowed("can_control_playback"):
+            return
         self._run_playback_call(self.spotify.next, resync_after=0.4)
 
     def action_play_pause(self):
         # Toggle from cached state (refreshed at least every 1.5s by
         # _sync_playback) instead of blocking the UI on a fresh get_playback().
+        if not self._playback_allowed("can_control_playback"):
+            return
         was_playing = bool(getattr(self, '_now_internal_is_playing', False))
         new_playing = not was_playing
         # Freeze the extrapolated position first: re-stamping the clock alone
@@ -560,6 +713,8 @@ class PlaybackMixin:
         self._run_playback_call(self.spotify.resume if new_playing else self.spotify.pause, resync_after=0.4)
 
     def action_prev_logic(self):
+        if not self._playback_allowed("can_control_playback"):
+            return
         progress = self._cached_pos_ms()
         if progress > 3000:
             self._run_playback_call(lambda: self.spotify.seek_ms(0), resync_after=0.4)
@@ -578,6 +733,8 @@ class PlaybackMixin:
         return (episode_s * 1000) if typ == "episode" else (track_s * 1000)
 
     def action_seek_back(self):
+        if not self._playback_allowed("can_seek"):
+            return
         item = getattr(self, '_bar_last_track', None) or {}
         delta_ms = self._seek_step_ms(item.get('type'))
         new_pos = max(0, self._cached_pos_ms() - delta_ms)
@@ -590,6 +747,8 @@ class PlaybackMixin:
         self._run_playback_call(lambda: self.spotify.seek_ms(new_pos), resync_after=0.35)
 
     def action_seek_fwd(self):
+        if not self._playback_allowed("can_seek"):
+            return
         item = getattr(self, '_bar_last_track', None) or {}
         delta_ms = self._seek_step_ms(item.get('type'))
         dur = int(getattr(self, '_now_internal_dur_ms', 0) or 0)
@@ -605,27 +764,37 @@ class PlaybackMixin:
         self._run_playback_call(lambda: self.spotify.seek_ms(new_pos), resync_after=0.35)
 
     def action_toggle_shuffle(self):
+        if not self._playback_allowed("can_shuffle_repeat"):
+            return
         new_state = not bool(getattr(self, '_now_shuffle', False))
         self._now_shuffle = new_state
         self._run_playback_call(lambda: self.spotify.shuffle(new_state))
 
     def action_toggle_repeat(self):
+        if not self._playback_allowed("can_shuffle_repeat"):
+            return
         self.repeat_idx = (self.repeat_idx + 1) % len(self.repeat_state_cycle)
         new_state = self.repeat_state_cycle[self.repeat_idx]
         self._now_repeat_state = new_state
         self._run_playback_call(lambda: self.spotify.repeat(new_state))
 
     def action_volume_down(self):
+        if not self._playback_allowed("can_set_volume"):
+            return
         vol = max(0, min(100, int(getattr(self, '_now_volume', 50) or 50) - 5))
         self._now_volume = vol
         self._run_playback_call(lambda: self.spotify.set_volume(vol))
 
     def action_volume_up(self):
+        if not self._playback_allowed("can_set_volume"):
+            return
         vol = max(0, min(100, int(getattr(self, '_now_volume', 50) or 50) + 5))
         self._now_volume = vol
         self._run_playback_call(lambda: self.spotify.set_volume(vol))
 
     def action_toggle_mute(self):
+        if not self._playback_allowed("can_set_volume"):
+            return
         vol = int(getattr(self, '_now_volume', 0) or 0)
         if vol == 0:
             target = 50
@@ -790,7 +959,8 @@ class PlaybackMixin:
                         pass
                     return
                 try:
-                    self.call_from_thread(lambda: self._notify(f"[b]{'Saved' if new else 'Removed from'} {label}[/b]"))
+                    self.call_from_thread(lambda: (self._notify(f"[b]{'Saved' if new else 'Removed from'} {label}[/b]"),
+                                                   self._paint_saved_rows(table, item_id, new)))
                 except Exception:
                     pass
                 try:
@@ -833,7 +1003,8 @@ class PlaybackMixin:
                         pass
                     return
                 try:
-                    self.call_from_thread(lambda: self._notify(f"[b]{'Followed' if new else 'Unfollowed'} Artist[/b]"))
+                    self.call_from_thread(lambda: (self._notify(f"[b]{'Followed' if new else 'Unfollowed'} Artist[/b]"),
+                                                   self._paint_saved_rows(table, aid, new)))
                 except Exception:
                     pass
                 try:
@@ -850,10 +1021,81 @@ class PlaybackMixin:
                 lock.release()
         threading.Thread(target=worker, daemon=True).start()
 
+    def _paint_saved_rows(self, table, item_id, saved: bool) -> None:
+        """UI thread: show the new saved/followed heart on the row(s) of
+        ``item_id`` in ``table`` (search grid panels, artist pages…), right
+        after a successful toggle — those tables are not re-checked later."""
+        if table is None or getattr(table, 'parent', None) is None:
+            return
+        try:
+            model = getattr(table, '_model_rows', None) or []
+            rows = self._rows_for_track(table, item_id)
+            if not rows:
+                return
+            if not hasattr(table, '_liked_map') or table._liked_map is None:
+                table._liked_map = {}
+            for r in rows:
+                if r < len(model) and isinstance(model[r], dict):
+                    model[r]['saved'] = bool(saved)
+                table._liked_map[r] = bool(saved)
+            self._repaint_rows_from_model(table)
+        except Exception:
+            logger.exception('saved heart repaint failed')
+
+    def _toggle_playlist_follow(self, sp, pid, table=None):
+        def worker():
+            lock = self._fav_lock_for(pid)
+            lock.acquire()
+            try:
+                try:
+                    was = bool((sp.current_user_follows_playlists_contains([pid]) or [False])[0])
+                except Exception:
+                    was = False
+                try:
+                    (sp.local_unfollow_playlists if was else sp.local_follow_playlists)([pid])
+                    ok = True
+                except Exception:
+                    logger.exception('playlist follow toggle failed')
+                    ok = False
+                if not ok:
+                    try:
+                        self.call_from_thread(lambda: self._notify('[b]Could not update Playlists[/b]', warn=True))
+                    except Exception:
+                        pass
+                    return
+                new = not was
+
+                def paint():
+                    self._notify(f"[b]{'Removed from' if was else 'Added to'} Playlists[/b]")
+                    self._paint_saved_rows(table, pid, new)
+                try:
+                    self.call_from_thread(paint)
+                except Exception:
+                    pass
+                self._load_playlists(force=True)
+            finally:
+                lock.release()
+        threading.Thread(target=worker, daemon=True).start()
+
     def action_toggle_favorite(self):
+        if not self._playback_allowed("can_like"):
+            return
         try:
             focused = getattr(self, 'focused', None)
             table = row = rtype = item_id = uri = None
+            # Sidebar playlist + local-follow provider: f unfollows / removes it.
+            try:
+                from textual.widgets import ListView
+                if isinstance(focused, ListView) and getattr(focused, 'id', '') == 'pl_list' \
+                        and focused.index is not None:
+                    sp = self.spotify.ensure()
+                    if hasattr(sp, 'current_user_follows_playlists_contains'):
+                        pdata = getattr(focused.children[focused.index], 'data', {}) or {}
+                        if pdata.get('id'):
+                            self._toggle_playlist_follow(sp, pdata['id'])
+                            return
+            except Exception:
+                logger.exception('sidebar playlist favourite failed')
 
             if isinstance(focused, DataTable):
                 table = focused
@@ -938,6 +1180,13 @@ class PlaybackMixin:
                 if not rid:
                     self._notify('[b]Could not determine artist id[/b]', warn=True); return
                 self._toggle_artist_favorite(sp, rid, table=table)
+            elif typ == 'playlist' and hasattr(sp, 'current_user_follows_playlists_contains'):
+                # Providers whose playlist "follow" is local (YouTube Music):
+                # f adds it to / removes it from the sidebar Playlists.
+                # (Spotify's client has no such method: unchanged there.)
+                if not rid:
+                    self._notify('[b]Could not determine playlist id[/b]', warn=True); return
+                self._toggle_playlist_follow(sp, rid, table=table)
             elif typ in ('podcast', 'show'):
                 if not rid:
                     self._notify('[b]Could not determine show id[/b]', warn=True); return

@@ -5,7 +5,282 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [RELEASED]
+## [v1.0.0] - 2026-11-07
+
+First stable release: multi-provider (Spotify, YouTube Music, Subsonic/Navidrome, MPRIS), local library, offline downloads, radio, artist pages, karaoke lyrics with Spicy Lyrics word timings, audio visualizer.
+
+### Changed
+
+- Now Playing: the progress bar no longer has `[ ]` around it; Repeat is `↻` (`↻¹` for one track) and Shuffle `⇄`, bold when active and dim when off (before, Repeat off and Shuffle off shared the same `↪`).
+
+### Fixed
+
+- Saving a setting right after entering the Spotify credentials no longer wipes `client_id`, `client_secret` and `redirect_uri` from `spt_config.json` (the form now updates the in-memory config, and saving never drops credentials already on disk). Reported in #9.
+
+### Added
+
+- Create Playlist only asks what the provider supports (`playlist_visibility`, `playlist_description` capabilities): Spotify = public + collaborative + description, YouTube Music = description, Subsonic = name only.
+- Settings > **Visualizer default mode** (`visualizer_mode`: `mirrored` (default) or `bars`); Shift+M still toggles it per session.
+- **Spicy Lyrics as a lyrics source** (`spt_tui/spicy_lyrics.py`, optional, own key from the keyring or `SPT_SPICY_LYRICS_KEY`):
+  real syllable times for karaoke, line times, duets and background vocals. Order: your files > Spicy Lyrics > LRCLIB; without a key
+  it does nothing. Spotify ids go straight to the API; other providers are matched with its search (only an `exact` result with
+  a matching duration is trusted). Cache in `<data>/lyrics/spicy_cache/` with a hard 30-day limit, own request pacing, errors fall
+  back to LRCLIB. Settings > Lyrics has an on/off list and shows whether a key was found (never its value).
+- The lyrics view now shows where the lyrics came from (provider; for a community sync also uploader and maker with links) under
+  the lines, in line mode and karaoke (also for LRCLIB and your own files). The key must be regenerated since it went through a chat; it
+  is not stored in the repo.
+- Track lists wrap around: Up on the first row jumps to the last, Down on the last row jumps to the first (`WrapTable`).
+- Settings > **Visualizer FPS** (`visualizer_fps`, 10-60, default 30), with a one-line help; Enter saves it and a running
+  visualizer picks it up at once (cava is restarted with the new framerate). The lower bound moved from 5 to 10.
+
+### Changed
+
+- Help and the "Add to playlist" picker now use the playlist frame like Queue and Devices: the title sits on the panel's
+  border and the content fills it (no heading or box nested inside).
+- Removed the dead view stack (`_view_stack` and the call to the non-existent `_restore_view` in `_back_one_level`).
+
+### Fixed
+
+- Esc while a search is running left the Search bar on "searching…" for good. Esc now cancels the search first (the late
+  results are discarded, the bar goes back to rest and the panel says "Search cancelled"); the next Esc goes to the menu.
+  The spinner also stops by itself if anything else clears the panel.
+- With the Visualizer open and the focus in a sidebar list, Enter on a playlist/library entry did nothing (the
+  Visualizer has no focusable widget and sets the "in a view" level, which `action_open` ignored). It now opens the item.
+- Karaoke and Visualizer: the big ASCII title/artist header was off-centre (about 11 columns to the right) and its rows
+  did not line up (Rich's `justify="center"` strips each row's trailing spaces and re-centres it). Each figlet block is now a
+  rectangle centred as a unit on the usable width, title and artist on the same axis; one shared helper (`_header_rows`).
+- Local player (librespot) first-time authorisation: the link now opens with the shared opener (`open_command` /
+  `SPT_OPEN_COMMAND`, default `abrir`, then the system browser), the status line says "Authorize SPT-TUI Local in
+  your browser… Waiting" until it is done (or why the browser could not be opened, with the link), and a clear
+  message on timeout. Choosing "SPT-TUI Local (start)" in Devices no longer sends that placeholder id to Spotify
+  (the "404 Device not found"), and Enter there acts once.
+- Tests never start a real librespot or open a browser (`SPT_LOCAL_PLAYER=0`, `SPT_OPEN_COMMAND=true` in the runner).
+- Esc ran its action twice (from the key handler AND the `escape` binding), so an Esc that cancels something
+  (Ctrl+D on a track, a running Spotify import) also went back to the menu. Now one Esc = one action, and
+  Multi-Add, the "/" filter, the big-album add confirmation and the delete-playlist prompt are each cancelled
+  by the first Esc (the view stays); the next Esc goes to the menu.
+- Library > Downloaded (and Radio) now paint the hearts of liked songs (one batched lookup; from memory with
+  YouTube Music's local library); they follow `s`/`S`, the `/` filter and `f`. Without likes the ♥ header is
+  dimmed and nothing is looked up.
+- Karaoke: the title and status rows could move as the lyrics advanced. The frame is now exactly the box
+  height (one row per line, no wrapping), the current line stays on the middle row, long lines take at most
+  2 rows with `…`; the wipe has a soft truecolor edge.
+- Offline copies were stored with `duration_ms: 0` when downloaded from a list row (Library > Downloaded
+  showed `0:00`): the duration now comes from the row, the provider's track, yt-dlp or ffprobe, and old
+  copies are filled in in the background.
+- The queue said `Source: Playlist` for songs played from Downloaded, Radio or the artist page; it now
+  says Downloaded / Radio / Artist with the right "Next from".
+- Multi-Add: any key (e.g. `s`) toggled the highlighted row; only Enter does now.
+- A 1.2 s search-bar timer could fire while the app was closing and raise `ScreenStackError` (seen as random UI-suite crashes under parallel load).
+- Artist page: the playlist search by the artist's name used `limit=50`, which development-mode Spotify apps now reject (search is capped at 10 since Feb 2026); it uses 10.
+- The first entry of Playlists (and Library) is highlighted as soon as you enter the list; it used to look unselected until you moved down and back up.
+- Liking / following / saving an album, artist or playlist from the combined-search grid no longer empties its panel (`_repaint_rows_from_model` only knew the Songs panel).
+
+### Added
+
+- Visualizer (`v`, `spt_tui/visualizer.py`, `app/visualizer_view.py`): `cava` bars from the real system audio,
+  accent gradient, the lyrics view's song header (fixed position), Shift+M mirror; cava is SIGSTOPped while nothing plays, killed when the view
+  closes, another view opens or spt exits (also if spt is killed: `PR_SET_PDEATHSIG`). `visualizer_fps` (30).
+- Devices view (`d`) in the same full-panel frame as a playlist (`Devices · N`), with `/` filter and the
+  cursor kept across refreshes.
+- Queue view like a playlist: full panel, frame title, `↓`/`♥`, `/` filter, sections as header rows; mpv
+  providers list up to `queue_context_limit` (300) songs; Spotify's short `/me/player/queue` is followed
+  by the rest of the playlist/album, marked "Deduced" (never with shuffle on).
+- Library > Downloaded can be sorted with `s` / `S` (also by Date added and Size; own remembered order;
+  unknown durations last) and has an Added column.
+- Settings > Appearance: hide the title bar (`show_header`), live.
+- A 1-cell download column before the heart in every song list and for every provider (`↓` / `⇣` / `·`);
+  dimmed with Spotify, where `o`/`O` explain that downloading is not possible (no API, DRM; pending).
+- Karaoke lyrics (`k` in the lyrics view, `spt_tui/karaoke.py`): word-by-word highlight (approximate from line
+  times, marked "≈ approximate"; real with enhanced LRC or your own TTML/LRC files in `<data>/lyrics/`), fading
+  by distance, `● ● ●` interludes, TTML background vocals / duets / romanisation, live offset `[` `]` `{` `}`.
+  The line view stays the default and unchanged (it now shows enhanced-LRC lines without their `<mm:ss>` tags).
+  Ticks at 10 Hz only while playing in karaoke, unchanged frames skipped, no layout pass per frame; the figlet
+  title is memoised (~2 ms per tick saved in both modes).
+- Offline downloads for YouTube Music and Subsonic (`spt_tui/offline.py`, `spt_tui/app/offline.py`): `o` downloads
+  or deletes the highlighted song, `O` the whole open list (filtered rows only with `/`), `↓` mark next to the heart,
+  Library > Downloaded. Files in `<data>/offline/<provider>/` with `index.json`; cap `offline_max_bytes` (Settings,
+  default 1 GB) with least-recently-used pruning. A downloaded song plays from the local file (no stream URL, no
+  yt-dlp, no server request); its metadata is kept so it plays after a restart without network. YouTube Music via
+  yt-dlp (best audio, no re-encode); Subsonic `download` with a fallback to `stream`.
+- Radio (`R`): tracks like the highlighted track, artist or playlist (or the one playing), as a "Radio: …"
+  list that plays from the chosen row. `Provider.radio` + `can_radio`: YouTube Music `get_watch_playlist`,
+  Subsonic `getSimilarSongs`/`getSimilarSongs2`, Spotify `/recommendations` (retired for development-mode
+  apps: explained on the status line, not retried). `Ctrl+R` reloads it.
+- Artist page: Enter on an artist shows its top tracks, albums, singles/EPs and related artists in one list
+  (Type column `TOP`/`ALB`/`SNG`/`REL`), with per-section counts in the title. New provider API
+  `artist_overview` / `artist_top_tracks` / `related_artists` and capabilities `can_artist_top_tracks` /
+  `can_related_artists`. YouTube Music: one `get_artist` call (+ `get_artist_albums` for the full discography).
+  Subsonic: `getTopSongs`, `getArtistInfo2`, OpenSubsonic `releaseTypes` (singles/EPs); `artist_albums(single)`
+  now returns them. Spotify: top tracks / related are tried once and, on 403/404 (Spotify removed them for
+  development-mode apps), the page says so and does not retry in that session. Missing sections never blank
+  the page; the status line explains.
+- `/` on an open list (playlist, album, Liked Songs, search results, artist view) filters the rows already
+  loaded by title/artist/album (all words, case- and accent-insensitive) without a new search. `Enter`/`↓`
+  keep it, `Esc` clears it. Works with the `s`/`S` sort; a filtered row plays from its real position, and
+  `f`, `Ctrl+D`, Multi-Add address the highlighted track. Elsewhere `/` still focuses Search.
+- Welcome screen: "Spotify" and "TUI" in the same figlet font (graffiti) with `by naarvent_ :)` centred under them, and
+  the whole text block centred against the headphones. It is now picked from the panel's REAL size (large /
+  medium / compact / small / minimal) at start and on every resize, so a window that is not fullscreen no
+  longer breaks the art; every line is padded to one width so the centred art keeps its shape.
+- Search bar: while you type it gets a heavy accent frame and a hint (`⏎ search · esc leave`); on Enter the
+  hint spins (`⠋ searching…`) until the results are up, then a green `✓`. Help box is narrower, the
+  title bar lost its icon, and the key hints bar uses the accent colour and can be hidden in Settings >
+  Appearance (`show_key_hints`).
+- Settings > Appearance: choose the **colour** of frames, titles and selection from 9 presets
+  (teal stays the default) or type any hex (`#ff7eb6`). The whole palette is derived from that one
+  colour (`spt_tui/theming.py`), applies at once and is remembered (`accent_color`).
+- Settings > Appearance: **Transparent** background. The terminal's own background (opacity, blur,
+  wallpaper) shows through and only the frames, the text and the selection stay painted; it
+  applies at once and is remembered (`transparent_background`). **Opaque** keeps the `spt-teal`
+  theme. Enter on a song in the Queue view now plays it (YouTube Music / Subsonic).
+- `spt_tui/scraper/`: anonymous reader of public Spotify metadata (track, playlist; no
+  credentials, no Premium), a small maintained port of SpotifyScraper (MIT, see
+  `spt_tui/scraper/NOTICE.md`): anonymous token from the embed page and persisted GraphQL
+  queries. Library > Import Playlists with YouTube Music now also accepts a Spotify playlist link
+  (or ID): it is copied into a local playlist, each song matched on YouTube Music. The screen
+  explains what each provider accepts (YouTube link kept on YouTube; Spotify link copied).
+- Stream prefetch for YouTube Music (`spt_tui/stream_cache.py`): the direct audio URL of the
+  next 3 queued tracks is resolved ahead (2 workers, 20-entry cache, expires before the URL
+  does), so skipping starts in ~0.4 s instead of ~2 s. A failing prefetched URL falls back to the
+  normal one without marking the track unavailable.
+- Import report: Liked Songs entries say how many songs were really new (`added_new`,
+  `merged_or_already_there`).
+
+- Provider layer (`spt_tui/providers/`): an abstract `Provider` with search,
+  library/playlists, playback and queue operations plus `Capabilities`
+  (`can_play`, `can_control_playback`, `can_seek`, `can_set_volume`,
+  `can_control_queue`, `can_like`, `can_edit_playlists`, `can_list_devices`...).
+  The UI talks to the active provider and gates unsupported actions with a
+  status-line notice. Chosen with `SPT_PROVIDER`, `"provider"` in
+  `spt_config.json`, or the provider picker; an unusable provider falls back
+  to Spotify with a notice at startup.
+- Spotify Free degraded mode: `product != premium` (or a `PREMIUM_REQUIRED`
+  answer) disables play/pause/seek/volume/queue/devices/librespot with a clear
+  notice; search, library, likes and playlists keep working.
+- `spotify_mpris` provider: control the Spotify web player the user opened,
+  through MPRIS / `playerctl` (play/pause/next/prev/seek/volume, now playing and
+  position for lyrics), and open `https://open.spotify.com/track/<id>` with
+  `abrir <url>` (configurable `open_command`). No browser automation, `sp_dc`,
+  internal endpoints, stream decryption or ad skipping.
+- `subsonic` provider (Subsonic / OpenSubsonic, Navidrome): token+salt auth,
+  `search3`, playlists, `star`/`unstar`, `scrobble`, `stream` playback. The
+  password is stored in the system keyring (`keyring` or `secret-tool`) or read
+  from `SPT_SUBSONIC_PASSWORD`, never written to `spt_config.json`.
+- `ytmusic` provider: anonymous `ytmusicapi` search and public playlists
+  (imported through Import Playlists), audio through `mpv` + `yt-dlp`.
+- Provider picker: `P` (Shift+P) from any view, and a selectable list in
+  Settings, show every provider with its readiness (available / missing mpv,
+  ytmusicapi, playerctl, configuration...).
+- Live provider switch (no restart): the new provider is created first (on
+  failure the current one stays, with a notice), then the old one's mpv /
+  sockets / librespot are released, caches, queue, views and playback state
+  are reset and the active view is reloaded; a failure after that rolls back
+  to a fresh instance of the previous provider. The choice is saved to
+  `spt_config.json`, except while `SPT_PROVIDER` is set (session-only switch,
+  the picker warns). Covered by `tests/test_provider_switch.py`.
+- Local library (`spt_tui/local_library.py`, `local_library_<provider>.json`)
+  for account-less providers (YouTube Music): `f` likes songs and saves
+  albums/singles and artists (Liked Songs / Saved Albums / Saved Artists with
+  hearts), `f` on a playlist result follows it into the sidebar (and `f` there
+  drops it), Create Playlist makes local playlists (`local:<uuid>`) that can be
+  renamed (`Ctrl+E`), deleted, played and edited (Add to Playlist, `Ctrl+D`),
+  and Recently Played is a local history (50). Entries keep minimal metadata
+  so they list offline; anything that vanishes upstream (removed/private video,
+  404 playlist, no network) is marked unavailable and skipped with a notice,
+  never deleted. Subsonic stars albums and artists on the server and keeps its
+  play history locally. Spotify is unchanged.
+- Import from Spotify (YouTube Music): Library entry and `P` picker entry
+  when Spotify credentials are configured. Reads the user's Spotify playlists,
+  Liked Songs, saved albums and followed artists read-only (official API, own
+  token, a wrapper refusing writes), matches every track by ytmusicapi search
+  (normalised title, artist, duration ±3 s, album; laxer second search),
+  imports playlists as local playlists, likes/albums/artists into the local
+  library, marks doubtful matches, caches matches (resume / retry), runs in
+  the background with progress, rate limiting and Esc to cancel, and writes
+  `import_report.json`. `tests/test_spotify_import.py` (offline) and the
+  optional online live check script.
+- Shared `mpv` player (`spt_tui/players/mpv.py`) over JSON IPC: queue, pause,
+  seek, volume, repeat, position/duration, subprocess cleanup on exit.
+- Optional extras in `pyproject.toml`: `[subsonic]` (keyring) and `[ytmusic]`
+  (ytmusicapi, yt-dlp).
+- Offline suites: `test_providers_base.py`, `test_spotify_free_mode.py`,
+  `test_mpv_player.py`, `test_subsonic_provider.py`, `test_ytmusic_provider.py`,
+  `test_mpris_provider.py`, `test_secret_store.py`, `test_provider_ui.py`,
+  `test_provider_switch.py`, `test_local_library.py`,
+  `test_ytmusic_library.py` (recorded ytmusicapi responses in
+  `tests/fixtures/ytmusic_recorded.json`), `test_local_library_ui.py`,
+  `test_view_focus.py`, `test_spotify_import.py`.
+
+### Fixed
+
+- Add to queue (mpv-backed providers) put the song at the END of the playlist, so `next` skipped it.
+  It now plays right after the current track, after earlier queued songs, and stays there across
+  shuffle on/off. A queued song that already played leaves the queue (and mpv's playlist).
+- Queue view with YouTube Music showed a stale local list (one row, already played). It now has two
+  parts like Spotify, "Next in queue" (manual, Source Queue) and "Next from <context>" (the next ~20),
+  follows mpv's real order (shuffle, repeat), handles the same song twice in the queue, and refreshes
+  on every track change. Reopening Devices after a view change no longer leaves the panel empty.
+- Repainting a table with the same id right after clearing the right panel could leave an unstarted
+  duplicate widget (Textual `DuplicateIds`) that stalled the UI; views now mount after the old one is gone.
+- Settings (`<`): Down on the last provider wrapped to the first and never reached the Subsonic
+  fields (Up on the first wrapped to the last). Arrows now leave lists at their edges
+  (`app/form_lists.py`); Tab and Up/Down also reach the "Import selected" button.
+- A burst of failures (network, yt-dlp) marked dozens of songs "unavailable" and skipped them
+  afterwards. Marks now expire after 24 h, a streak of 3 failures marks nothing, network errors
+  never mark, and the repeated "Skipped N unavailable track(s)" notice shows once.
+- Import from Spotify aborted on one slow reply (spotipy's 5 s default timeout): 25 s timeout and
+  per-page retries for timeouts and dropped connections.
+
+- Switching provider pauses what the outgoing one is playing (a Spotify device
+  kept playing), warns when it cannot (Free / no device), resets the Now
+  Playing bar and stops polling the old provider.
+- No `AttributeError` from saved-state checks on non-Spotify providers
+  (`current_user_saved_albums_contains` and the rest of the spotipy names the
+  UI calls now exist on every provider with safe defaults).
+- Concurrent writes of `playlists_cache_*.json`, the lyrics cache and
+  `spt_config.json` no longer share one `.tmp` file (`FileNotFoundError`):
+  unique temp file per write, config writes serialised.
+- Now Playing: the Repeat / Shuffle indicators sit flush with the right edge
+  of the progress bar at any width; long titles are cut with "…" (measured in
+  terminal cells). With mpv the bar no longer freezes: a skip unpauses, and the
+  loading phase (no duration yet) is reported as not playing.
+- YouTube Music: albums/singles of an artist page carry the artist; channel
+  uploads show the artist from the title instead of the channel, "- Topic"
+  suffixes are dropped; mpv never expands a URL into a playlist or autoplays.
+- YouTube Music: `f` on an artist said "Podcasts and followed artists is not
+  available": Saved Artists was gated on `can_podcasts`. Following artists is
+  now its own capability (`can_follow_artists`) and works through the local
+  library; the podcast notice no longer mentions artists. `f` on an album or
+  artist in the search grid now fills its heart at once (any provider).
+- Saved Podcasts / Saved Episodes (and Import Playlists for Subsonic) are
+  hidden from the Library menu when the provider has no such thing, also after
+  a live switch.
+- Focus could get stuck: with Settings (or Import Playlists / Rename / any form
+  view) open, moving focus to Playlists, Library, Search or Help left no way
+  back. `→` now returns to the field last used in the open view (also from
+  Help), Tab offers the form as a stop and walks every field before leaving,
+  and `↑`/`↓` reach the provider list and the Subsonic fields. The provider
+  picker stays modal (Esc closes). Covered by `tests/test_view_focus.py`.
+
+### Changed (UI)
+
+- Settings redesigned: title and subtitle, sections (Playback, Lyrics, Music
+  provider, Subsonic / Navidrome), aligned labels with a grey help line each,
+  a key-hint bar, scrolling, and a stacked layout on narrow terminals. Same
+  fields, keys and behaviour.
+- Provider picker redesigned: titled rounded window, ● / ○ and an ACTIVE badge
+  for the active provider, status in colour with its reason, separators and a
+  key-hint line (↑↓ choose · Enter apply · Esc close).
+- The app's teal palette is registered as a Textual theme (`spt-teal`) so the
+  new screens (and Textual's own widgets) use theme variables in the same
+  colours.
+
+### Changed
+
+- `spt_tui/spotify_client.py` moved to `spt_tui/providers/spotify.py` as
+  `SpotifyProvider`; `spt_tui.spotify_client.SpotifyClient` still works (same
+  class).
 
 ## [v0.2.3] - 2026-11-06
 

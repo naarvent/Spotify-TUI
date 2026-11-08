@@ -60,14 +60,23 @@ class LocalPlayer:
 
     def __init__(self, spotify, *, cache_dir: Optional[str] = None,
                  popen: Callable = subprocess.Popen,
-                 open_url: Optional[Callable[[str], None]] = None,
+                 open_url: Optional[Callable[[str], object]] = None,
                  now: Callable[[], float] = time.time,
-                 sleep: Callable[[float], None] = time.sleep):
+                 sleep: Callable[[float], None] = time.sleep,
+                 on_event: Optional[Callable[[str, dict], None]] = None):
         self._spotify = spotify
         self._cache_dir = cache_dir or config.CACHE_DIR
         self._librespot_cache = os.path.join(self._cache_dir, "librespot")
         self._popen = popen
-        self._open_url = open_url or (lambda u: None)
+        # Without an opener nothing can be shown to the user: default to the
+        # shared helper (open_command / SPT_OPEN_COMMAND, then webbrowser).
+        if open_url is None:
+            from .opener import open_url as _shared_open
+            open_url = _shared_open
+        self._open_url = open_url
+        # ("auth_url", {url, opened, error}) / ("auth_ok", {}) /
+        # ("auth_timeout", {url}) / ("auth_failed", {reason}) for the UI.
+        self._on_event = on_event or (lambda kind, data: None)
         self._now = now
         self._sleep = sleep
         self._proc = None
@@ -226,25 +235,48 @@ class LocalPlayer:
         threading.Thread(target=_reader, args=(proc,), daemon=True).start()
 
         deadline = self._now() + self.OAUTH_WAIT_SECONDS
-        opened = False
+        url = None
         while proc.poll() is None and self._now() < deadline:
-            if not opened:
+            # Drain EVERY line queued since the last tick (librespot prints its
+            # banner first): reading one per 0.1 s tick delayed the URL.
+            while url is None:
                 try:
                     line = line_q.get_nowait()
                 except queue.Empty:
-                    line = ""
-                if line:
-                    url = self._extract_url(line)
-                    if url:
-                        try:
-                            self._open_url(url)
-                        except Exception:
-                            logger.exception("LocalPlayer: opening auth url failed")
-                        opened = True
+                    break
+                url = self._extract_url(line)
+                if url:
+                    self._announce_url(url)
             if self.is_authenticated():
+                self._emit("auth_ok", {})
                 return True
             self._sleep(0.1)
-        return self.is_authenticated()
+        if self.is_authenticated():
+            self._emit("auth_ok", {})
+            return True
+        if proc.poll() is not None:
+            self._emit("auth_failed", {"reason": self.last_error or
+                                       f"librespot exited ({proc.returncode})"})
+        else:
+            self._emit("auth_timeout", {"url": url, "seconds": int(self.OAUTH_WAIT_SECONDS)})
+        return False
+
+    def _emit(self, kind: str, data: dict) -> None:
+        try:
+            self._on_event(kind, data)
+        except Exception:
+            logger.exception("LocalPlayer: event handler failed")
+
+    def _announce_url(self, url: str) -> None:
+        """Open the authorisation link ONCE and tell the UI (opened or not)."""
+        error = None
+        try:
+            res = self._open_url(url)
+            opened = res is not False
+        except Exception as exc:
+            opened, error = False, str(exc)
+            logger.warning("LocalPlayer: opening the auth url failed: %s", exc)
+        self._emit("auth_url", {"url": url, "opened": opened, "error": error})
 
     def start(self) -> bool:
         """Ensure librespot is running. Serialized: only one start may be in

@@ -1,0 +1,68 @@
+name: Bug report
+description: Something does not work as expected
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting! Please **do not paste tokens, passwords, keys or private data**. Check logs and screenshots first.
+        Security problems go through the private [security advisory](https://github.com/naarvent/Spotify-TUI/security/advisories/new), not here.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: What did you do, what did you expect, and what happened instead?
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Switch to provider ...
+        2. Press ...
+        3. See ...
+    validations:
+      required: true
+  - type: dropdown
+    id: provider
+    attributes:
+      label: Provider
+      options:
+        - Spotify
+        - Spotify Free via MPRIS (spotify_mpris)
+        - YouTube Music (ytmusic)
+        - Subsonic / Navidrome (subsonic)
+        - Not provider-specific
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Spotify-TUI version
+      description: Output of `spt --version`, or the installer / release you used.
+      placeholder: "1.0.0"
+    validations:
+      required: true
+  - type: dropdown
+    id: install
+    attributes:
+      label: How did you install it?
+      options:
+        - Windows installer
+        - pipx
+        - From source (pip install -e .)
+        - Other
+  - type: input
+    id: system
+    attributes:
+      label: Operating system and terminal
+      placeholder: "Arch Linux, kitty 0.35 / Windows 11, Windows Terminal"
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs or screenshots
+      description: The log file is `spt_py_textual_spotify.log` in the data directory. Remove private information first.
+      render: shell

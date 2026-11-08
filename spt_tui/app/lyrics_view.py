@@ -22,7 +22,10 @@ except Exception:
     pyfiglet = None
 
 from .. import config
+from .. import karaoke
+from .. import spicy_lyrics
 from ..config import logger
+from ..local_library import atomic_write_json
 from ..constants import WELCOME
 
 class LyricsMixin:
@@ -56,7 +59,7 @@ class LyricsMixin:
         if self._lyrics_on:
             self._leave_lyrics_mode()
             try:
-                self.action_escape_to_menu()
+                self._go_to_menu()
             except Exception:
                 try:
                     self.right_panel.update(WELCOME)
@@ -86,12 +89,291 @@ class LyricsMixin:
         self._lyrics_lines = []
         self.lyrics_box.update(self._render_header(big=True) + self._lyrics_gap() + "[b]Lyrics loading…[/b]")
 
+        self._lyrics_frame = None
+        self._start_lyrics_interval()
+        self._start_lyrics_load()
+
+    # ------------------------------------------------------------------ #
+    # Karaoke mode (word by word) and the live offset
+    # ------------------------------------------------------------------ #
+    # Line mode keeps its historical 0.4 s tick. Karaoke needs a finer one for
+    # the word wipe, but only repaints when the frame really changes
+    # (karaoke.frame_key_fixed), so most ticks cost a few comparisons.
+    LYRICS_TICK_LINES = 0.4
+    LYRICS_TICK_KARAOKE = 0.1
+    LYRICS_MODES = ("lines", "karaoke")
+    OFFSET_STEP_MS = 250
+    OFFSET_BIG_STEP_MS = 1000
+
+    def _lyrics_mode(self) -> str:
+        m = getattr(self, "_lyrics_mode_value", None)
+        if m is None:
+            cfg = config.LOCAL_CFG if isinstance(config.LOCAL_CFG, dict) else {}
+            m = cfg.get("lyrics_mode") if cfg.get("lyrics_mode") in self.LYRICS_MODES else "lines"
+            self._lyrics_mode_value = m
+        return m
+
+    def _start_lyrics_interval(self) -> None:
+        it = getattr(self, "_lyrics_interval", None)
+        if it is not None:
+            try: it.stop()
+            except Exception: pass
+            self._lyrics_interval = None
+        period = self._lyrics_tick_period()
+        self._lyrics_period = period
         try:
-            self._lyrics_interval = self.set_interval(0.4, self._update_lyrics_highlight, pause=False)
+            self._lyrics_interval = self.set_interval(period, self._update_lyrics_highlight, pause=False)
         except Exception:
             logger.exception("Could not initialize lyrics range")
 
-        self._start_lyrics_load()
+    def _lyrics_tick_period(self) -> float:
+        # Karaoke only needs 10 Hz while the song moves: paused, the 0.4 s tick
+        # of the line view is enough (a 10 Hz timer costs a few % CPU just by
+        # waking Textual up, even when nothing is repainted).
+        if self._lyrics_mode() == "karaoke" and getattr(self, "_now_internal_is_playing", False):
+            return self.LYRICS_TICK_KARAOKE
+        return self.LYRICS_TICK_LINES
+
+    def action_lyrics_mode(self) -> None:
+        """`k` in the lyrics view: line-by-line ⇄ karaoke (remembered)."""
+        if not getattr(self, "_lyrics_on", False):
+            return
+        m = "karaoke" if self._lyrics_mode() == "lines" else "lines"
+        self._lyrics_mode_value = m
+        try:
+            if not isinstance(config.LOCAL_CFG, dict):
+                config.LOCAL_CFG = {}
+            config.LOCAL_CFG["lyrics_mode"] = m
+            config.save_local_config(config.LOCAL_CFG)
+        except Exception:
+            logger.exception("could not save lyrics_mode")
+        self._lyrics_frame = None
+        self._start_lyrics_interval()
+        self._update_lyrics_highlight()
+        self._notify("[b]Lyrics:[/b] " + ("karaoke (word by word)" if m == "karaoke" else "line by line"))
+
+    def _lyrics_offset(self) -> int:
+        offs = getattr(self, "_lyrics_offsets", None) or {}
+        return int(offs.get(getattr(self, "_lyrics_track_id", None) or "", 0))
+
+    def _shift_lyrics_offset(self, delta_ms: int) -> None:
+        """`]`/`[` (±250 ms) and `}`/`{` (±1 s): lyrics later/earlier for THIS
+        song (on top of the file's own [offset:]). Positive = lyrics earlier."""
+        if not getattr(self, "_lyrics_on", False):
+            return
+        offs = getattr(self, "_lyrics_offsets", None)
+        if offs is None:
+            offs = self._lyrics_offsets = {}
+        key = getattr(self, "_lyrics_track_id", None) or ""
+        offs[key] = int(offs.get(key, 0)) + int(delta_ms)
+        self._lyrics_frame = None
+        self._update_lyrics_highlight()
+        self._notify(f"[b]Lyrics offset:[/b] {offs[key] / 1000:+.2f} s  [dim]([ ] ±0.25 s · {{ }} ±1 s)[/dim]")
+
+    def action_lyrics_offset_up(self): self._shift_lyrics_offset(+self.OFFSET_STEP_MS)
+    def action_lyrics_offset_down(self): self._shift_lyrics_offset(-self.OFFSET_STEP_MS)
+    def action_lyrics_offset_up_big(self): self._shift_lyrics_offset(+self.OFFSET_BIG_STEP_MS)
+    def action_lyrics_offset_down_big(self): self._shift_lyrics_offset(-self.OFFSET_BIG_STEP_MS)
+
+    def _lyrics_pos(self) -> int:
+        return max(0, self._cached_pos_ms() + self._lyrics_offset())
+
+    def _karaoke_lines(self):
+        kl = getattr(self, "_lyrics_klines", None)
+        if kl is None:
+            dur = int(getattr(self, "_now_internal_dur_ms", 0) or 0)
+            kl = self._lyrics_klines = karaoke.from_lines(self._lyrics_lines or [], dur)
+        return kl
+
+    def _karaoke_status(self, kl) -> str:
+        src = getattr(self, "_lyrics_source", "") or ""
+        if karaoke.has_real_words(kl):
+            sync = f"word-synced{' · ' + src if src else ''}"
+            n = karaoke.approximate_count(kl)
+            if n:
+                sync += f" (≈ {n} line{'s' if n != 1 else ''} approximate)"
+        else:
+            sync = "≈ approximate word timing (from line times)"
+        off = self._lyrics_offset()
+        off_s = f" · offset {off / 1000:+.2f} s" if off else ""
+        return f"[dim]karaoke · {sync}{off_s} · k: line view · [ ]: offset[/dim]"
+
+    # Body rows the karaoke view never goes below (on a tiny panel the big
+    # title is dropped for a one-line one first).
+    KARAOKE_MIN_BODY = 7
+
+    def _lyrics_box_size(self):
+        """(width, height) of the lyrics box's content area, with a guess
+        before the first layout."""
+        w = h = 0
+        try:
+            cs = self.lyrics_box.content_size
+            w, h = int(cs.width or 0), int(cs.height or 0)
+        except Exception:
+            pass
+        if not w:
+            w = self._lyrics_panel_width()
+        if not h:
+            try:
+                h = max(10, int(self.size.height) - 16)
+            except Exception:
+                h = 20
+        return w, h
+
+    @staticmethod
+    def _fixed_rows(markup: str, width: int):
+        """One no-wrap, cropped Text per line of ``markup`` (a header can never
+        wrap into extra rows)."""
+        from rich.text import Text
+        out = []
+        # Parse the whole markup first: a tag (the title colour) spans lines.
+        whole = Text.from_markup((markup or "").rstrip("\n"))
+        for t in whole.split("\n", allow_blank=True):
+            t.justify = "center"
+            t.no_wrap = True
+            t.overflow = "crop"
+            out.append(t)
+        return out
+
+    def _karaoke_layout(self):
+        """Rows of the header block (title, gap, status, spacer) and how many
+        rows the body gets. Fixed for a given song and panel size."""
+        from rich.text import Text
+        w, h = self._lyrics_box_size()
+        kl = self._karaoke_lines()
+        status = self._fixed_rows(self._karaoke_status(kl), w)[:1]
+        gap = max(0, self._lyrics_gap().count("\n") - 1)
+        head = self._header_rows(big=True, width=w)
+        if len(head) + gap + 2 + self.KARAOKE_MIN_BODY > h:
+            head = self._header_rows(big=False, width=w)
+            gap = min(gap, 1)
+        top = head + [Text("") for _ in range(gap)] + status + [Text("")]
+        if len(top) + self.KARAOKE_MIN_BODY > h:
+            top = status + [Text("")]
+        return top, max(1, h - len(top)), w
+
+    def _render_karaoke_view(self, force: bool = False) -> bool:
+        """Paint the karaoke frame; returns False when nothing changed.
+
+        Fixed geometry: the frame is EXACTLY the box height, one row per Text
+        (no wrapping anywhere), so the title and the status line never move
+        and the current line always starts on the middle row of the body."""
+        from rich.console import Group
+        from rich.text import Text
+        kl = self._karaoke_lines()
+        pos = self._lyrics_pos()
+        top, body_rows, width = self._karaoke_layout()
+        # Credit rows at the bottom of the box (fixed: the geometry never changes).
+        credit = spicy_lyrics.attribution_rows(getattr(self, "_lyrics_attr", None), width)
+        if credit and body_rows - len(credit) - 1 >= 3:
+            body_rows -= len(credit) + 1
+        else:
+            credit = []
+        sig = (karaoke.frame_key_fixed(kl, pos), tuple(t.plain for t in top), body_rows, width,
+               self._lyrics_offset(), tuple(t.plain for t in credit))
+        if not force and sig == getattr(self, "_lyrics_frame", None):
+            return False
+        self._lyrics_frame = sig
+        body = karaoke.render_fixed(kl, pos, width=width, rows=body_rows, accent=self._karaoke_accent())
+        self._karaoke_rows = top + body + ([Text("")] + credit if credit else [])
+        self._karaoke_credit_rows = (len(credit) + 1) if credit else 0
+        self._karaoke_header_rows = len(top)
+        # .lyrics_box is 1fr × 1fr: its size never depends on the text, so a
+        # frame only needs a repaint, not a layout pass (that pass was ~30% of
+        # the cost of each karaoke frame).
+        self.lyrics_box.update(Group(*self._karaoke_rows), layout=force)
+        self._lyrics_paints = getattr(self, "_lyrics_paints", 0) + 1
+        return True
+
+    # Wipe colour: the same yellow as the current line of the line view.
+    KARAOKE_ACCENT = "#e6ff71"
+
+    def _karaoke_accent(self) -> str:
+        return self.KARAOKE_ACCENT
+
+    # ------------------------------------------------------------------ #
+    # Spicy Lyrics source (optional, needs the user's own key)
+    # ------------------------------------------------------------------ #
+    def _spicy_enabled(self) -> bool:
+        """Settings flag (on by default). Whether a key exists is checked in the worker;
+        without one the source is skipped silently and LRCLIB works as before."""
+        return spicy_lyrics.enabled_in(config.LOCAL_CFG)
+
+    def _spicy_service(self):
+        svc = getattr(self, "_spicy_svc", None)
+        if svc is None:
+            cache = spicy_lyrics.SpicyCache(os.path.join(self._local_lyrics_dir(), "spicy_cache"))
+            svc = self._spicy_svc = spicy_lyrics.SpicyService(cache)
+            try:
+                cache.prune()
+            except Exception:
+                logger.exception("spicy cache prune failed")
+        return svc
+
+    def _spicy_notice(self, kind: str, text: str) -> None:
+        """One discreet line per kind of problem every 10 minutes (from the worker)."""
+        now = time.monotonic()
+        seen = getattr(self, "_spicy_notices", None)
+        if seen is None:
+            seen = self._spicy_notices = {}
+        if now - seen.get(kind, -1e9) < 600:
+            return
+        seen[kind] = now
+        try:
+            self.call_from_thread(self._notify, rich_escape(text), warn=True)
+        except Exception:
+            logger.debug("spicy notice dropped", exc_info=True)
+
+    def _lyrics_footer(self) -> str:
+        """Credit under the lines of the line-by-line view."""
+        m = spicy_lyrics.attribution_markup(getattr(self, "_lyrics_attr", None))
+        return ("\n\n" + m) if m else ""
+
+    # ------------------------------------------------------------------ #
+    # Your own lyrics files (TTML or LRC) — checked before the cache/LRCLIB
+    # ------------------------------------------------------------------ #
+    LOCAL_LYRICS_EXT = (".ttml", ".lrc")
+
+    def _local_lyrics_dir(self) -> str:
+        return os.path.join(config.CACHE_DIR, "lyrics")
+
+    @staticmethod
+    def _lyrics_file_stem(s: str) -> str:
+        return re.sub(r'[\\/:*?"<>|]+', "_", (s or "").strip()).lower()
+
+    def _find_local_lyrics(self, track_id, title, artist):
+        """Path of <lyrics dir>/<track id>.(ttml|lrc) or "<Artist> - <Title>"."""
+        d = self._local_lyrics_dir()
+        if not os.path.isdir(d):
+            return None
+        try:
+            names = {f.lower(): f for f in os.listdir(d)}
+        except OSError:
+            return None
+        stems = []
+        if track_id:
+            stems.append(self._lyrics_file_stem(str(track_id)))
+        if title:
+            if artist:
+                stems.append(self._lyrics_file_stem(f"{artist} - {title}"))
+                stems.append(self._lyrics_file_stem(f"{artist} - {self._clean_track_title(title)}"))
+        for stem in stems:
+            for ext in self.LOCAL_LYRICS_EXT:
+                hit = names.get(stem + ext)
+                if hit:
+                    return os.path.join(d, hit)
+        return None
+
+    def _load_local_lyrics(self, path):
+        """(line tuples, karaoke lines or None, source label) from a file."""
+        with open(path, "r", encoding="utf-8") as fh:
+            text = fh.read()
+        if path.lower().endswith(".ttml"):
+            kl = karaoke.parse_ttml(text)
+            return karaoke.to_line_tuples(kl), kl, "TTML"
+        lines = self._parse_lrc(text)
+        enhanced = any(len(x) > 2 and x[2] for x in lines)
+        return lines, None, ("enhanced LRC" if enhanced else "LRC")
 
     def _lyrics_gap(self) -> str:
         """Vertical separation between the header, the status line and the lyric
@@ -131,11 +413,37 @@ class LyricsMixin:
         self._lyrics_track_id = now_id or track_id
         self._lyrics_title = f"{name} — {artists}" if artists else name
         self._lyrics_lines = []
+        self._lyrics_klines = None
+        self._lyrics_source = ""
+        self._lyrics_attr = None
+        self._lyrics_frame = None
         if self.lyrics_box is not None:
             self.lyrics_box.update(self._render_header(big=True) + self._lyrics_gap() + "[b]Lyrics loading…[/b]")
 
+        # --- your own file (TTML / LRC in <data>/lyrics/) beats everything ---
+        try:
+            local = self._find_local_lyrics(track_id, name, primary_artist)
+        except Exception:
+            local = None
+        if local:
+            try:
+                lines, kl, src = self._load_local_lyrics(local)
+                self._apply_lyrics_result(gen, track_id, self._lyrics_title, lines, "found",
+                                          klines=kl, source=src,
+                                          attribution=spicy_lyrics.Attribution("Local file", "local"))
+                return
+            except Exception as exc:
+                logger.warning("lyrics file %s unusable: %s", local, exc)
+                self._notify(f"[b]Lyrics file ignored:[/b] {rich_escape(os.path.basename(local))} "
+                             f"({rich_escape(str(exc))})", warn=True)
+
+        use_spicy = self._spicy_enabled()
+        provider = self._current_provider_name() or ""
+
         # --- cache first (a Ctrl+R forces a fresh fetch, ignoring negatives) ---
-        if not force:
+        # With the Spicy Lyrics source on, its cache/request goes BEFORE the LRCLIB
+        # cache, so that check moves into the worker (the key lookup may touch the keyring).
+        if not force and not use_spicy:
             cached = self._lyrics_cache_get(track_id, name, primary_artist, duration_ms, album)
             if cached is not None:
                 self._apply_lyrics_result(gen, track_id, self._lyrics_title, cached,
@@ -145,7 +453,41 @@ class LyricsMixin:
         key = self._lyrics_cache_key(track_id, name, primary_artist, duration_ms, album)
         title = self._lyrics_title
 
+        def _deliver(*a, **kw):
+            try:
+                self.call_from_thread(self._apply_lyrics_result, gen, track_id, title, *a, **kw)
+            except Exception:
+                if getattr(self, '_closing', False):
+                    logger.debug("lyrics result dropped during teardown")
+                else:
+                    logger.exception("lyrics result: call_from_thread failed")
+
         def _worker():
+            static_fallback = None
+            if use_spicy:
+                out = self._spicy_service().fetch(
+                    provider=provider, track_id=track_id, title=name, artist=primary_artist,
+                    album=album, duration_ms=duration_ms, force=force,
+                    is_current=lambda: gen == getattr(self, "_lyrics_gen", 0) and self._lyrics_on)
+                if out.notice:
+                    self._spicy_notice(out.notice_kind, out.notice)
+                res = out.result
+                if out.status == "found" and res is not None:
+                    if res.kind in ("Syllable", "Line"):
+                        label = "Spicy Lyrics" if res.kind == "Syllable" else ""
+                        _deliver(res.lines, "found", klines=res.klines, source=label, attribution=res.attribution)
+                        return
+                    static_fallback = res
+                if gen != getattr(self, "_lyrics_gen", 0):
+                    return
+                if not force:
+                    cached = self._lyrics_cache_get(track_id, name, primary_artist, duration_ms, album)
+                    if cached:
+                        _deliver(cached, "found")
+                        return
+                    if cached is not None and static_fallback is None:
+                        _deliver(cached, "notfound")
+                        return
             try:
                 lines, status = self._fetch_synced_lyrics(
                     title=name, artist=primary_artist, album=album, duration_ms=duration_ms,
@@ -157,17 +499,18 @@ class LyricsMixin:
             # cached as a permanent absence.
             if status in ("found", "notfound"):
                 self._lyrics_cache_put(key, lines if status == "found" else [], status)
-            try:
-                self.call_from_thread(self._apply_lyrics_result, gen, track_id, title, lines, status)
-            except Exception:
-                if getattr(self, '_closing', False):
-                    logger.debug("lyrics result dropped during teardown")
-                else:
-                    logger.exception("lyrics result: call_from_thread failed")
+            if not lines and static_fallback is not None:
+                # Only unsynced text exists: pseudo-timed like LRCLIB's plain lyrics, credited to its source.
+                texts = [t[1] for t in static_fallback.lines]
+                _deliver(self._plain_to_pseudo_lrc("\n".join(texts), duration_ms), "found",
+                         attribution=static_fallback.attribution)
+                return
+            _deliver(lines, status)
 
         threading.Thread(target=_worker, daemon=True).start()
 
-    def _apply_lyrics_result(self, gen, track_id, title, lines, status="found"):
+    def _apply_lyrics_result(self, gen, track_id, title, lines, status="found", *,
+                             klines=None, source="", attribution=None):
         # Drop results from a stale request (A→B→C keeps only the newest) or
         # after the view was closed.
         if not self._lyrics_on or gen != getattr(self, "_lyrics_gen", 0):
@@ -176,12 +519,20 @@ class LyricsMixin:
         self._lyrics_track_id = track_id
         self._lyrics_title = title or self._lyrics_title
         self._lyrics_lines = lines or []
+        self._lyrics_klines = klines
+        self._lyrics_source = source or ("enhanced LRC" if any(len(x) > 2 and x[2] for x in self._lyrics_lines) else "")
+        # The credit always goes with the lyrics (provider; for a community sync also
+        # uploader and maker). Lyrics that came from LRCLIB say so.
+        self._lyrics_attr = (attribution or spicy_lyrics.Attribution("LRCLIB", "lrclib")) if self._lyrics_lines else None
+        self._lyrics_frame = None
         if self.lyrics_box is None:
             return
         header = self._render_header(big=True)
         gap = self._lyrics_gap()
-        if self._lyrics_lines:
-            self.lyrics_box.update(header + gap + self._render_lyrics_at(self._cached_pos_ms()))
+        if self._lyrics_lines and self._lyrics_mode() == "karaoke":
+            self._render_karaoke_view(force=True)
+        elif self._lyrics_lines:
+            self.lyrics_box.update(header + gap + self._render_lyrics_at(self._lyrics_pos()) + self._lyrics_footer())
         elif status == "error":
             # Keep the (correct) song header; a transient failure is retryable.
             self.lyrics_box.update(header + gap + "[b]Lyrics unavailable.[/b] Press Ctrl+R to retry.")
@@ -222,11 +573,9 @@ class LyricsMixin:
         try:
             c = getattr(self, "_lyrics_cache_data", None) or {}
             self._lyrics_cache_trim(c)
-            p = self._lyrics_cache_path()
-            tmp = f"{p}.{os.getpid()}.tmp"
-            with open(tmp, "w", encoding="utf-8") as f:
-                json.dump(c, f, ensure_ascii=False)
-            os.replace(tmp, p)       # atomic swap; no half-written file
+            # Atomic swap with a unique temp file (no half-written file, and
+            # two threads saving at once cannot clobber each other's temp).
+            atomic_write_json(self._lyrics_cache_path(), c)
         except OSError:
             logger.exception("lyrics cache save failed")
 
@@ -486,11 +835,16 @@ class LyricsMixin:
                     text = p.strip()
             if stamps:
                 for ts in stamps:
-                    lines.append((ts, text))
+                    # Enhanced LRC: "<mm:ss.xx>" word stamps inside the text.
+                    # The line view shows the clean text; karaoke uses the times.
+                    clean, words = karaoke.parse_enhanced_words(text, ts)
+                    lines.append((ts, clean, words) if words else (ts, text))
             else:
                 lines.append((0, raw))
         if offset_ms:
-            lines = [(max(0, ts - offset_ms), txt) for ts, txt in lines]
+            lines = [(max(0, x[0] - offset_ms), x[1]) + (
+                ([[max(0, int(w[0]) - offset_ms), w[1]] for w in x[2]],) if len(x) > 2 else ())
+                for x in lines]
         lines.sort(key=lambda x: x[0])
         return lines
 
@@ -498,8 +852,8 @@ class LyricsMixin:
         if not self._lyrics_lines:
             return "[i]No Lyrics Found[/i]"
         idx = 0
-        for i, (ts, _) in enumerate(self._lyrics_lines):
-            if ts <= pos_ms:
+        for i, line in enumerate(self._lyrics_lines):
+            if line[0] <= pos_ms:
                 idx = i
             else:
                 break
@@ -507,16 +861,16 @@ class LyricsMixin:
         end = min(len(self._lyrics_lines), idx + window + 1)
         out: List[str] = []
         for i in range(start, idx):
-            _, txt = self._lyrics_lines[i]
+            txt = self._lyrics_lines[i][1]
             safe = rich_escape(txt or "")
             out.append(f"[dim]{safe}[/dim]")
-        _, cur_txt = self._lyrics_lines[idx]
+        cur_txt = self._lyrics_lines[idx][1]
         cur_safe = rich_escape(cur_txt or "")
         out.append("")
         out.append(f"[b][#e6ff71]{cur_safe}[/#e6ff71][/b]")
         out.append("")
         for i in range(idx + 1, end):
-            _, txt = self._lyrics_lines[i]
+            txt = self._lyrics_lines[i][1]
             safe = rich_escape(txt or "")
             out.append(f"[dim]{safe}[/dim]")
         return "\n".join(out)
@@ -541,7 +895,12 @@ class LyricsMixin:
             if getattr(self, "_lyrics_loading", False) and not self._lyrics_lines:
                 self.lyrics_box.update(header + gap + "[b]Lyrics loading…[/b]")
                 return
-            block = self._render_lyrics_at(self._cached_pos_ms())
+            if self._lyrics_lines and self._lyrics_mode() == "karaoke":
+                self._render_karaoke_view()
+                if self._lyrics_tick_period() != getattr(self, "_lyrics_period", None):
+                    self._start_lyrics_interval()     # play/pause changed the rate
+                return
+            block = self._render_lyrics_at(self._lyrics_pos()) + self._lyrics_footer()
             self.lyrics_box.update(header + gap + block)
         except Exception:
             logger.exception("Error updating lyrics")

@@ -8,7 +8,7 @@ import threading
 import webbrowser
 from typing import Dict, List
 
-from textual.widgets import DataTable, Input, Static, ListItem, Label
+from textual.widgets import DataTable, Input, Static, ListItem, Label, ListView
 from rich.markup import escape as rich_escape
 
 try:
@@ -22,8 +22,12 @@ except Exception:
 
 from .. import config
 from .. import playlist_sort
+from ..local_library import atomic_write_json
 from ..config import logger
-from ..spotify_client import SpotifyClient
+from ..providers.spotify import SpotifyClient
+
+from .form_lists import FormOptionList
+
 
 class LibraryMixin:
     def action_prompt_import_playlists(self) -> None:
@@ -44,8 +48,9 @@ class LibraryMixin:
             self._new_view_token('import_input', '')
 
             right = self._clear_right()
-            self.import_input = Input(placeholder='Paste the playlist URI or ID and press Enter…')
-            right.mount(Static('[b]Add playlist to Import Playlists[/b]\nEnter playlist URI or ID and press Enter.'))
+            _text, _hint = self._import_prompt_texts()
+            self.import_input = Input(placeholder=_hint)
+            right.mount(Static(_text))
             right.mount(self.import_input)
             self.import_input.focus()
             self.level = self.LVL_VIEW
@@ -53,7 +58,18 @@ class LibraryMixin:
         except Exception:
             logger.exception('action_prompt_import_playlists failed')
 
+    def _import_prompt_texts(self) -> tuple:
+        """(help text, input placeholder) of Library > Import Playlists for the active provider."""
+        from .. import spotify_import as _si
+        prov = getattr(self, 'spotify', None)
+        caps = getattr(prov, 'capabilities', None)
+        return _si.import_playlists_text(getattr(prov, 'name', '') or '',
+                                         getattr(caps, 'can_import_from_spotify', False) is True)
+
     def action_prompt_create_playlist(self) -> None:
+        req = getattr(self, "_require_cap", None)
+        if callable(req) and not req("can_edit_playlists"):
+            return
         try:
             which = self.section_order[self.section_idx]
             if which != 'lib':
@@ -85,7 +101,10 @@ class LibraryMixin:
                 return
             self._new_view_token('create_playlist', '')
             right = self._clear_right()
-            right.mount(Static('[b]Create new Spotify playlist[/b]\nEnter the playlist name and press Enter.'))
+            where = ("in the local library" if self._cap("local_library")
+                     else f"on {getattr(self.spotify, 'display_name', 'Spotify')}")
+            right.mount(Static(f'[b]Create new playlist[/b] ({rich_escape(str(where))})\n'
+                               'Enter the playlist name and press Enter.'))
             self.create_name_input = Input(placeholder='Playlist name…')
             right.mount(self.create_name_input)
             self.create_name_input.focus()
@@ -95,39 +114,315 @@ class LibraryMixin:
         except Exception:
             logger.exception('action_prompt_create_playlist failed')
 
-    def action_prompt_settings(self) -> None:
+    def action_rename_playlist(self) -> None:
+        """Ctrl+E on a sidebar playlist: rename it (local playlists only)."""
         try:
-            self._new_view_token('settings', '')
+            focused = getattr(self, 'focused', None)
+            if not isinstance(focused, ListView) or getattr(focused, 'id', '') != 'pl_list' \
+                    or focused.index is None:
+                self._notify('[b]Select a playlist in the sidebar to rename it.[/b]', warn=True)
+                return
+            pdata = getattr(focused.children[focused.index], 'data', {}) or {}
+            pid, name = pdata.get('id'), pdata.get('name') or ''
+            can = getattr(self.spotify, 'can_rename_playlist', None)
+            if not pid or not callable(can) or not can(pid):
+                self._notify('[b]Only local-library playlists can be renamed here.[/b]', warn=True)
+                return
+            self._new_view_token('rename_playlist', pid)
+            self._pending_rename = {'id': pid, 'name': name}
             right = self._clear_right()
-            cur_vol_down = int((config.LOCAL_CFG.get('seek_volume_down') if isinstance(config.LOCAL_CFG, dict) else None) or 5)
-            cur_vol_up = int((config.LOCAL_CFG.get('seek_volume_up') if isinstance(config.LOCAL_CFG, dict) else None) or 5)
-            cur_track = int((config.LOCAL_CFG.get('seek_seconds_track') if isinstance(config.LOCAL_CFG, dict) else None) or 5)
-            cur_episode = int((config.LOCAL_CFG.get('seek_seconds_episode') if isinstance(config.LOCAL_CFG, dict) else None) or 15)
-            cur_cache_bytes = int((config.LOCAL_CFG.get('lyrics_cache_max_bytes') if isinstance(config.LOCAL_CFG, dict) else None) or config.LYRICS_CACHE_DEFAULT_BYTES)
-            cur_cache_h = config.format_size(cur_cache_bytes)
-            right.mount(Static('[b]Settings[/b]\nConfigure volume steps, seek jump times and the lyrics cache size.\nEnter values and press Enter (or use Up/Down arrows) to move between fields.'))
-            right.mount(Static(f'Current: Vol Down = {cur_vol_down}%, Vol Up = {cur_vol_up}%, Tracks = {cur_track}s, Episodes = {cur_episode}s, Lyrics cache = {cur_cache_h}'))
+            right.mount(Static(f'[b]Rename playlist:[/b] {rich_escape(name)}\nType the new name and press Enter (Esc cancels).'))
+            self.rename_playlist_input = Input(value=name, placeholder='New name…')
+            right.mount(self.rename_playlist_input)
+            self.rename_playlist_input.focus()
+            self.level = self.LVL_VIEW
+        except Exception:
+            logger.exception('action_rename_playlist failed')
+
+    def _submit_rename_playlist(self, value: str) -> None:
+        pending = getattr(self, '_pending_rename', None) or {}
+        self._pending_rename = None
+        try:
+            del self.rename_playlist_input
+        except Exception:
+            pass
+        new = (value or '').strip()
+        if not pending or not new:
+            self._notify('[b]Rename cancelled.[/b]', warn=True)
+            return
+
+        def worker():
             try:
-                right.mount(Static('[dim]Lyrics cache accepts sizes like "200 MB", "500 MB", "1 GB" or "2 GB". Press ESC to go back.[/dim]'))
+                ok = bool(self.spotify.rename_playlist(pending['id'], new))
+            except Exception as exc:
+                logger.exception('rename playlist failed')
+                ok, err = False, str(exc)
+            else:
+                err = ''
+            def done():
+                if ok:
+                    self._notify(f"[b]Playlist renamed:[/b] {rich_escape(new)}")
+                    self._go_to_menu()
+                else:
+                    self._notify(f"[b]Could not rename the playlist.[/b] {rich_escape(err)}", warn=True)
+            try:
+                self.call_from_thread(done)
             except Exception:
                 pass
+            self._load_playlists(force=True)
+        threading.Thread(target=worker, daemon=True).start()
+
+    def action_prompt_settings(self) -> None:
+        """Settings: one scrollable form grouped in sections (Playback,
+        Lyrics, Music provider, Subsonic). The fields, their order and the
+        Enter / ↑↓ / Esc behaviour are those of the original wizard."""
+        try:
+            from textual.containers import VerticalScroll
+            self._new_view_token('settings', '')
+            right = self._clear_right()
+            cfg = config.LOCAL_CFG if isinstance(config.LOCAL_CFG, dict) else {}
+            cur_vol_down = int(cfg.get('seek_volume_down') or 5)
+            cur_vol_up = int(cfg.get('seek_volume_up') or 5)
+            cur_track = int(cfg.get('seek_seconds_track') or 5)
+            cur_episode = int(cfg.get('seek_seconds_episode') or 15)
+            cur_cache_bytes = int(cfg.get('lyrics_cache_max_bytes') or config.LYRICS_CACHE_DEFAULT_BYTES)
+            cur_cache_h = config.format_size(cur_cache_bytes)
             # No widget ids: remove() is async, so a second Settings open in the same
             # turn would hit DuplicateIds. The wizard finds the inputs by attribute.
-            self.seek_vol_down_input = Input(placeholder=f'Volume Down step percent (current {cur_vol_down})')
-            self.seek_vol_up_input = Input(placeholder=f'Volume Up step percent (current {cur_vol_up})')
-            self.seek_track_input = Input(placeholder=f'Track jump seconds (current {cur_track})')
-            self.seek_episode_input = Input(placeholder=f'Episode jump seconds (current {cur_episode})')
-            self.lyrics_cache_input = Input(placeholder=f'Lyrics cache max size, e.g. 200 MB or 1 GB (current {cur_cache_h})')
-            right.mount(self.seek_vol_down_input)
-            right.mount(self.seek_vol_up_input)
-            right.mount(self.seek_track_input)
-            right.mount(self.seek_episode_input)
-            right.mount(self.lyrics_cache_input)
+            self.seek_vol_down_input = Input(placeholder=f'{cur_vol_down}')
+            self.seek_vol_up_input = Input(placeholder=f'{cur_vol_up}')
+            self.seek_track_input = Input(placeholder=f'{cur_track}')
+            self.seek_episode_input = Input(placeholder=f'{cur_episode}')
+            self.lyrics_cache_input = Input(placeholder=f'{cur_cache_h}')
+
+            parts = [
+                Static('⚙  Settings', classes='settings-title'),
+                Static('Playback steps, lyrics cache and music provider. Type a value and press '
+                       'Enter to save it; an empty field keeps the current value.',
+                       classes='settings-subtitle'),
+                Static('Playback', classes='settings-section'),
+                *self._settings_field('Volume step down', self.seek_vol_down_input,
+                                      f'Percent per "-" press. Current: {cur_vol_down}%'),
+                *self._settings_field('Volume step up', self.seek_vol_up_input,
+                                      f'Percent per "+" press. Current: {cur_vol_up}%'),
+                *self._settings_field('Track seek', self.seek_track_input,
+                                      f'Seconds per Ctrl+←/→ on a song. Current: {cur_track}s'),
+                *self._settings_field('Episode seek', self.seek_episode_input,
+                                      f'Seconds per Ctrl+←/→ on a podcast episode. Current: {cur_episode}s'),
+                Static('Lyrics', classes='settings-section'),
+                *self._settings_field('Lyrics cache size', self.lyrics_cache_input,
+                                      f'With a unit: "200 MB", "1 GB" (1 MB – 8 GB). Current: {cur_cache_h}. '
+                                      'Enter here saves and closes Settings.'),
+            ]
+            parts += self._spicy_settings_widgets()
+            parts += self._visualizer_settings_widgets()
+            parts += self._offline_settings_widgets()
+            parts += self._appearance_settings_widgets()
+            parts += self._provider_settings_widgets()
+            parts.append(Static('Enter save · ↑↓/Tab move · Esc back', classes='settings-keys'))
+            form = VerticalScroll(*parts, classes='settings-form')
+            try:
+                width = int(getattr(right.content_size, 'width', 0) or 0) or (int(self.size.width) - 44)
+                form.set_class(width < 72, '-narrow')
+            except Exception:
+                pass
+            right.mount(form)
             self.seek_vol_down_input.focus()
+            # The fields live in a nested container that finishes mounting a
+            # moment later; focus again once it is on screen.
+            first = self.seek_vol_down_input
+            self.call_after_refresh(lambda: first.focus() if first.is_attached else None)
             self.level = self.LVL_VIEW
             return
         except Exception:
             logger.exception('action_prompt_settings failed')
+
+    def _spicy_settings_widgets(self) -> list:
+        """Lyrics source with word-by-word times (Spicy Lyrics API). On by default; it only does
+        something when the user has their own key (keyring or SPT_SPICY_LYRICS_KEY, never the JSON).
+        The key is looked up off the UI thread; only whether it exists is shown, never its value."""
+        from textual.widgets.option_list import Option
+        from .. import spicy_lyrics as sl
+        on = sl.enabled_in(config.LOCAL_CFG)
+        self.spicy_select = FormOptionList(
+            Option('Use Spicy Lyrics (word-by-word) when a key is found', id='on'),
+            Option('Off · LRCLIB only', id='off'),
+            classes='settings-provider-select')
+        self.spicy_select.highlighted = 0 if on else 1
+        self.spicy_key_status = Static('Key: checking…', classes='settings-help settings-help-wide')
+
+        def probe():
+            key, where = sl.resolve_key()
+            if key:
+                text = f"Key: found ({'environment ' + sl.KEY_ENV if where == 'env' else 'keyring'})."
+            else:
+                text = "Key: not found. " + sl.key_hint()
+            try:
+                self.call_from_thread(self._set_spicy_key_status, text)
+            except Exception:
+                pass
+        threading.Thread(target=probe, daemon=True).start()
+        return [Static('Word-by-word lyrics source (Spicy Lyrics API; needs your own free key). '
+                       'Order: your files > Spicy Lyrics > LRCLIB. Pick one and press Enter.',
+                       classes='settings-help settings-help-wide'),
+                self.spicy_select, self.spicy_key_status]
+
+    def _set_spicy_key_status(self, text: str) -> None:
+        w = getattr(self, 'spicy_key_status', None)
+        if w is not None and w.is_attached:
+            w.update(rich_escape(text))
+
+    def _visualizer_settings_widgets(self) -> list:
+        """Visualizer: frame rate of the bars (`visualizer_fps`, 10-60, default 30)."""
+        from .. import visualizer as viz
+        cur = self._vis_fps()
+        self.visualizer_fps_input = Input(placeholder=f'{cur}')
+        from textual.widgets.option_list import Option
+        self.visualizer_mode_select = FormOptionList(
+            Option('Mirrored · bass in the middle (default)', id='mirrored'),
+            Option('Bars · plain bars', id='bars'),
+            classes='settings-provider-select')
+        self.visualizer_mode_select.highlighted = 0 if self._vis_default_mirror() else 1
+        return [Static('Visualizer', classes='settings-section'),
+                *self._settings_field('Visualizer FPS', self.visualizer_fps_input,
+                                      f'Frames per second of the bars, {viz.MIN_FPS}-{viz.MAX_FPS} '
+                                      f'(default {viz.DEFAULT_FPS}). Lower uses less CPU. Current: {cur}. '
+                                      'Enter saves and applies it.'),
+                Static('Default visualizer mode when you press v. Shift+M still switches it while it is open. '
+                       'Pick one and press Enter.', classes='settings-help settings-help-wide'),
+                self.visualizer_mode_select]
+
+    def _offline_settings_widgets(self) -> list:
+        """Offline downloads: the size cap (only for providers that download)."""
+        if not self._cap("can_download") or not hasattr(getattr(self, "spotify", None), "capabilities"):
+            self.offline_cap_input = None
+            return []
+        from .. import offline
+        cur = config.format_size(offline.configured_limit())
+        self.offline_cap_input = Input(placeholder=cur)
+        where = ""
+        try:
+            st = getattr(self.spotify, "offline", None)
+            if st is not None:
+                where = f" Stored in {st.root}."
+        except Exception:
+            pass
+        lo, hi = config.format_size(offline.OFFLINE_MIN_BYTES), config.format_size(offline.OFFLINE_MAX_BYTES_LIMIT)
+        return [Static('Offline downloads', classes='settings-section'),
+                *self._settings_field('Offline space', self.offline_cap_input,
+                                      f'With a unit: "500 MB", "1 GB" ({lo} – {hi}). Current: {cur}. '
+                                      f'Older copies are deleted first when it is full.{where}')]
+
+    @staticmethod
+    def _settings_field(label: str, widget, help_text: str) -> list:
+        """A labelled form row with its short help line underneath."""
+        from textual.containers import Horizontal
+        return [Horizontal(Static(rich_escape(label), classes='settings-label'), widget,
+                           classes='settings-row'),
+                Static(rich_escape(help_text), classes='settings-help')]
+
+    def _mount_provider_settings(self, right) -> None:
+        """Kept for callers that mount the provider block on its own."""
+        for w in self._provider_settings_widgets():
+            right.mount(w)
+
+    def _appearance_settings_widgets(self) -> list:
+        """Appearance: opaque (the spt-teal theme) or transparent (the terminal's own background shows
+        through; only frames, text and the selection stay painted). Applies at once and is remembered."""
+        from textual.widgets.option_list import Option
+        cfg = config.LOCAL_CFG if isinstance(config.LOCAL_CFG, dict) else {}
+        on = bool(cfg.get('transparent_background'))
+        self.appearance_select = FormOptionList(
+            Option('Opaque · spt-teal theme', id='opaque'),
+            Option('Transparent · terminal background, only the frames', id='transparent'),
+            classes='settings-provider-select')
+        self.appearance_select.highlighted = 1 if on else 0
+        from ..theming import PRESETS, normalize_color
+        cur = normalize_color(cfg.get('accent_color') or '') or PRESETS['teal']
+        self.accent_select = FormOptionList(
+            *[Option(f'[{hexv}]●[/] {name}', id=name) for name, hexv in PRESETS.items()],
+            classes='settings-provider-select')
+        names = list(PRESETS)
+        self.accent_select.highlighted = next((i for i, n in enumerate(names) if PRESETS[n] == cur), None)
+        self.accent_input = Input(placeholder=cur)
+        hints_on = cfg.get('show_key_hints', True) is not False
+        self.hints_select = FormOptionList(
+            Option('Show the key hints bar', id='show'),
+            Option('Hide it', id='hide'),
+            classes='settings-provider-select')
+        self.hints_select.highlighted = 0 if hints_on else 1
+        header_on = cfg.get('show_header', True) is not False
+        self.header_select = FormOptionList(
+            Option('Show the title bar', id='show'),
+            Option('Hide it (one more row for the content)', id='hide'),
+            classes='settings-provider-select')
+        self.header_select.highlighted = 0 if header_on else 1
+        return [Static('Appearance', classes='settings-section'),
+                Static(f'Background: {"transparent" if on else "opaque"}. Choose one and press Enter; '
+                       'it applies now. Transparent works best with a terminal that has opacity/blur.',
+                       classes='settings-help settings-help-wide'),
+                self.appearance_select,
+                Static('Colour of the frames, titles and selection. Pick one and press Enter, or type '
+                       'your own below.', classes='settings-help settings-help-wide'),
+                self.accent_select,
+                *self._settings_field('Custom colour', self.accent_input,
+                                      f'Hex like #ff7eb6 (or a name above). Current: {cur}. Enter applies it.'),
+                Static('The bar at the bottom with the keys (q, esc, /, space…). Help (?) lists them all.',
+                       classes='settings-help settings-help-wide'),
+                self.hints_select,
+                Static('The title bar at the top ("spt - Spotify TUI (Python) — provider"). '
+                       'Pick one and press Enter; it applies now.',
+                       classes='settings-help settings-help-wide'),
+                self.header_select]
+
+    def _provider_settings_widgets(self) -> list:
+        """Provider choice + Subsonic server fields, below the numeric wizard.
+
+        The provider is a selectable list with each provider's readiness;
+        picking one switches live (see provider_switch). The Subsonic fields
+        are a separate mini-chain (URL -> user -> password): Enter on the
+        lyrics-cache field still finishes the settings as before. An empty
+        field keeps the current value. The password is handed to the keyring,
+        never to the JSON config (see spt_tui.secret_store)."""
+        from ..providers import resolve_provider_name
+        from textual.widgets import OptionList
+        from .provider_switch import build_provider_options, provider_statuses, env_warning_text
+        cfg = config.LOCAL_CFG if isinstance(config.LOCAL_CFG, dict) else {}
+        try:
+            cur_provider = resolve_provider_name()
+        except Exception:
+            cur_provider = "spotify"
+        cur_url = cfg.get('subsonic_url') or ''
+        cur_user = cfg.get('subsonic_user') or ''
+        active = getattr(getattr(self, 'spotify', None), 'name', None)
+        active = active if isinstance(active, str) else cur_provider
+        warn = env_warning_text()
+        try:
+            statuses = provider_statuses()
+        except Exception:
+            logger.exception('provider statuses failed')
+            statuses = []
+        self.provider_select = FormOptionList(*build_provider_options(active, statuses),
+                                          classes="settings-provider-select")
+        out = [Static('Music provider', classes='settings-section'),
+               Static(f'Active: {rich_escape(active)}. Choose one and press Enter to switch now '
+                      '(no restart). Also P from any view.', classes='settings-help settings-help-wide')]
+        if warn:
+            out.append(Static(f'▲ {rich_escape(warn)}', classes='settings-warn'))
+        out.append(self.provider_select)
+        self.subsonic_url_input = Input(placeholder=cur_url or 'https://music.example.org')
+        self.subsonic_user_input = Input(placeholder=cur_user or 'not set')
+        self.subsonic_password_input = Input(placeholder='leave empty to keep', password=True)
+        out += [Static('Subsonic / Navidrome', classes='settings-section'),
+                *self._settings_field('Server URL', self.subsonic_url_input,
+                                      f'Current: {cur_url or "not set"}'),
+                *self._settings_field('User', self.subsonic_user_input,
+                                      f'Current: {cur_user or "not set"}'),
+                *self._settings_field('Password', self.subsonic_password_input,
+                                      'Stored in the system keyring, never in spt_config.json '
+                                      '(no keyring: export SPT_SUBSONIC_PASSWORD). Then pick '
+                                      'subsonic above to apply.')]
+        return out
 
     def _open_library_item(self, name: str) -> bool:
         """Single source of truth for opening a Library list item, so keyboard
@@ -142,6 +437,8 @@ class LibraryMixin:
             "Saved Albums": self._open_saved_albums,
             "Saved Podcasts": self._open_saved_podcasts,
             "Saved Episodes": self._open_saved_episodes,
+            "Import from Spotify": self.action_import_from_spotify,
+            "Downloaded": self._open_downloaded_table,
         }
         fn = handlers.get(name)
         if fn is None:
@@ -154,6 +451,12 @@ class LibraryMixin:
         return True
 
     def _playlists_cache_path(self) -> str:
+        # One cache per provider family: after switching to Subsonic the
+        # startup paint must not show (and let the user open) Spotify playlists.
+        # Both Spotify modes share the historical file name.
+        name = getattr(getattr(self, "spotify", None), "name", None)
+        if isinstance(name, str) and name not in ("spotify", "spotify_mpris") and name.isidentifier():
+            return os.path.join(config.CACHE_DIR, f"playlists_cache_{name}.json")
         return os.path.join(config.CACHE_DIR, "playlists_cache.json")
 
     def _save_playlists_disk(self, items, *, allow_empty: bool = False) -> None:
@@ -165,11 +468,10 @@ class LibraryMixin:
         try:
             minimal = [{"name": p.get("name"), "id": p.get("id"), "uri": p.get("uri")}
                        for p in (items or []) if p]
-            path = self._playlists_cache_path()
-            tmp = f"{path}.tmp"
-            with open(tmp, "w", encoding="utf-8") as f:
-                json.dump(minimal, f, ensure_ascii=False)
-            os.replace(tmp, path)
+            # Unique temp file per write: two loads finishing together used to
+            # share `<path>.tmp` and one os.replace() then failed with
+            # FileNotFoundError.
+            atomic_write_json(self._playlists_cache_path(), minimal)
         except Exception:
             logger.exception("could not save playlists cache")
 
@@ -544,23 +846,34 @@ class LibraryMixin:
 
     # --- View-only sort of the open playlist (`s` / `S`) ------------------ #
 
-    def _pl_sort_pref(self):
-        """(key, desc) for playlist tables, read once from spt_config.json."""
+    def _pl_sort_pref(self, profile: str = "playlist"):
+        """(key, desc) for playlist tables (or another sort profile, e.g.
+        Library > Downloaded), read once from spt_config.json."""
+        if profile != "playlist":
+            prefs = getattr(self, "_sort_prefs", None)
+            if prefs is None:
+                prefs = self._sort_prefs = {}
+            if profile not in prefs:
+                keys, ck, cdk, _ = playlist_sort.profile(profile)
+                prefs[profile] = playlist_sort.load_pref(config.LOCAL_CFG, keys=keys, cfg_key=ck, cfg_desc_key=cdk)
+            return prefs[profile]
         pref = getattr(self, "_pl_sort", None)
         if pref is None:
             pref = self._pl_sort = playlist_sort.load_pref(config.LOCAL_CFG)
         return pref
 
-    def _pl_title(self, base_title):
-        lab = playlist_sort.label(*self._pl_sort_pref())
+    def _pl_title(self, base_title, profile: str = "playlist"):
+        lab = playlist_sort.label(*self._pl_sort_pref(profile))
         return f"{base_title}  [dim]({lab})[/dim]" if lab else base_title
 
-    def _pl_sorted(self, rows, liked):
+    def _pl_sorted(self, rows, liked, profile: str = "playlist"):
         """Rows and their liked flags, both in the current view order."""
         rows = list(rows or [])
         liked = list(liked) if liked else []
         flag = {id(r): bool(liked[i]) if i < len(liked) else False for i, r in enumerate(rows)}
-        out = playlist_sort.sort_rows(rows, *self._pl_sort_pref())
+        keys, _, _, missing_last = playlist_sort.profile(profile)
+        key, desc = self._pl_sort_pref(profile)
+        out = playlist_sort.sort_rows(rows, key, desc, keys=keys, missing_last=missing_last)
         return out, [flag[id(r)] for r in out]
 
     @staticmethod
@@ -601,7 +914,8 @@ class LibraryMixin:
             pairs_rows = model + list(extra_rows or [])
             pairs_liked = [bool(liked_map.get(i, False)) for i in range(len(model))] + \
                 [False] * len(extra_rows or [])
-        new_rows, new_liked = self._pl_sorted(pairs_rows, pairs_liked)
+        new_rows, new_liked = self._pl_sorted(pairs_rows, pairs_liked,
+                                              getattr(table, "_sort_profile", "playlist"))
 
         table._model_rows = new_rows
         table._liked_map = {i: v for i, v in enumerate(new_liked)}
@@ -623,16 +937,20 @@ class LibraryMixin:
         elif cur_ident is not None:
             for i, r in enumerate(new_rows):
                 if self._pl_row_ident(r) == cur_ident:
+                    # With a "/" filter the model index is not the screen row.
+                    shown = self._model_to_display_row(table, i)
+                    if shown is None:
+                        break
                     try:
                         col = int(getattr(getattr(table, "cursor_coordinate", None), "column", 0) or 0)
-                        table.move_cursor(row=i, column=col, animate=False, scroll=follow)
+                        table.move_cursor(row=shown, column=col, animate=False, scroll=follow)
                     except Exception:
                         logger.debug("_resort_playlist_table: cursor restore failed")
                     break
 
     def _open_playlist_tracks_table(self):
         rv = getattr(self, "_right_view", None)
-        if not rv or rv[0] != "playlist":
+        if not rv or rv[0] not in ("playlist", "downloaded"):
             return None
         try:
             table = self.query_one("#tracks_table", DataTable)
@@ -651,27 +969,34 @@ class LibraryMixin:
     def _change_playlist_sort(self, *, cycle=False, reverse=False) -> None:
         table = self._open_playlist_tracks_table()
         if table is None:
-            self._notify("[b]Open a playlist to sort its tracks.[/b]")
+            self._notify("[b]Open a playlist (or Library > Downloaded) to sort its tracks.[/b]")
             return
-        key, desc = self._pl_sort_pref()
+        prof = getattr(table, "_sort_profile", "playlist")
+        keys, ck, cdk, _ = playlist_sort.profile(prof)
+        key, desc = self._pl_sort_pref(prof)
         if cycle:
-            key, desc = playlist_sort.next_key(key), False
+            key, desc = playlist_sort.next_key(key, keys), False
         if reverse:
             desc = not desc
-        self._pl_sort = (key, desc)
+        if prof == "playlist":
+            self._pl_sort = (key, desc)
+        else:
+            self._pl_sort_pref(prof)
+            self._sort_prefs[prof] = (key, desc)
         try:
             if not isinstance(config.LOCAL_CFG, dict):
                 config.LOCAL_CFG = {}
-            config.LOCAL_CFG[playlist_sort.CFG_KEY] = key
-            config.LOCAL_CFG[playlist_sort.CFG_DESC_KEY] = desc
+            config.LOCAL_CFG[ck] = key
+            config.LOCAL_CFG[cdk] = desc
             config.save_local_config(config.LOCAL_CFG)
         except Exception:
             logger.exception("saving playlist sort failed")
         self._resort_playlist_table(table, follow=True)
-        self._set_table_title("tracks_table", self._pl_title(table._pl_base_title))
+        self._set_table_title("tracks_table", self._pl_title(table._pl_base_title, prof))
         arrow = "↓" if desc else "↑"
+        what = "the copies are unchanged" if prof == "downloaded" else "the playlist is unchanged"
         self._notify(f"[b]Sorted by {playlist_sort.SORT_LABELS[key]} {arrow}[/b]  "
-                     "[dim](view only; the playlist is unchanged)[/dim]")
+                     f"[dim](view only; {what})[/dim]")
 
     # How many playlists keep their tracks in memory. Enough to make going back
     # and forth instant without holding every big playlist of a long session.
@@ -718,6 +1043,9 @@ class LibraryMixin:
                 cache.pop(pl_id, None)
 
     def _open_saved_artists(self):
+        req = getattr(self, "_require_cap", None)
+        if callable(req) and not req("can_follow_artists"):
+            return
         # Unified with the other saved-list views via the shared streaming loader:
         # gains the session cache, generation/token guard and empty-vs-error
         # distinction. Followed artists uses cursor pagination; the app shows the
@@ -904,6 +1232,9 @@ class LibraryMixin:
         threading.Thread(target=worker, daemon=True).start()
 
     def _open_saved_podcasts(self):
+        req = getattr(self, "_require_cap", None)
+        if callable(req) and not req("can_podcasts"):
+            return
         def fetch_page(offset):
             sp = self.spotify.ensure()
             try:
@@ -929,6 +1260,9 @@ class LibraryMixin:
             fetch_page=fetch_page, tracks_mode=False, layout="podcasts")
 
     def _open_saved_episodes(self):
+        req = getattr(self, "_require_cap", None)
+        if callable(req) and not req("can_podcasts"):
+            return
         def fetch_page(offset):
             sp = self.spotify.ensure()
             try:
@@ -1056,8 +1390,9 @@ class LibraryMixin:
         try:
             self._new_view_token('import_input', '')
             right = self._clear_right()
-            right.mount(Static('[b]Add playlist to Import Playlists[/b]\nEnter playlist URI or ID and press Enter.'))
-            self.import_input = Input(placeholder='Paste the playlist URI or ID and press Enter…')
+            _text, _hint = self._import_prompt_texts()
+            right.mount(Static(_text))
+            self.import_input = Input(placeholder=_hint)
             right.mount(self.import_input)
             try:
                 self.import_input.focus()

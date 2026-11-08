@@ -75,15 +75,60 @@ def load_local_config() -> dict:
         logger.exception("load_local_config failed")
     return {}
 
+import threading as _threading
+_SAVE_LOCK = _threading.Lock()
+
+_CRED_KEYS = ("client_id", "client_secret", "redirect_uri")
+
 def save_local_config(cfg: dict) -> None:
-    try:
-        with open(CONFIG_PATH, "w", encoding="utf-8") as f:
-            json.dump(cfg or {}, f, ensure_ascii=False, indent=2)
-    except Exception:
-        logger.exception("save_local_config failed")
+    """Atomic write (unique temp file + rename) under a lock: several workers
+    (playlist import, provider switch, settings) may save at the same time."""
+    import tempfile
+    with _SAVE_LOCK:
+        tmp = None
+        try:
+            cfg = dict(cfg or {})
+            # Safety net: a stale in-memory dict (loaded before the credentials
+            # form ran) must never wipe the credentials already on disk.
+            if any(k not in cfg for k in _CRED_KEYS):
+                try:
+                    with open(CONFIG_PATH, "r", encoding="utf-8") as f:
+                        on_disk = json.load(f)
+                    if isinstance(on_disk, dict):
+                        for k in _CRED_KEYS:
+                            if k not in cfg and on_disk.get(k):
+                                cfg[k] = on_disk[k]
+                except (OSError, ValueError):
+                    pass
+            d = os.path.dirname(os.path.abspath(CONFIG_PATH))
+            fd, tmp = tempfile.mkstemp(prefix="spt_config.", suffix=".tmp", dir=d)
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                json.dump(cfg or {}, f, ensure_ascii=False, indent=2)
+            os.replace(tmp, CONFIG_PATH)
+            tmp = None
+        except Exception:
+            logger.exception("save_local_config failed")
+        finally:
+            if tmp:
+                try:
+                    os.unlink(tmp)
+                except OSError:
+                    pass
 
 LOCAL_CFG = load_local_config()
 CONFIG_LOADED = bool(LOCAL_CFG)
+
+
+def save_credentials(client_id: str, client_secret: str, redirect_uri: str) -> None:
+    """Persist the Spotify credentials, keeping every other setting and keeping
+    the in-memory LOCAL_CFG in sync (later saves dump LOCAL_CFG whole)."""
+    global LOCAL_CFG, CLIENT_ID, CLIENT_SECRET, REDIRECT_URI, CONFIG_LOADED
+    if not isinstance(LOCAL_CFG, dict):
+        LOCAL_CFG = {}
+    LOCAL_CFG.update(client_id=client_id, client_secret=client_secret, redirect_uri=redirect_uri)
+    save_local_config(LOCAL_CFG)
+    CLIENT_ID, CLIENT_SECRET, REDIRECT_URI = client_id, client_secret, redirect_uri
+    CONFIG_LOADED = True
 
 # --------------------------------------------------------------------------- #
 # Human-readable size parsing (lyrics cache size cap)

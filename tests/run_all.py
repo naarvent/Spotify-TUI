@@ -56,9 +56,16 @@ def run_one(name: str, timeout: int):
     # another worker over them.
     tmp = tempfile.mkdtemp(prefix="spt_test_")
     env["SPT_TUI_CACHE_DIR"] = tmp
+    env["SPT_SPICY_LYRICS"] = "off"      # suites must never use the user's real Spicy Lyrics key
     # The suites print ♥ in their check names; the Windows console default
     # (cp1252) cannot encode it and the run dies on its own summary.
     env["PYTHONIOENCODING"] = "utf-8"
+    # Never reach the user's desktop from a test: no real librespot (it would
+    # start an OAuth and open a browser tab), and any URL "opened" goes to the
+    # no-op `true` instead of `abrir` / a browser. Suites that test these set
+    # their own values.
+    env["SPT_LOCAL_PLAYER"] = "0"
+    env["SPT_OPEN_COMMAND"] = "true"
     started = time.time()
     try:
         p = subprocess.run([sys.executable, path], cwd=ROOT, env=env,

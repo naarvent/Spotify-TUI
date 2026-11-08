@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import os
 import time
 import threading
@@ -24,21 +25,41 @@ except Exception:
 
 from .. import config
 from ..config import logger, LOG_PATH
-from ..constants import WELCOME, WELCOME_SPOTIFY_ART, WELCOME_AUTHOR, LIBRARY_ITEMS
-from ..spotify_client import SpotifyClient
+from ..constants import WELCOME, LIBRARY_ITEMS, build_welcome
+from ..providers import create_provider, CAPABILITY_LABELS
 from ..local_player import LocalPlayer, LOCAL_START_SENTINEL
 from ..widgets import HelpScroll, ContentPanel
 
 class CoreMixin:
     def __init__(self):
         super().__init__()
-        self.spotify = SpotifyClient()
+        # The CSS refers to the theme's own variables ($spt-dim...), so the theme must be there
+        # BEFORE the stylesheet is first parsed (on_mount is too late).
         try:
-            self.local_player = LocalPlayer(
-                self.spotify, open_url=getattr(self, "_open_url_in_browser", None))
+            from . import SPT_THEME
+            from ..theming import normalize_color, DEFAULT_ACCENT
+            self.register_theme(SPT_THEME)
+            self.theme = SPT_THEME.name
+            _cfg = config.LOCAL_CFG if isinstance(config.LOCAL_CFG, dict) else {}
+            _acc = normalize_color(_cfg.get("accent_color") or "")
+            if _acc and _acc != DEFAULT_ACCENT:
+                self._apply_accent(_acc)
         except Exception:
-            logger.exception("LocalPlayer init failed")
-            self.local_player = None
+            logger.exception("could not set the SPT theme at start")
+        # The active music provider (Spotify by default; see spt_tui.providers).
+        # It keeps the historical attribute name `spotify` because every view
+        # (and every test fake) talks to it through `self.spotify`; `provider`
+        # is the same object under its new name.
+        self.spotify, self._provider_notice = create_provider()
+        self.local_player = None
+        if self._cap("supports_local_player"):
+            try:
+                self.local_player = LocalPlayer(
+                    self.spotify, open_url=getattr(self, "_open_url_in_browser", None),
+                    on_event=getattr(self, "_local_player_event", None))
+            except Exception:
+                logger.exception("LocalPlayer init failed")
+                self.local_player = None
         try:
             self._auto_load_playlists = os.getenv('SPT_AUTO_LOAD_PLAYLISTS', '0') == '1'
         except Exception:
@@ -46,7 +67,6 @@ class CoreMixin:
         self._allow_auto_revalidate_likes = False
         self._force_revalidate_likes_once = False
 
-        self._view_stack: List[Tuple] = []
         self.playlists_cache: List[Dict] = []
 
         self._create_playlist_state: Optional[dict] = None
@@ -54,6 +74,7 @@ class CoreMixin:
 
         self._last_right_focus = None
         self._local_queue: List[Dict] = []
+        self._play_context: Optional[Dict] = None   # {"name", "source"} of what was played last (queue view)
         self.repeat_state_cycle = ["off", "context", "track"]
         self.repeat_idx = 0
 
@@ -113,9 +134,9 @@ class CoreMixin:
         self._welcome_variant: str = "large"
 
     def compose(self) -> ComposeResult:
-        self.right_panel = ContentPanel(Text(WELCOME), id="right")
+        self.right_panel = ContentPanel(Text(build_welcome("minimal")), id="right")
 
-        self.search_input = Input(placeholder="Search ...", id="search_input")
+        self.search_input = Input(placeholder="Type to search songs, artists, albums…", id="search_input")
         try:
             self.search_input.password = False
             self.search_input.cursor_blink = True
@@ -123,7 +144,7 @@ class CoreMixin:
             pass
 
         lib_items = []
-        for txt in LIBRARY_ITEMS:
+        for txt in self._visible_library_items():
             li = ListItem(Label(txt))
             li.data = {"type": "library", "name": txt}
             lib_items.append(li)
@@ -138,7 +159,7 @@ class CoreMixin:
                     yield Static("Search", id="search_title", classes="title")
                     yield self.search_input
                 with Container(id="help_wrap", classes="section"):
-                    yield Static("Help\n(press ?)", id="help_box")
+                    yield Static("Help [b]?[/b]", id="help_box")
 
             with Container(id="left_col"):
                 yield Vertical(Static("Library", classes="title"), self.lib_list,
@@ -152,7 +173,7 @@ class CoreMixin:
                 self.np_title = Static("[dim]Now Playing: —[/dim]", id="np_title")
                 yield self.np_title
                 with Container(id="now_row_bar"):
-                    self.np_bar_full = Static("[" + ("-" * 30) + "]", id="np_bar_full", markup=False)
+                    self.np_bar_full = Static("-" * 30, id="np_bar_full", markup=False)
                     yield self.np_bar_full
                 self.np_times = Static("--:--", id="np_times")
                 yield self.np_times
@@ -163,7 +184,7 @@ class CoreMixin:
         self.status_line = Static("", id="status_line")
         yield self.status_line
 
-        yield Footer()
+        yield Footer(show_command_palette=False)
 
     def _show_credentials_prompt(self, right) -> None:
         """Mount the 'Not signed in' message plus the three credential inputs."""
@@ -180,7 +201,88 @@ class CoreMixin:
         self.client_id_input.focus()
         self._defer_now = True
 
+    def _apply_title_bar(self, on: bool) -> None:
+        """Show / hide the title bar at the top ("spt - Spotify TUI (Python) — <provider>"),
+        Settings > Appearance. Only its display changes: the Header widget stays mounted, so
+        provider switches keep updating ``sub_title`` and it comes back right. The grid takes
+        the freed row by itself (it is ``height: 1fr``)."""
+        try:
+            self.query_one(Header).display = bool(on)
+        except Exception:
+            logger.exception("could not toggle the title bar")
+        # The karaoke view lays out to its box: repaint at the new size.
+        try:
+            if getattr(self, "_lyrics_on", False):
+                self._lyrics_frame = None
+                self.call_after_refresh(self._update_lyrics_highlight)
+        except Exception:
+            pass
+
+    def _apply_key_hints(self, on: bool) -> None:
+        """Show / hide the bottom bar with the key hints (Settings > Appearance)."""
+        try:
+            self.query_one(Footer).display = bool(on)
+        except Exception:
+            logger.exception("could not toggle the key hints bar")
+
+    def _apply_transparency(self, on: bool) -> None:
+        """Transparent look (Settings > Appearance). ``ansi_color`` lets ``ansi_default`` through to the
+        terminal's own background; the `-transparent` class switches the CSS rules in TRANSPARENT_CSS.
+        Off goes back to the theme's colours (``ansi_color=None`` = what the theme says)."""
+        try:
+            self.ansi_color = True if on else None
+            self.set_class(bool(on), "-transparent")
+            self.refresh(layout=True)
+        except Exception:
+            logger.exception("could not apply the transparent background")
+
+    def _set_accent(self, text: str) -> bool:
+        """Settings > Appearance: apply a preset name or a hex colour, save it. False if invalid."""
+        from ..theming import normalize_color, DEFAULT_ACCENT
+        color = normalize_color(text or "")
+        if color is None:
+            self._notify('[b]Not a colour.[/b] Use a hex like #ff7eb6 or a name from the list.', warn=True)
+            return False
+        self._apply_accent(None if color == DEFAULT_ACCENT else color)
+        self._save_plain_flag("accent_color", color)
+        self._notify(f"[b]Colour: {color}[/b]")
+        return True
+
+    def _apply_accent(self, accent=None) -> None:
+        """Re-colour the whole UI from one accent colour (None = the original teal). The theme is
+        registered under an alternating name so Textual sees a change and re-reads the CSS."""
+        try:
+            from ..theming import build_theme
+            self._accent_flip = not getattr(self, "_accent_flip", False)
+            theme = build_theme("spt-a" if self._accent_flip else "spt-b", accent)
+            self.register_theme(theme)
+            self.theme = theme.name
+        except Exception:
+            logger.exception("could not apply the accent colour")
+
+    def _accent_hex(self) -> str:
+        """The current primary colour, for Rich markup built in Python."""
+        try:
+            return self.current_theme.primary or "#27e1c1"
+        except Exception:
+            return "#27e1c1"
+
     def on_mount(self) -> None:
+        try:
+            cfg = config.LOCAL_CFG if isinstance(config.LOCAL_CFG, dict) else {}
+            if cfg.get("transparent_background"):
+                self._apply_transparency(True)
+            if cfg.get("show_key_hints") is False:
+                self._apply_key_hints(False)
+            if cfg.get("show_header") is False:
+                self._apply_title_bar(False)
+        except Exception:
+            logger.exception("could not read transparent_background")
+        # The first paint used the biggest welcome whatever the window: pick the one that fits.
+        try:
+            self.call_after_refresh(lambda: self._paint_welcome(only_if_changed=False))
+        except Exception:
+            logger.exception("initial welcome paint failed")
         self.section_search = self.query_one("#search_wrap")
         self.section_lib = self.query_one("#section_lib")
         self.section_pl = self.query_one("#section_pl")
@@ -298,6 +400,139 @@ class CoreMixin:
             logger.exception("Could not start playlist retry worker")
 
         self._start_local_player()
+        self._start_provider_checks()
+
+    # ------------------------------------------------------------------ #
+    # Active provider and its capabilities
+    # ------------------------------------------------------------------ #
+    @property
+    def provider(self):
+        """The active music provider (same object as ``self.spotify``)."""
+        return self.spotify
+
+    def _cap(self, name: str) -> bool:
+        """Whether the active provider supports capability ``name``. Objects
+        without a ``capabilities`` attribute (older code, test fakes) are
+        treated as fully capable, which is the historical behaviour."""
+        caps = getattr(getattr(self, "spotify", None), "capabilities", None)
+        if caps is None:
+            return True
+        val = getattr(caps, name, True)
+        return val if isinstance(val, bool) else True
+
+    def _unsupported_message(self, name: str) -> str:
+        prov = getattr(self, "spotify", None)
+        fn = getattr(prov, "unsupported_message", None)
+        if callable(fn):
+            try:
+                msg = fn(name)
+                if isinstance(msg, str) and msg:
+                    return msg
+            except Exception:
+                logger.exception("unsupported_message failed")
+        return f"{CAPABILITY_LABELS.get(name, name)} is not available with this provider."
+
+    def _require_cap(self, name: str) -> bool:
+        """Gate an action on a capability: True if supported, otherwise show
+        why on the status line (instead of a failing API call) and return False."""
+        if self._cap(name):
+            return True
+        try:
+            self._notify(f"[b]{rich_escape(self._unsupported_message(name))}[/b]", warn=True)
+        except Exception:
+            logger.exception("could not show the capability notice")
+        return False
+
+    # Library entries that only exist for some providers.
+    _LIBRARY_ITEM_CAPS = {
+        "Saved Podcasts": "can_podcasts",
+        "Saved Episodes": "can_podcasts",
+        "Saved Artists": "can_follow_artists",
+        "Import Playlists": "can_import_playlists",
+    }
+
+    def _visible_library_items(self) -> List[str]:
+        """The Library menu for the active provider: podcast entries only
+        where podcasts exist (Spotify), Import only where playlists can be
+        imported. Providers without capabilities (test fakes) see them all."""
+        names = [name for name in LIBRARY_ITEMS
+                 if self._cap(self._LIBRARY_ITEM_CAPS.get(name, "can_browse_library"))]
+        # Library > Downloaded: only for a provider that really says it can
+        # download (test fakes without capabilities do not get it).
+        caps = getattr(getattr(self, "spotify", None), "capabilities", None)
+        if caps is not None and getattr(caps, "can_download", False) is True:
+            from .offline import DOWNLOADED_ENTRY
+            names.append(DOWNLOADED_ENTRY)
+        try:
+            from .spotify_import_view import IMPORT_ENTRY
+            if self._spotify_import_visible():
+                # Appended last so the other entries keep their positions.
+                names.append(IMPORT_ENTRY)
+        except Exception:
+            logger.exception("import entry visibility check failed")
+        return names
+
+    def _refresh_library_items(self) -> None:
+        lv = getattr(self, "lib_list", None)
+        if lv is None:
+            return
+        try:
+            names = self._visible_library_items()
+            current = [(getattr(li, "data", {}) or {}).get("name") for li in lv.children]
+            if current == names:
+                return
+            lv.clear()
+            for txt in names:
+                li = ListItem(Label(txt))
+                li.data = {"type": "library", "name": txt}
+                lv.append(li)
+        except Exception:
+            logger.exception("could not refresh the Library menu")
+
+    def _start_provider_checks(self) -> None:
+        """Detect account limits (e.g. Spotify Free) off the UI thread, then
+        surface the degraded-mode / fallback notice on the status line."""
+        prov = getattr(self, "spotify", None)
+        try:
+            name = getattr(prov, "display_name", None)
+            if isinstance(name, str) and name and name != "Spotify":
+                self.sub_title = name
+        except Exception:
+            pass
+
+        def worker():
+            refresh = getattr(prov, "refresh_account", None)
+            if callable(refresh):
+                try:
+                    if not callable(getattr(prov, "has_cached_token", None)) or prov.has_cached_token():
+                        refresh()
+                except Exception:
+                    logger.exception("provider refresh_account failed")
+            parts = []
+            fallback = getattr(self, "_provider_notice", None)
+            if fallback:
+                parts.append(str(fallback))
+            notice_fn = getattr(prov, "status_notice", None)
+            if callable(notice_fn):
+                try:
+                    n = notice_fn()
+                    if isinstance(n, str) and n:
+                        parts.append(n)
+                except Exception:
+                    logger.exception("provider status_notice failed")
+            if not parts or getattr(self, "_closing", False):
+                return
+            msg = " ".join(parts)
+            self._provider_status_message = msg
+            try:
+                self.call_from_thread(
+                    self._notify, f"[b]{rich_escape(msg)}[/b]", warn=True, seconds=12.0)
+            except Exception:
+                logger.debug("provider notice dropped (app not running)")
+        try:
+            threading.Thread(target=worker, daemon=True).start()
+        except Exception:
+            logger.exception("Could not start provider checks")
 
     def _start_local_player(self) -> None:
         """Kick off the polite local-player autostart on a daemon thread so the
@@ -331,12 +566,23 @@ class CoreMixin:
         and stop every timer so no worker paints into a torn-down app."""
         self._closing = True
         self._stop_all_intervals()
+        stop = getattr(self, "_stop_visualizer", None)
+        if callable(stop):
+            try: stop()
+            except Exception: logger.exception("stopping cava during teardown failed")
         lp = getattr(self, "local_player", None)
         if lp is not None:
             try:
                 lp.stop()
             except Exception:
                 logger.exception("Stopping local player during teardown failed")
+        # Providers may own subprocesses (mpv) or sockets: release them.
+        close = getattr(getattr(self, "spotify", None), "close", None)
+        if callable(close):
+            try:
+                close()
+            except Exception:
+                logger.exception("Closing the provider during teardown failed")
 
     # How long a message stays up. Long enough to read, short enough not to sit
     # over the now-playing bar.
@@ -392,6 +638,11 @@ class CoreMixin:
             logger.debug("clearing the status line failed")
 
     def _clear_right(self):
+        # Whatever takes the panel, the visualizer's cava must not keep running.
+        stop = getattr(self, "_stop_visualizer", None)
+        if callable(stop):
+            try: stop()
+            except Exception: logger.exception("stopping the visualizer failed")
         right: Static = self.right_panel
         # Any view taking over the right panel is no longer the welcome screen,
         # so on_resize must stop re-rendering the welcome into it.
@@ -407,9 +658,47 @@ class CoreMixin:
             right.border_title = ""
         except Exception:
             pass
-        for w in list(right.children):
-            w.remove()
+        # Widget.remove() is asynchronous; remember the pending removals so a
+        # same-id view mounted right after can wait for them (_mount_in_right).
+        self._right_epoch = getattr(self, "_right_epoch", 0) + 1
+        self._right_removals = [w.remove() for w in list(right.children)]
         return right
+
+    def _mount_in_right(self, right, widget, after_mount=None) -> None:
+        """Mount a content widget into #right, then run ``after_mount``.
+
+        _clear_right() only schedules the removal of the old children. If one
+        with the same id (e.g. the previous #tracks_table) is still in the DOM,
+        mounting now raises DuplicateIds after Textual has already appended the
+        new widget to the node list: a never-started zombie that keeps the old
+        rows on screen and stalls every wait-for-idle. In that case mount once
+        the pending removals finish, unless another view took #right meanwhile.
+        """
+        wid = getattr(widget, "id", None)
+        if not wid or not any(getattr(c, "id", None) == wid for c in right.children):
+            right.mount(widget)
+            if after_mount is not None:
+                after_mount()
+            return
+        epoch = getattr(self, "_right_epoch", 0)
+        removals = list(getattr(self, "_right_removals", None) or [])
+
+        async def _mount_when_removed():
+            for r in removals:
+                try:
+                    await r
+                except Exception:
+                    logger.debug("waiting for a #right removal failed")
+            if getattr(self, "_right_epoch", 0) != epoch or widget.is_attached:
+                return  # superseded by a newer view (or already mounted)
+            try:
+                right.mount(widget)
+                if after_mount is not None:
+                    after_mount()
+            except Exception:
+                logger.exception("deferred #right mount failed")
+
+        self._right_mount_task = asyncio.ensure_future(_mount_when_removed())
 
     # ------------------------------------------------------------------ #
     # Responsive welcome screen
@@ -428,44 +717,49 @@ class CoreMixin:
         return max(0, int(tw or 0) - (6 if collapsed else 44)), max(0, int(th or 0) - 15)
 
     def _welcome_panel_size(self):
-        # self.size is correct on a stable layout (used by _paint_welcome); on a
-        # resize event self.size lags, so on_resize passes event.size instead.
+        """The right panel's real content area (what the art has to fit). Falls back to an estimate
+        from the terminal size before the panel has been laid out."""
+        try:
+            cs = self.right_panel.content_size
+            if int(cs.width or 0) > 0 and int(cs.height or 0) > 0:
+                return int(cs.width), int(cs.height)
+        except Exception:
+            pass
         try:
             return self._welcome_dims(int(self.size.width or 0), int(self.size.height or 0))
         except Exception:
             return 80, 24
 
+    _WELCOME_LEVELS = ("large", "medium", "compact", "small", "minimal")
+
     def _welcome_variant_for(self, w: int, h: int) -> str:
-        """Choose a welcome layout by available panel size. Thresholds are the
-        content width × height; each level drops the piece that no longer fits:
-          large   (w>=90, h>=20): Spotify figlet + portrait art + author
-          medium  (w>=46, h>=12): Spotify figlet + author (portrait dropped)
-          small   (w>=22, h>=5) : 3-line text header + author
-          minimal (otherwise)   : title + author only
+        """The richest welcome whose art fits a w x h content area (sizes come from the art itself):
+          large   Spotify + TUI + author, with the headphones portrait on the right
+          medium  Spotify + TUI + author, stacked
+          compact Spotify + author
+          small   3-line text header + author
+          minimal title + author only
         """
+        from ..constants import welcome_size
         w, h = int(w or 0), int(h or 0)
-        if w >= 90 and h >= 20:
-            return "large"
-        if w >= 46 and h >= 12:
-            return "medium"
-        if w >= 22 and h >= 5:
-            return "small"
+        for v in self._WELCOME_LEVELS[:-1]:
+            sw, sh = welcome_size(v)
+            if w >= sw and h >= sh:
+                return v
         return "minimal"
 
     def _render_welcome(self, width: int, height: int) -> str:
-        v = self._welcome_variant_for(width, height)
-        if v == "large":
-            return WELCOME
-        if v == "medium":
-            return "\n\n" + WELCOME_SPOTIFY_ART + "\n\n\n" + WELCOME_AUTHOR + "\n"
-        if v == "small":
-            return "\n\nSPT-TUI\nSpotify in your terminal\n\n" + WELCOME_AUTHOR + "\n"
-        return "SPT-TUI\n" + WELCOME_AUTHOR
+        from ..constants import build_welcome
+        return build_welcome(self._welcome_variant_for(width, height))
 
-    def _paint_welcome(self):
-        """Render the size-appropriate welcome into the (already-clear) panel."""
+    def _paint_welcome(self, only_if_changed: bool = False):
+        """Render the size-appropriate welcome into the (already-clear) panel. With
+        ``only_if_changed`` a resize that keeps the same level does not repaint (no flicker)."""
         w, h = self._welcome_panel_size()
-        self._welcome_variant = self._welcome_variant_for(w, h)
+        variant = self._welcome_variant_for(w, h)
+        if only_if_changed and variant == getattr(self, "_welcome_variant", None):
+            return
+        self._welcome_variant = variant
         try:
             self.right_panel.update(self._render_welcome(w, h))
         except Exception:
@@ -477,18 +771,11 @@ class CoreMixin:
         # the variant changes, so resizing never flickers it). Use event.size:
         # self.size still holds the pre-resize value at this point.
         if getattr(self, "_welcome_on", False):
+            # The panel's real size is only right after the layout pass.
             try:
-                tw, th = int(event.size.width), int(event.size.height)
+                self.call_after_refresh(lambda: self._welcome_on and self._paint_welcome(only_if_changed=True))
             except Exception:
-                tw, th = int(self.size.width or 0), int(self.size.height or 0)
-            w, h = self._welcome_dims(tw, th)
-            variant = self._welcome_variant_for(w, h)
-            if variant != getattr(self, "_welcome_variant", None):
-                self._welcome_variant = variant
-                try:
-                    self.right_panel.update(self._render_welcome(w, h))
-                except Exception:
-                    logger.exception("welcome resize repaint failed")
+                logger.exception("welcome resize repaint failed")
             return
         # A visible result table re-fits its columns from ContentPanel.on_resize,
         # not here: at this point the right panel's content_size still holds its
@@ -503,7 +790,9 @@ class CoreMixin:
             logger.exception("search grid resize failed")
 
     def on_input_submitted(self, event: Input.Submitted) -> None:
-
+        if getattr(event.input, "_filter_table", None) is not None:
+            self._leave_view_filter()
+            return
         try:
 
             if getattr(self, 'redirect_input', None) is event.input:
@@ -515,9 +804,7 @@ class CoreMixin:
                         self._notify("[b]All fields are required. Fill in all three and press Enter on the Redirect URI.[/b]")
                         return
 
-                    cfg = {"client_id": cid, "client_secret": csec, "redirect_uri": ruri}
-                    config.save_local_config(cfg)
-                    config.CLIENT_ID = cid; config.CLIENT_SECRET = csec; config.REDIRECT_URI = ruri; config.CONFIG_LOADED = True
+                    config.save_credentials(cid, csec, ruri)
 
                     right = self._clear_right()
                     auth_url = self.spotify.prepare_authorize_url()
@@ -564,7 +851,7 @@ class CoreMixin:
                     except Exception:
                         logger.exception("Could not start NOW BAR interval after auth")
                     try:
-                        self.action_escape_to_menu()
+                        self._go_to_menu()
                     except Exception:
                         logger.exception("Could not navigate to main menu after auth")
                     try:
@@ -580,12 +867,19 @@ class CoreMixin:
                     self._notify("[b]Authorization failed; check the URL and try again.[/b]")
                     return
 
+            if getattr(self, 'rename_playlist_input', None) is event.input:
+                self._submit_rename_playlist(event.value or "")
+                return
+
             if getattr(self, 'create_name_input', None) is event.input:
                 name = (event.value or "").strip()
                 if not name:
                     self._notify("[b]Playlist name cannot be empty. Enter a name and press Enter.[/b]")
                     return
                 self._create_playlist_state = {"name": name}
+                if not self._cap("playlist_visibility"):
+                    self._create_playlist_next_step("desc")
+                    return
                 right = self._clear_right()
                 right.mount(Static(f'[b]Create playlist:[/b] {rich_escape(name)}\nPublic? (y/N)'))
                 self.create_public_input = Input(placeholder='y = public, N = private')
@@ -610,91 +904,10 @@ class CoreMixin:
                 if self._create_playlist_state is None:
                     self._create_playlist_state = {}
                 self._create_playlist_state["collaborative"] = coll
-                right = self._clear_right()
-                right.mount(Static(f'[b]Create playlist:[/b] {rich_escape(self._create_playlist_state.get("name",""))}\nEnter a description (or leave blank) and press Enter.'))
-                self.create_desc_input = Input(placeholder='Description…')
-                right.mount(self.create_desc_input)
-                self.create_desc_input.focus()
+                self._create_playlist_next_step("desc")
                 return
             if getattr(self, 'create_desc_input', None) is event.input:
-                desc = (event.value or "").strip()
-                st = self._create_playlist_state or {}
-                name = st.get("name")
-                public = bool(st.get("public", False))
-                collaborative = bool(st.get("collaborative", False))
-                right = self._clear_right()
-                right.update(f"[b]Creating playlist:[/b] {rich_escape(name)} …")
-                def _worker_create(nm, pub, collab, dsc):
-                    try:
-                        pl = self.spotify.create_playlist(nm, public=pub, collaborative=collab, description=dsc)
-
-                        def _paint_result():
-                            try:
-                                if pl:
-                                    r = self._clear_right()
-                                    r.update(f"[b]Playlist created:[/b] {rich_escape(pl.get('name',''))}")
-                                    try:
-                                        threading.Thread(target=lambda: self._load_playlists(force=True), daemon=True).start()
-                                    except Exception:
-                                        logger.exception('Could not start _load_playlists thread')
-                                    try:
-                                        def _delayed_back():
-                                            try:
-                                                time.sleep(1.0)
-                                                try:
-                                                    self.call_from_thread(self.action_escape_to_menu)
-                                                except Exception:
-                                                    self.action_escape_to_menu()
-                                            except Exception:
-                                                pass
-                                        threading.Thread(target=_delayed_back, daemon=True).start()
-                                    except Exception:
-                                        logger.exception('Could not start delayed back-to-menu thread')
-                                else:
-                                    err = getattr(self.spotify, '_last_create_error', None)
-                                    r = self._clear_right()
-                                    if err:
-                                        safe = rich_escape(str(err))
-                                        r.update(f"[b]Failed to create playlist:[/b] {safe}")
-                                    else:
-                                        r.update('[b]Failed to create playlist.[/b]')
-                            except Exception:
-                                logger.exception('paint_result for create playlist failed')
-
-                        try:
-                            self.call_from_thread(_paint_result)
-                        except Exception:
-                            if getattr(self, '_closing', False):
-                                logger.debug("create-playlist result paint dropped during teardown")
-                            else:
-                                logger.exception("create-playlist result: call_from_thread failed")
-
-                    except Exception:
-                        logger.exception('Create playlist worker failed')
-
-                        def _paint_err():
-                            try:
-                                r = self._clear_right()
-                                r.update('[b]Error creating playlist.[/b]')
-                            except Exception:
-                                pass
-
-                        try:
-                            self.call_from_thread(_paint_err)
-                        except Exception:
-                            if getattr(self, '_closing', False):
-                                logger.debug("create-playlist error paint dropped during teardown")
-                            else:
-                                logger.exception("create-playlist error: call_from_thread failed")
-
-                threading.Thread(target=_worker_create, args=(name, public, collaborative, desc), daemon=True).start()
-                try:
-                    del self.create_name_input
-                    del self.create_public_input
-                    del self.create_collab_input
-                    del self.create_desc_input
-                except Exception:
-                    pass
+                self._run_create_playlist((event.value or "").strip())
                 self._create_playlist_state = None
                 return
 
@@ -718,8 +931,41 @@ class CoreMixin:
                     except Exception: pass
                 return
 
+            if getattr(self, 'accent_input', None) is event.input:
+                if (event.value or "").strip():
+                    self._set_accent(event.value)
+                return
+
+            if getattr(self, 'visualizer_fps_input', None) is event.input:
+                self._save_visualizer_fps_setting(event.value or "")
+                return
+
+            if getattr(self, 'offline_cap_input', None) is event.input:
+                self._save_offline_cap_setting(event.value or "")
+                return
+
             if getattr(self, 'lyrics_cache_input', None) is event.input:
                 if not self._save_lyrics_cache_setting(event.value or ""):
+                    return
+                self._finish_settings()
+                return
+
+            if getattr(self, 'subsonic_url_input', None) is event.input:
+                self._save_plain_setting('subsonic_url', (event.value or "").strip().rstrip('/'))
+                nxt = getattr(self, 'subsonic_user_input', None)
+                if nxt is not None:
+                    try: nxt.focus()
+                    except Exception: pass
+                return
+            if getattr(self, 'subsonic_user_input', None) is event.input:
+                self._save_plain_setting('subsonic_user', (event.value or "").strip())
+                nxt = getattr(self, 'subsonic_password_input', None)
+                if nxt is not None:
+                    try: nxt.focus()
+                    except Exception: pass
+                return
+            if getattr(self, 'subsonic_password_input', None) is event.input:
+                if not self._save_subsonic_password(event.value or ""):
                     return
                 self._finish_settings()
                 return
@@ -786,7 +1032,7 @@ class CoreMixin:
                                         pass
                                     try:
                                         try:
-                                            self.call_from_thread(self.action_escape_to_menu)
+                                            self.call_from_thread(self._go_to_menu)
                                         except Exception:
                                             self.call_from_thread(lambda: self._notify(f"[b]Playlist deleted:[/b] {rich_escape(pname)}"))
                                     except Exception:
@@ -801,13 +1047,13 @@ class CoreMixin:
                         try:
                             if threading.current_thread() is threading.main_thread():
                                 try:
-                                    self.action_escape_to_menu()
+                                    self._go_to_menu()
                                 except Exception:
                                     try: self._notify('[b]Deletion cancelled.[/b]')
                                     except Exception: pass
                             else:
                                 try:
-                                    self.call_from_thread(self.action_escape_to_menu)
+                                    self.call_from_thread(self._go_to_menu)
                                 except Exception:
                                     try: self._notify('[b]Deletion cancelled.[/b]')
                                     except Exception: pass
@@ -826,6 +1072,12 @@ class CoreMixin:
                     if not raw:
                         self._notify("[b]Empty input. Enter a playlist URI or ID.[/b]")
                         return
+
+                    try:
+                        if self._import_link_dispatch(raw):
+                            return
+                    except Exception:
+                        logger.exception("import link dispatch failed")
 
                     def worker_import(vraw: str):
                         right = self._clear_right()
@@ -941,6 +1193,163 @@ class CoreMixin:
             logger.exception('Could not save %s', cfg_key)
         return True
 
+    def _create_playlist_next_step(self, step: str) -> None:
+        """Create Playlist wizard: continue at the description prompt, or (providers that cannot
+        store one) create the playlist right away."""
+        name = (self._create_playlist_state or {}).get("name", "")
+        if step == "desc" and self._cap("playlist_description"):
+            right = self._clear_right()
+            right.mount(Static(f'[b]Create playlist:[/b] {rich_escape(name)}\nEnter a description (or leave blank) and press Enter.'))
+            self.create_desc_input = Input(placeholder='Description…')
+            right.mount(self.create_desc_input)
+            self.create_desc_input.focus()
+            return
+        self._run_create_playlist("")
+
+    def _run_create_playlist(self, desc: str) -> None:
+        """Create the playlist from ``self._create_playlist_state`` (worker thread)."""
+        st = self._create_playlist_state or {}
+        name = st.get("name")
+        public = bool(st.get("public", False))
+        collaborative = bool(st.get("collaborative", False))
+        right = self._clear_right()
+        right.update(f"[b]Creating playlist:[/b] {rich_escape(name)} …")
+        def _worker_create(nm, pub, collab, dsc):
+            try:
+                pl = self.spotify.create_playlist(nm, public=pub, collaborative=collab, description=dsc)
+
+                def _paint_result():
+                    try:
+                        if pl:
+                            r = self._clear_right()
+                            r.update(f"[b]Playlist created:[/b] {rich_escape(pl.get('name',''))}")
+                            try:
+                                threading.Thread(target=lambda: self._load_playlists(force=True), daemon=True).start()
+                            except Exception:
+                                logger.exception('Could not start _load_playlists thread')
+                            try:
+                                def _delayed_back():
+                                    try:
+                                        time.sleep(1.0)
+                                        try:
+                                            self.call_from_thread(self._go_to_menu)
+                                        except Exception:
+                                            self._go_to_menu()
+                                    except Exception:
+                                        pass
+                                threading.Thread(target=_delayed_back, daemon=True).start()
+                            except Exception:
+                                logger.exception('Could not start delayed back-to-menu thread')
+                        else:
+                            err = getattr(self.spotify, '_last_create_error', None)
+                            r = self._clear_right()
+                            if err:
+                                safe = rich_escape(str(err))
+                                r.update(f"[b]Failed to create playlist:[/b] {safe}")
+                            else:
+                                r.update('[b]Failed to create playlist.[/b]')
+                    except Exception:
+                        logger.exception('paint_result for create playlist failed')
+
+                try:
+                    self.call_from_thread(_paint_result)
+                except Exception:
+                    if getattr(self, '_closing', False):
+                        logger.debug("create-playlist result paint dropped during teardown")
+                    else:
+                        logger.exception("create-playlist result: call_from_thread failed")
+
+            except Exception:
+                logger.exception('Create playlist worker failed')
+
+                def _paint_err():
+                    try:
+                        r = self._clear_right()
+                        r.update('[b]Error creating playlist.[/b]')
+                    except Exception:
+                        pass
+
+                try:
+                    self.call_from_thread(_paint_err)
+                except Exception:
+                    if getattr(self, '_closing', False):
+                        logger.debug("create-playlist error paint dropped during teardown")
+                    else:
+                        logger.exception("create-playlist error: call_from_thread failed")
+
+        threading.Thread(target=_worker_create, args=(name, public, collaborative, desc), daemon=True).start()
+        try:
+            del self.create_name_input
+            del self.create_public_input
+            del self.create_collab_input
+            del self.create_desc_input
+        except Exception:
+            pass
+        self._create_playlist_state = None
+
+
+    def _save_visualizer_fps_setting(self, value: str) -> bool:
+        """Settings > Visualizer FPS: integer within viz.MIN_FPS..MAX_FPS, saved as `visualizer_fps`
+        and applied to a running visualizer at once. Empty keeps the current value."""
+        from .. import visualizer as viz
+        if not (value or "").strip():
+            return True
+        try:
+            n = int(str(value).strip())
+            if not (viz.MIN_FPS <= n <= viz.MAX_FPS):
+                raise ValueError(n)
+        except (TypeError, ValueError):
+            self._notify(f'[b]Invalid FPS.[/b] Use a whole number between {viz.MIN_FPS} and {viz.MAX_FPS}.',
+                         warn=True)
+            return False
+        try:
+            if not isinstance(config.LOCAL_CFG, dict):
+                config.LOCAL_CFG = {}
+            config.LOCAL_CFG['visualizer_fps'] = n
+            config.save_local_config(config.LOCAL_CFG)
+        except Exception:
+            logger.exception('Could not save visualizer_fps')
+        try:
+            self._apply_visualizer_fps()
+        except Exception:
+            logger.exception('applying visualizer_fps failed')
+        self._notify(f'[b]Visualizer set to {n} FPS.[/b]')
+        return True
+
+    def _save_offline_cap_setting(self, value: str) -> bool:
+        """Settings > Offline space: parse '1 GB', save `offline_max_bytes`
+        and prune the active provider's copies to it right away."""
+        from .. import offline
+        if not (value or "").strip():
+            return True
+        parsed = config.parse_size(value)
+        if parsed is None or not (offline.OFFLINE_MIN_BYTES <= parsed <= offline.OFFLINE_MAX_BYTES_LIMIT):
+            lo = config.format_size(offline.OFFLINE_MIN_BYTES)
+            hi = config.format_size(offline.OFFLINE_MAX_BYTES_LIMIT)
+            self._notify(f'[b]Invalid offline space.[/b] Use a unit, between {lo} and {hi} (e.g. 1 GB).', warn=True)
+            return False
+        try:
+            if not isinstance(config.LOCAL_CFG, dict):
+                config.LOCAL_CFG = {}
+            config.LOCAL_CFG[offline.CONFIG_KEY] = parsed
+            config.save_local_config(config.LOCAL_CFG)
+        except Exception:
+            logger.exception('Could not save offline_max_bytes')
+        removed = []
+        st = getattr(getattr(self, 'spotify', None), 'offline', None)
+        if st is not None:
+            try:
+                removed = st.prune(limit=parsed)
+            except Exception:
+                logger.exception('offline prune failed')
+        msg = f'[b]Offline space set to {config.format_size(parsed)}.[/b]'
+        if removed:
+            msg += f' Deleted {len(removed)} older copies to fit.'
+            try: self._repaint_offline_marks()
+            except Exception: pass
+        self._notify(msg)
+        return True
+
     def _save_lyrics_cache_setting(self, value: str) -> bool:
         """Parse a human-readable lyrics-cache size ('200 MB', '1 GB') into bytes,
         validate the range, persist it and apply it to the live cap. Shows a clear
@@ -975,13 +1384,73 @@ class CoreMixin:
             pass
         return True
 
+    def _save_plain_flag(self, cfg_key: str, value: bool) -> None:
+        """Persist a boolean setting (unlike _save_plain_setting, False is a real value)."""
+        try:
+            if not isinstance(config.LOCAL_CFG, dict):
+                config.LOCAL_CFG = {}
+            config.LOCAL_CFG[cfg_key] = value if isinstance(value, str) else bool(value)
+            config.save_local_config(config.LOCAL_CFG)
+        except Exception:
+            logger.exception('Could not save %s', cfg_key)
+
+    def _save_plain_setting(self, cfg_key: str, value: str) -> None:
+        """Persist a non-secret string setting; an empty value keeps the old one."""
+        if not value:
+            return
+        try:
+            if not isinstance(config.LOCAL_CFG, dict):
+                config.LOCAL_CFG = {}
+            config.LOCAL_CFG[cfg_key] = value
+            config.save_local_config(config.LOCAL_CFG)
+            self._provider_settings_changed = True
+        except Exception:
+            logger.exception('Could not save %s', cfg_key)
+
+    def _save_subsonic_password(self, value: str) -> bool:
+        """Hand the Subsonic password to the keyring. It is never written to
+        spt_config.json; without a keyring the user is told to use the env var."""
+        if not value:
+            return True
+        from ..secret_store import default_store
+        from ..providers.subsonic import password_account
+        cfg = config.LOCAL_CFG if isinstance(config.LOCAL_CFG, dict) else {}
+        url, user = cfg.get('subsonic_url') or '', cfg.get('subsonic_user') or ''
+        if not url or not user:
+            try:
+                self._notify('[b]Set the Subsonic URL and user before the password.[/b]', warn=True)
+            except Exception:
+                pass
+            return False
+        backend = None
+        try:
+            backend = default_store().set(password_account(url, user), value)
+        except Exception:
+            logger.exception('storing the Subsonic password failed')
+        if backend is None:
+            try:
+                self._notify('[b]No system keyring available: the password was NOT saved.[/b] '
+                             'Export SPT_SUBSONIC_PASSWORD instead.', warn=True, seconds=10.0)
+            except Exception:
+                pass
+            return False
+        self._provider_settings_changed = True
+        return True
+
     def _finish_settings(self) -> None:
         """Tear down the settings-wizard inputs and bounce back to the menu."""
         for a in ('seek_vol_down_input', 'seek_vol_up_input', 'seek_track_input',
-                  'seek_episode_input', 'lyrics_cache_input'):
+                  'seek_episode_input', 'lyrics_cache_input', 'provider_select',
+                  'subsonic_url_input', 'subsonic_user_input', 'subsonic_password_input',
+                  'appearance_select', 'accent_select', 'accent_input', 'hints_select', 'header_select',
+                  'offline_cap_input', 'visualizer_fps_input', 'visualizer_mode_select', 'spicy_select', 'spicy_key_status'):
             try: delattr(self, a)
             except Exception: pass
-        self._clear_right().update('[b]Settings saved![/b]')
+        msg = '[b]Settings saved![/b]'
+        if getattr(self, '_provider_settings_changed', False):
+            msg += '\nPick the provider again (P) to apply the new server settings.'
+            self._provider_settings_changed = False
+        self._clear_right().update(msg)
 
         def _return():
             try:
@@ -992,6 +1461,9 @@ class CoreMixin:
         threading.Thread(target=_return, daemon=True).start()
 
     def on_input_changed(self, event: Input.Changed) -> None:
+        if getattr(event.input, "_filter_table", None) is not None:
+            self._schedule_view_filter(event.input, event.value or "")
+            return
         if event.input is self.search_input:
             txt = event.value or ""
             self.search_title.update(f"Search: {rich_escape(txt)}" if txt else "Search")
@@ -1049,6 +1521,10 @@ class CoreMixin:
                     self._open_artist_table(rv[3], push_stack=False); return
                 if kind == 'podcast' and len(rv) > 3 and rv[3]:
                     self._open_podcast_table(rv[3], push_stack=False); return
+                if kind == 'downloaded':
+                    self._open_downloaded_table(push_stack=False); return
+                if kind == 'radio' and len(rv) > 3 and rv[3]:
+                    self._open_radio_view(rv[3], push_stack=False); return
                 if kind == 'queue':
                     self._refresh_queue_table(); return
                 if kind == 'search':
@@ -1078,7 +1554,7 @@ class CoreMixin:
         try:
             if getattr(self, '_help_on', False):
                 try:
-                    self.action_escape_to_menu()
+                    self._go_to_menu()
                 except Exception:
                     try: self.set_focus(getattr(self, 'search_input', None))
                     except Exception: pass
@@ -1088,14 +1564,13 @@ class CoreMixin:
         except Exception:
             pass
         self._leave_lyrics_mode()   # opening Help exits lyrics
-        help_text = f"""[b]Help & Keybindings[/b]
-
+        help_text = f"""
     [b]Main / Navigation[/b]
         - Esc: Return to main menu
         - Ctrl+Q: Quit
         - ↑ / ↓ : Move between sections and list items
         - Tab / Shift+Tab : Cycle focus across Search, Help, Library, Playlists and the open content (without entering a section)
-        - / : Focus search input
+        - / : Focus search input — or, on an open list (playlist, album, Liked Songs, search results), filter its loaded rows by title/artist/album (Enter/↓ keep, Esc clears)
         - Enter: Open / Play selected item
 
     [b]Playback Controls[/b]
@@ -1104,6 +1579,12 @@ class CoreMixin:
         - p: Previous / Restart
         - r: Cycle repeat (off → context → track)
         - c: Add selected track to Queue
+        - o: Download the highlighted song for offline play (again: delete the copy) — YouTube Music / Subsonic
+        - O (Shift+O): Download every song of the open list (only the filtered rows with /)
+        - k (lyrics view): line-by-line ⇄ karaoke (word by word; ≈ approximate unless the lyrics carry word times)
+        - [ / ] (lyrics view): lyrics offset −/+ 0.25 s for this song; {{ / }} ±1 s
+        - v: Visualizer (cava, real system audio; v or Esc closes it; Shift+M mirrored bars)
+        - R (Shift+R): Radio — tracks like the highlighted track, artist or playlist (or the one playing)
         - Ctrl+S: Toggle shuffle
         - - / + : Volume down / up (±5%)
         - m: Mute / Unmute
@@ -1113,6 +1594,7 @@ class CoreMixin:
         - f: Toggle Favorite (Like / Unlike selected track)
         - Ctrl+Shift+P: Add to a playlist — the selected track/episode, or all tracks of a selected album/artist/playlist/podcast
         - Ctrl+D: Delete (playlist or remove item)
+        - Ctrl+E: Rename the selected sidebar playlist (local-library playlists)
         - s: Sort the open playlist (Default → Title → Artist → Album → Duration → Date added; view only)
         - S (Shift+S): Reverse the playlist sort (ascending / descending)
         - Ctrl+R: Refresh / reload content
@@ -1158,6 +1640,7 @@ class CoreMixin:
         - - / + : Volume down / up
 
     [b]Help & Misc[/b]
+        - P (Shift+P): Choose the music provider (Spotify, Spotify via MPRIS, Subsonic, YouTube Music); switches live
         - ?: Toggle this Help view
         - F1: Toggle this Help view
         - Ctrl+O: Select all items (multi-select review)
@@ -1169,6 +1652,13 @@ class CoreMixin:
     """
 
         right = self._clear_right()
+        # Same frame as a playlist / the Queue: the title sits on #right's border and the scroll
+        # fills the panel (no padded text block inside the frame).
+        try:
+            right.add_class("table-view")
+            right.border_title = "Help & Keybindings  (↑↓ PgUp PgDn scroll · Esc close)"
+        except Exception:
+            pass
         try:
             # A focusable scroll container so Up/Down/PageUp/PageDown/Home/End
             # scroll the (long) help text with the keyboard, not just the mouse.
@@ -1196,7 +1686,12 @@ class CoreMixin:
 
     def on_list_view_selected(self, event: ListView.Selected) -> None:
         sender: ListView = event.list_view
-        if self.level != self.LVL_SECTION_CONTENT and not (getattr(self, '_lyrics_on', False) and sender.id in ("pl_list", "lib_list")):
+        # The lyrics view and the Visualizer have no focusable widget: the focus stays in the sidebar
+        # list while level == LVL_VIEW, and a click/Enter there must still open the item. (With any
+        # other view open, a click that merely focuses the list is ignored, as before.)
+        side_view = (getattr(self, '_lyrics_on', False) or getattr(self, '_vis_on', False)) \
+            and sender.id in ("pl_list", "lib_list")
+        if self.level != self.LVL_SECTION_CONTENT and not side_view:
             return
         if self._suppress_first_selection:
             self._suppress_first_selection = False; return
@@ -1260,11 +1755,55 @@ class CoreMixin:
         except Exception:
             logger.warning("could not report the local player failure: %s", detail)
 
+    def _local_player_event(self, kind: str, data: dict) -> None:
+        """LocalPlayer (worker thread) -> status line. The authorisation wait is
+        a sticky line until it succeeds, times out or librespot dies."""
+        name = getattr(getattr(self, "local_player", None), "device_name", "SPT-TUI Local")
+
+        def show():
+            url = (data or {}).get("url") or ""
+            short = (url[:60] + "…") if len(url) > 61 else url
+            if kind == "auth_url":
+                if data.get("opened"):
+                    self._notify(f"[b]Authorize {rich_escape(name)} in your browser[/b] (link opened). Waiting…  "
+                                 f"[dim]{rich_escape(short)} — full link in the log[/dim]", sticky=True)
+                else:
+                    err = data.get("error") or getattr(self, "_last_open_error", None) or "no browser could be started"
+                    self._notify(f"[b]Could not open the browser[/b] ({rich_escape(str(err))}). Open this link to "
+                                 f"authorize {rich_escape(name)}: {rich_escape(url)}  [dim](also in the log)[/dim]",
+                                 warn=True, sticky=True)
+            elif kind == "auth_ok":
+                self._notify(f"[b]{rich_escape(name)} authorized.[/b] Starting the device…")
+            elif kind == "auth_timeout":
+                self._notify(f"[b]{rich_escape(name)} was not authorized[/b] within {data.get('seconds', 120)} s. "
+                             "Open Devices (d) and choose it again to retry.", warn=True, seconds=10.0)
+            elif kind == "auth_failed":
+                self._notify(f"[b]{rich_escape(name)} stopped before authorizing:[/b] "
+                             f"{rich_escape(str(data.get('reason') or ''))}", warn=True, seconds=10.0)
+        try:
+            self.call_from_thread(show)
+        except Exception:
+            # Already on the UI thread (tests) or closing.
+            try:
+                show()
+            except Exception:
+                logger.debug("local player event dropped: %s", kind)
+
+    # Enter in Devices fires both action_open and DataTable.RowSelected.
+    _DEVICE_SELECT_DEBOUNCE_S = 0.8
+
     def _select_device(self, dev_id) -> None:
         """Route a Devices-view selection. The synthetic sentinel row starts and
         activates the local librespot player; any real id transfers to it."""
         if not dev_id:
             return
+        if not self._require_cap("can_list_devices"):
+            return
+        now = time.monotonic()
+        last = getattr(self, "_last_device_select", None)
+        if last and last[0] == dev_id and now - last[1] < self._DEVICE_SELECT_DEBOUNCE_S:
+            return
+        self._last_device_select = (dev_id, now)
         if dev_id == LOCAL_START_SENTINEL:
             lp = getattr(self, "local_player", None)
             if lp is not None:
@@ -1277,6 +1816,8 @@ class CoreMixin:
         table: DataTable = event.data_table
         if table.id == "tracks_table" and hasattr(table, "row_to_uri"):
             self._play_row(event.row_key, table)
+        elif table.id == "queue_table":
+            self._play_queue_row(event.row_key, table)
         elif table.id == "devices_table" and hasattr(table, "row_to_device"):
             dev_id = self._resolve_device_id(table, event.row_key)
             if dev_id:

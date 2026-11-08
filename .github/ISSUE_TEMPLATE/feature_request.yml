@@ -1,0 +1,33 @@
+name: Feature request
+description: Suggest an idea or an improvement
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem would this solve?
+      description: Describe your use case, not only the solution.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What would you like to see?
+      description: A short description, and the keys or screens involved if you have them in mind.
+    validations:
+      required: true
+  - type: dropdown
+    id: provider
+    attributes:
+      label: Which provider is it for?
+      multiple: true
+      options:
+        - Spotify
+        - Spotify Free via MPRIS (spotify_mpris)
+        - YouTube Music (ytmusic)
+        - Subsonic / Navidrome (subsonic)
+        - All of them
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives you considered

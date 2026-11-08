@@ -1,0 +1,1461 @@
+{
+ "data": {
+  "playlistV2": {
+   "__typename": "Playlist",
+   "content": {
+    "__typename": "PlaylistItemsPage",
+    "items": [
+     {
+      "addedAt": {
+       "isoString": "2026-11-06T05:02:41.791Z"
+      },
+      "addedBy": null,
+      "attributes": [
+       {
+        "key": "decision_id",
+        "value": "ssp~065fa2f16d1632f6be3875c5efbf7aa708c2"
+       }
+      ],
+      "itemV2": {
+       "__typename": "TrackResponseWrapper",
+       "data": {
+        "__typename": "Track",
+        "albumOfTrack": {
+         "artists": {
+          "items": [
+           {
+            "profile": {
+             "name": "Ashe"
+            },
+            "uri": "spotify:artist:6P5NO5hzJbuOqSdyPB7SJM"
+           }
+          ]
+         },
+         "coverArt": {
+          "sources": [
+           {
+            "height": 300,
+            "url": "https://i.scdn.co/image/ab67616d00001e020893a0c33fd4b8497b0ef2f6",
+            "width": 300
+           },
+           {
+            "height": 64,
+            "url": "https://i.scdn.co/image/ab67616d000048510893a0c33fd4b8497b0ef2f6",
+            "width": 64
+           },
+           {
+            "height": 640,
+            "url": "https://i.scdn.co/image/ab67616d0000b2730893a0c33fd4b8497b0ef2f6",
+            "width": 640
+           }
+          ]
+         },
+         "name": "Stop The Wedding!",
+         "uri": "spotify:album:4dem9qxmFf4RD6fqoCH6wc"
+        },
+        "artists": {
+         "items": [
+          {
+           "profile": {
+            "name": "Ashe"
+           },
+           "uri": "spotify:artist:6P5NO5hzJbuOqSdyPB7SJM"
+          }
+         ]
+        },
+        "associationsV3": {
+         "audioAssociations": {
+          "__typename": "TrackAudioAssociationPage",
+          "items": []
+         },
+         "videoAssociations": {
+          "totalCount": 1
+         }
+        },
+        "contentRating": {
+         "label": "NONE"
+        },
+        "discNumber": 1,
+        "trackDuration": {
+         "totalMilliseconds": 198840
+        },
+        "mediaType": "AUDIO",
+        "name": "Stop The Wedding!",
+        "playability": {
+         "playable": true,
+         "reason": "PLAYABLE"
+        },
+        "playcount": "183232740",
+        "trackNumber": 1,
+        "uri": "spotify:track:3zOYmiNOuyDL0ClxJcEJ0T"
+       }
+      },
+      "itemV3": {
+       "__typename": "EntityResponseWrapper",
+       "data": {
+        "__typename": "Entity",
+        "consumptionExperienceTrait": {
+         "__typename": "ConsumptionExperienceTrait",
+         "contentRatings": [],
+         "duration": {
+          "nanoSeconds": 0,
+          "seconds": 199
+         },
+         "formats": [
+          "FORMAT_AUDIO",
+          "FORMAT_VIDEO",
+          "FORMAT_LOSSLESS"
+         ]
+        },
+        "identityTrait": {
+         "__typename": "IdentityTrait",
+         "contentHierarchyParent": {
+          "__typename": "Entity",
+          "identityTrait": {
+           "__typename": "IdentityTrait",
+           "name": "Stop The Wedding!"
+          },
+          "publishingMetadataTrait": {
+           "__typename": "PublishingMetadataTrait",
+           "firstPublishedAt": {
+            "isoString": "2026-08-07",
+            "precision": "DAY"
+           }
+          },
+          "uri": "spotify:album:4dem9qxmFf4RD6fqoCH6wc"
+         },
+         "contributors": {
+          "items": [
+           {
+            "name": "Ashe",
+            "uri": "spotify:artist:6P5NO5hzJbuOqSdyPB7SJM"
+           }
+          ],
+          "totalCount": 1
+         },
+         "description": "",
+         "name": "Stop The Wedding!",
+         "type": "Song"
+        },
+        "playability": {
+         "playable": true,
+         "reason": "PLAYABLE"
+        },
+        "uri": "spotify:track:3zOYmiNOuyDL0ClxJcEJ0T",
+        "visualIdentityTrait": {
+         "__typename": "VisualIdentityTrait",
+         "sixteenByNineCoverImage": {
+          "image": {
+           "data": {
+            "__typename": "ImageV2",
+            "sources": [
+             {
+              "imageFormat": "WEBP",
+              "maxHeight": 360,
+              "maxWidth": 640,
+              "url": "https://image-cdn-fa.spotifycdn.com/image/ab6742d3000052b64377315df8d29233ae34067b"
+             },
+             {
+              "imageFormat": "WEBP",
+              "maxHeight": 720,
+              "maxWidth": 1280,
+              "url": "https://image-cdn-fa.spotifycdn.com/image/ab6742d3000053b64377315df8d29233ae34067b"
+             }
+            ]
+           }
+          }
+         },
+         "squareCoverImage": {
+          "extractedColorSet": {
+           "encoreBaseSetTextColor": {
+            "alpha": 255,
+            "blue": 235,
+            "green": 182,
+            "red": 181
+           },
+           "highContrast": {
+            "backgroundBase": {
+             "alpha": 255,
+             "blue": 124,
+             "green": 79,
+             "red": 79
+            },
+            "backgroundTintedBase": {
+             "alpha": 255,
+             "blue": 88,
+             "green": 46,
+             "red": 48
+            },
+            "textBase": {
+             "alpha": 255,
+             "blue": 255,
+             "green": 255,
+             "red": 255
+            },
+            "textBrightAccent": {
+             "alpha": 255,
+             "blue": 255,
+             "green": 255,
+             "red": 255
+            },
+            "textSubdued": {
+             "alpha": 255,
+             "blue": 254,
+             "green": 201,
+             "red": 200
+            }
+           },
+           "higherContrast": {
+            "backgroundBase": {
+             "alpha": 255,
+             "blue": 91,
+             "green": 48,
+             "red": 50
+            },
+            "backgroundTintedBase": {
+             "alpha": 255,
+             "blue": 127,
+             "green": 81,
+             "red": 82
+            },
+            "textBase": {
+             "alpha": 255,
+             "blue": 255,
+             "green": 255,
+             "red": 255
+            },
+            "textBrightAccent": {
+             "alpha": 255,
+             "blue": 96,
+             "green": 215,
+             "red": 30
+            },
+            "textSubdued": {
+             "alpha": 255,
+             "blue": 254,
+             "green": 201,
+             "red": 200
+            }
+           },
+           "minContrast": {
+            "backgroundBase": {
+             "alpha": 255,
+             "blue": 160,
+             "green": 112,
+             "red": 112
+            },
+            "backgroundTintedBase": {
+             "alpha": 255,
+             "blue": 130,
+             "green": 84,
+             "red": 85
+            },
+            "textBase": {
+             "alpha": 255,
+             "blue": 255,
+             "green": 255,
+             "red": 255
+            },
+            "textBrightAccent": {
+             "alpha": 255,
+             "blue": 255,
+             "green": 255,
+             "red": 255
+            },
+            "textSubdued": {
+             "alpha": 255,
+             "blue": 255,
+             "green": 255,
+             "red": 255
+            }
+           }
+          },
+          "image": {
+           "data": {
+            "__typename": "ImageV2",
+            "sources": [
+             {
+              "imageFormat": "WEBP",
+              "maxHeight": 640,
+              "maxWidth": 640,
+              "url": "https://image-cdn-fa.spotifycdn.com/image/ab67616d000075a00893a0c33fd4b8497b0ef2f6"
+             },
+             {
+              "imageFormat": "WEBP",
+              "maxHeight": 64,
+              "maxWidth": 64,
+              "url": "https://image-cdn-fa.spotifycdn.com/image/ab67616d000090d50893a0c33fd4b8497b0ef2f6"
+             },
+             {
+              "imageFormat": "WEBP",
+              "maxHeight": 300,
+              "maxWidth": 300,
+              "url": "https://image-cdn-fa.spotifycdn.com/image/ab67616d0000ab870893a0c33fd4b8497b0ef2f6"
+             }
+            ]
+           }
+          }
+         }
+        }
+       }
+      },
+      "uid": "654e44597543482f767755"
+     },
+     {
+      "addedAt": {
+       "isoString": "2026-11-06T05:02:41.791Z"
+      },
+      "addedBy": null,
+      "attributes": [
+       {
+        "key": "decision_id",
+        "value": "ssp~065fa2f16d1632f6be3875c5efbf7aa708c2"
+       }
+      ],
+      "itemV2": {
+       "__typename": "TrackResponseWrapper",
+       "data": {
+        "__typename": "Track",
+        "albumOfTrack": {
+         "artists": {
+          "items": [
+           {
+            "profile": {
+             "name": "Tame Impala"
+            },
+            "uri": "spotify:artist:5INjqkS1o8h1imAzPqGZBb"
+           }
+          ]
+         },
+         "coverArt": {
+          "sources": [
+           {
+            "height": 300,
+            "url": "https://i.scdn.co/image/ab67616d00001e02208500450dcd0fd294d7bd3b",
+            "width": 300
+           },
+           {
+            "height": 64,
+            "url": "https://i.scdn.co/image/ab67616d00004851208500450dcd0fd294d7bd3b",
+            "width": 64
+           },
+           {
+            "height": 640,
+            "url": "https://i.scdn.co/image/ab67616d0000b273208500450dcd0fd294d7bd3b",
+            "width": 640
+           }
+          ]
+         },
+         "name": "Deadbeat",
+         "uri": "spotify:album:5WulAOx9ilWy1h8UGZ1gkI"
+        },
+        "artists": {
+         "items": [
+          {
+           "profile": {
+            "name": "Tame Impala"
+           },
+           "uri": "spotify:artist:5INjqkS1o8h1imAzPqGZBb"
+          }
+         ]
+        },
+        "associationsV3": {
+         "audioAssociations": {
+          "__typename": "TrackAudioAssociationPage",
+          "items": []
+         },
+         "videoAssociations": {
+          "totalCount": 1
+         }
+        },
+        "contentRating": {
+         "label": "EXPLICIT"
+        },
+        "discNumber": 1,
+        "trackDuration": {
+         "totalMilliseconds": 223069
+        },
+        "mediaType": "AUDIO",
+        "name": "Loser",
+        "playability": {
+         "playable": true,
+         "reason": "PLAYABLE"
+        },
+        "playcount": "382336207",
+        "trackNumber": 4,
+        "uri": "spotify:track:7bxaFZ1O3cHkgLKMsdC3xR"
+       }
+      },
+      "itemV3": {
+       "__typename": "EntityResponseWrapper",
+       "data": {
+        "__typename": "Entity",
+        "consumptionExperienceTrait": {
+         "__typename": "ConsumptionExperienceTrait",
+         "contentRatings": [
+          "CONTENT_RATING_EXPLICIT"
+         ],
+         "duration": {
+          "nanoSeconds": 0,
+          "seconds": 223
+         },
+         "formats": [
+          "FORMAT_AUDIO",
+          "FORMAT_VIDEO",
+          "FORMAT_LOSSLESS"
+         ]
+        },
+        "identityTrait": {
+         "__typename": "IdentityTrait",
+         "contentHierarchyParent": {
+          "__typename": "Entity",
+          "identityTrait": {
+           "__typename": "IdentityTrait",
+           "name": "Deadbeat"
+          },
+          "publishingMetadataTrait": {
+           "__typename": "PublishingMetadataTrait",
+           "firstPublishedAt": {
+            "isoString": "2025-10-17",
+            "precision": "DAY"
+           }
+          },
+          "uri": "spotify:album:5WulAOx9ilWy1h8UGZ1gkI"
+         },
+         "contributors": {
+          "items": [
+           {
+            "name": "Tame Impala",
+            "uri": "spotify:artist:5INjqkS1o8h1imAzPqGZBb"
+           }
+          ],
+          "totalCount": 1
+         },
+         "description": "",
+         "name": "Loser",
+         "type": "Song"
+        },
+        "playability": {
+         "playable": true,
+         "reason": "PLAYABLE"
+        },
+        "uri": "spotify:track:7bxaFZ1O3cHkgLKMsdC3xR",
+        "visualIdentityTrait": {
+         "__typename": "VisualIdentityTrait",
+         "sixteenByNineCoverImage": {
+          "image": {
+           "data": {
+            "__typename": "ImageV2",
+            "sources": [
+             {
+              "imageFormat": "WEBP",
+              "maxHeight": 360,
+              "maxWidth": 640,
+              "url": "https://image-cdn-ak.spotifycdn.com/image/ab6742d3000052b6a9f20c92c6b848c81bd96679"
+             },
+             {
+              "imageFormat": "WEBP",
+              "maxHeight": 720,
+              "maxWidth": 1280,
+              "url": "https://image-cdn-ak.spotifycdn.com/image/ab6742d3000053b6a9f20c92c6b848c81bd96679"
+             }
+            ]
+           }
+          }
+         },
+         "squareCoverImage": {
+          "extractedColorSet": {
+           "encoreBaseSetTextColor": {
+            "alpha": 255,
+            "blue": 187,
+            "green": 187,
+            "red": 187
+           },
+           "highContrast": {
+            "backgroundBase": {
+             "alpha": 255,
+             "blue": 83,
+             "green": 83,
+             "red": 83
+            },
+            "backgroundTintedBase": {
+             "alpha": 255,
+             "blue": 51,
+             "green": 51,
+             "red": 51
+            },
+            "textBase": {
+             "alpha": 255,
+             "blue": 255,
+             "green": 255,
+             "red": 255
+            },
+            "textBrightAccent": {
+             "alpha": 255,
+             "blue": 255,
+             "green": 255,
+             "red": 255
+            },
+            "textSubdued": {
+             "alpha": 255,
+             "blue": 205,
+             "green": 205,
+             "red": 205
+            }
+           },
+           "higherContrast": {
+            "backgroundBase": {
+             "alpha": 255,
+             "blue": 53,
+             "green": 53,
+             "red": 53
+            },
+            "backgroundTintedBase": {
+             "alpha": 255,
+             "blue": 86,
+             "green": 86,
+             "red": 86
+            },
+            "textBase": {
+             "alpha": 255,
+             "blue": 255,
+             "green": 255,
+             "red": 255
+            },
+            "textBrightAccent": {
+             "alpha": 255,
+             "blue": 96,
+             "green": 215,
+             "red": 30
+            },
+            "textSubdued": {
+             "alpha": 255,
+             "blue": 205,
+             "green": 205,
+             "red": 205
+            }
+           },
+           "minContrast": {
+            "backgroundBase": {
+             "alpha": 255,
+             "blue": 83,
+             "green": 83,
+             "red": 83
+            },
+            "backgroundTintedBase": {
+             "alpha": 255,
+             "blue": 51,
+             "green": 51,
+             "red": 51
+            },
+            "textBase": {
+             "alpha": 255,
+             "blue": 255,
+             "green": 255,
+             "red": 255
+            },
+            "textBrightAccent": {
+             "alpha": 255,
+             "blue": 255,
+             "green": 255,
+             "red": 255
+            },
+            "textSubdued": {
+             "alpha": 255,
+             "blue": 255,
+             "green": 255,
+             "red": 255
+            }
+           }
+          },
+          "image": {
+           "data": {
+            "__typename": "ImageV2",
+            "sources": [
+             {
+              "imageFormat": "WEBP",
+              "maxHeight": 640,
+              "maxWidth": 640,
+              "url": "https://image-cdn-fa.spotifycdn.com/image/ab67616d000075a0208500450dcd0fd294d7bd3b"
+             },
+             {
+              "imageFormat": "WEBP",
+              "maxHeight": 64,
+              "maxWidth": 64,
+              "url": "https://image-cdn-fa.spotifycdn.com/image/ab67616d000090d5208500450dcd0fd294d7bd3b"
+             },
+             {
+              "imageFormat": "WEBP",
+              "maxHeight": 300,
+              "maxWidth": 300,
+              "url": "https://image-cdn-fa.spotifycdn.com/image/ab67616d0000ab87208500450dcd0fd294d7bd3b"
+             }
+            ]
+           }
+          }
+         }
+        }
+       }
+      },
+      "uid": "6d2f566d4b543975424441"
+     },
+     {
+      "addedAt": {
+       "isoString": "2026-11-06T05:02:41.791Z"
+      },
+      "addedBy": null,
+      "attributes": [
+       {
+        "key": "decision_id",
+        "value": "ssp~065fa2f16d1632f6be3875c5efbf7aa708c2"
+       }
+      ],
+      "itemV2": {
+       "__typename": "TrackResponseWrapper",
+       "data": {
+        "__typename": "Track",
+        "albumOfTrack": {
+         "artists": {
+          "items": [
+           {
+            "profile": {
+             "name": "Tate McRae"
+            },
+            "uri": "spotify:artist:45dkTj5sMRSjrmBSBeiHym"
+           }
+          ]
+         },
+         "coverArt": {
+          "sources": [
+           {
+            "height": 300,
+            "url": "https://i.scdn.co/image/ab67616d00001e02f2d3185e46b03c243f60ce53",
+            "width": 300
+           },
+           {
+            "height": 64,
+            "url": "https://i.scdn.co/image/ab67616d00004851f2d3185e46b03c243f60ce53",
+            "width": 64
+           },
+           {
+            "height": 640,
+            "url": "https://i.scdn.co/image/ab67616d0000b273f2d3185e46b03c243f60ce53",
+            "width": 640
+           }
+          ]
+         },
+         "name": "Housewife",
+         "uri": "spotify:album:6JvmSyocXef7RZDZFaymNl"
+        },
+        "artists": {
+         "items": [
+          {
+           "profile": {
+            "name": "Tate McRae"
+           },
+           "uri": "spotify:artist:45dkTj5sMRSjrmBSBeiHym"
+          }
+         ]
+        },
+        "associationsV3": {
+         "audioAssociations": {
+          "__typename": "TrackAudioAssociationPage",
+          "items": []
+         },
+         "videoAssociations": {
+          "totalCount": 1
+         }
+        },
+        "contentRating": {
+         "label": "NONE"
+        },
+        "discNumber": 1,
+        "trackDuration": {
+         "totalMilliseconds": 208810
+        },
+        "mediaType": "AUDIO",
+        "name": "Housewife",
+        "playability": {
+         "playable": true,
+         "reason": "PLAYABLE"
+        },
+        "playcount": "137606382",
+        "trackNumber": 1,
+        "uri": "spotify:track:2sFepQNyl1WjpROruP8bJ0"
+       }
+      },
+      "itemV3": {
+       "__typename": "EntityResponseWrapper",
+       "data": {
+        "__typename": "Entity",
+        "consumptionExperienceTrait": {
+         "__typename": "ConsumptionExperienceTrait",
+         "contentRatings": [],
+         "duration": {
+          "nanoSeconds": 0,
+          "seconds": 208
+         },
+         "formats": [
+          "FORMAT_AUDIO",
+          "FORMAT_VIDEO",
+          "FORMAT_LOSSLESS"
+         ]
+        },
+        "identityTrait": {
+         "__typename": "IdentityTrait",
+         "contentHierarchyParent": {
+          "__typename": "Entity",
+          "identityTrait": {
+           "__typename": "IdentityTrait",
+           "name": "Housewife"
+          },
+          "publishingMetadataTrait": {
+           "__typename": "PublishingMetadataTrait",
+           "firstPublishedAt": {
+            "isoString": "2026-10-15",
+            "precision": "DAY"
+           }
+          },
+          "uri": "spotify:album:6JvmSyocXef7RZDZFaymNl"
+         },
+         "contributors": {
+          "items": [
+           {
+            "name": "Tate McRae",
+            "uri": "spotify:artist:45dkTj5sMRSjrmBSBeiHym"
+           }
+          ],
+          "totalCount": 1
+         },
+         "description": "",
+         "name": "Housewife",
+         "type": "Song"
+        },
+        "playability": {
+         "playable": true,
+         "reason": "PLAYABLE"
+        },
+        "uri": "spotify:track:2sFepQNyl1WjpROruP8bJ0",
+        "visualIdentityTrait": {
+         "__typename": "VisualIdentityTrait",
+         "sixteenByNineCoverImage": {
+          "image": {
+           "data": {
+            "__typename": "ImageV2",
+            "sources": [
+             {
+              "imageFormat": "WEBP",
+              "maxHeight": 360,
+              "maxWidth": 640,
+              "url": "https://image-cdn-fa.spotifycdn.com/image/ab6742d3000052b67c836a54fe8b4ff940c43a93"
+             },
+             {
+              "imageFormat": "WEBP",
+              "maxHeight": 720,
+              "maxWidth": 1280,
+              "url": "https://image-cdn-fa.spotifycdn.com/image/ab6742d3000053b67c836a54fe8b4ff940c43a93"
+             }
+            ]
+           }
+          }
+         },
+         "squareCoverImage": {
+          "extractedColorSet": {
+           "encoreBaseSetTextColor": {
+            "alpha": 255,
+            "blue": 154,
+            "green": 162,
+            "red": 255
+           },
+           "highContrast": {
+            "backgroundBase": {
+             "alpha": 255,
+             "blue": 32,
+             "green": 24,
+             "red": 152
+            },
+            "backgroundTintedBase": {
+             "alpha": 255,
+             "blue": 1,
+             "green": 0,
+             "red": 92
+            },
+            "textBase": {
+             "alpha": 255,
+             "blue": 255,
+             "green": 255,
+             "red": 255
+            },
+            "textBrightAccent": {
+             "alpha": 255,
+             "blue": 255,
+             "green": 255,
+             "red": 255
+            },
+            "textSubdued": {
+             "alpha": 255,
+             "blue": 183,
+             "green": 189,
+             "red": 255
+            }
+           },
+           "higherContrast": {
+            "backgroundBase": {
+             "alpha": 255,
+             "blue": 2,
+             "green": 0,
+             "red": 101
+            },
+            "backgroundTintedBase": {
+             "alpha": 255,
+             "blue": 43,
+             "green": 52,
+             "red": 147
+            },
+            "textBase": {
+             "alpha": 255,
+             "blue": 255,
+             "green": 255,
+             "red": 255
+            },
+            "textBrightAccent": {
+             "alpha": 255,
+             "blue": 96,
+             "green": 215,
+             "red": 30
+            },
+            "textSubdued": {
+             "alpha": 255,
+             "blue": 183,
+             "green": 189,
+             "red": 255
+            }
+           },
+           "minContrast": {
+            "backgroundBase": {
+             "alpha": 255,
+             "blue": 32,
+             "green": 24,
+             "red": 152
+            },
+            "backgroundTintedBase": {
+             "alpha": 255,
+             "blue": 1,
+             "green": 0,
+             "red": 92
+            },
+            "textBase": {
+             "alpha": 255,
+             "blue": 255,
+             "green": 255,
+             "red": 255
+            },
+            "textBrightAccent": {
+             "alpha": 255,
+             "blue": 255,
+             "green": 255,
+             "red": 255
+            },
+            "textSubdued": {
+             "alpha": 255,
+             "blue": 255,
+             "green": 255,
+             "red": 255
+            }
+           }
+          },
+          "image": {
+           "data": {
+            "__typename": "ImageV2",
+            "sources": [
+             {
+              "imageFormat": "WEBP",
+              "maxHeight": 640,
+              "maxWidth": 640,
+              "url": "https://image-cdn-fa.spotifycdn.com/image/ab67616d000075a0f2d3185e46b03c243f60ce53"
+             },
+             {
+              "imageFormat": "WEBP",
+              "maxHeight": 64,
+              "maxWidth": 64,
+              "url": "https://image-cdn-fa.spotifycdn.com/image/ab67616d000090d5f2d3185e46b03c243f60ce53"
+             },
+             {
+              "imageFormat": "WEBP",
+              "maxHeight": 300,
+              "maxWidth": 300,
+              "url": "https://image-cdn-fa.spotifycdn.com/image/ab67616d0000ab87f2d3185e46b03c243f60ce53"
+             }
+            ]
+           }
+          }
+         }
+        }
+       }
+      },
+      "uid": "33345a6b58796e51557934"
+     },
+     {
+      "addedAt": {
+       "isoString": "2026-11-06T05:02:41.791Z"
+      },
+      "addedBy": null,
+      "attributes": [
+       {
+        "key": "decision_id",
+        "value": "ssp~065fa2f16d1632f6be3875c5efbf7aa708c2"
+       }
+      ],
+      "itemV2": {
+       "__typename": "TrackResponseWrapper",
+       "data": {
+        "__typename": "Episode",
+        "albumOfTrack": {
+         "artists": {
+          "items": [
+           {
+            "profile": {
+             "name": "Ashe"
+            },
+            "uri": "spotify:artist:6P5NO5hzJbuOqSdyPB7SJM"
+           }
+          ]
+         },
+         "coverArt": {
+          "sources": [
+           {
+            "height": 300,
+            "url": "https://i.scdn.co/image/ab67616d00001e020893a0c33fd4b8497b0ef2f6",
+            "width": 300
+           },
+           {
+            "height": 64,
+            "url": "https://i.scdn.co/image/ab67616d000048510893a0c33fd4b8497b0ef2f6",
+            "width": 64
+           },
+           {
+            "height": 640,
+            "url": "https://i.scdn.co/image/ab67616d0000b2730893a0c33fd4b8497b0ef2f6",
+            "width": 640
+           }
+          ]
+         },
+         "name": "Stop The Wedding!",
+         "uri": "spotify:album:4dem9qxmFf4RD6fqoCH6wc"
+        },
+        "artists": {
+         "items": [
+          {
+           "profile": {
+            "name": "Ashe"
+           },
+           "uri": "spotify:artist:6P5NO5hzJbuOqSdyPB7SJM"
+          }
+         ]
+        },
+        "associationsV3": {
+         "audioAssociations": {
+          "__typename": "TrackAudioAssociationPage",
+          "items": []
+         },
+         "videoAssociations": {
+          "totalCount": 1
+         }
+        },
+        "contentRating": {
+         "label": "NONE"
+        },
+        "discNumber": 1,
+        "trackDuration": {
+         "totalMilliseconds": 198840
+        },
+        "mediaType": "AUDIO",
+        "name": "Stop The Wedding!",
+        "playability": {
+         "playable": true,
+         "reason": "PLAYABLE"
+        },
+        "playcount": "183232740",
+        "trackNumber": 1,
+        "uri": "spotify:track:3zOYmiNOuyDL0ClxJcEJ0T"
+       }
+      },
+      "itemV3": {
+       "__typename": "EntityResponseWrapper",
+       "data": {
+        "__typename": "Entity",
+        "consumptionExperienceTrait": {
+         "__typename": "ConsumptionExperienceTrait",
+         "contentRatings": [],
+         "duration": {
+          "nanoSeconds": 0,
+          "seconds": 199
+         },
+         "formats": [
+          "FORMAT_AUDIO",
+          "FORMAT_VIDEO",
+          "FORMAT_LOSSLESS"
+         ]
+        },
+        "identityTrait": {
+         "__typename": "IdentityTrait",
+         "contentHierarchyParent": {
+          "__typename": "Entity",
+          "identityTrait": {
+           "__typename": "IdentityTrait",
+           "name": "Stop The Wedding!"
+          },
+          "publishingMetadataTrait": {
+           "__typename": "PublishingMetadataTrait",
+           "firstPublishedAt": {
+            "isoString": "2026-08-07",
+            "precision": "DAY"
+           }
+          },
+          "uri": "spotify:album:4dem9qxmFf4RD6fqoCH6wc"
+         },
+         "contributors": {
+          "items": [
+           {
+            "name": "Ashe",
+            "uri": "spotify:artist:6P5NO5hzJbuOqSdyPB7SJM"
+           }
+          ],
+          "totalCount": 1
+         },
+         "description": "",
+         "name": "Stop The Wedding!",
+         "type": "Song"
+        },
+        "playability": {
+         "playable": true,
+         "reason": "PLAYABLE"
+        },
+        "uri": "spotify:track:3zOYmiNOuyDL0ClxJcEJ0T",
+        "visualIdentityTrait": {
+         "__typename": "VisualIdentityTrait",
+         "sixteenByNineCoverImage": {
+          "image": {
+           "data": {
+            "__typename": "ImageV2",
+            "sources": [
+             {
+              "imageFormat": "WEBP",
+              "maxHeight": 360,
+              "maxWidth": 640,
+              "url": "https://image-cdn-fa.spotifycdn.com/image/ab6742d3000052b64377315df8d29233ae34067b"
+             },
+             {
+              "imageFormat": "WEBP",
+              "maxHeight": 720,
+              "maxWidth": 1280,
+              "url": "https://image-cdn-fa.spotifycdn.com/image/ab6742d3000053b64377315df8d29233ae34067b"
+             }
+            ]
+           }
+          }
+         },
+         "squareCoverImage": {
+          "extractedColorSet": {
+           "encoreBaseSetTextColor": {
+            "alpha": 255,
+            "blue": 235,
+            "green": 182,
+            "red": 181
+           },
+           "highContrast": {
+            "backgroundBase": {
+             "alpha": 255,
+             "blue": 124,
+             "green": 79,
+             "red": 79
+            },
+            "backgroundTintedBase": {
+             "alpha": 255,
+             "blue": 88,
+             "green": 46,
+             "red": 48
+            },
+            "textBase": {
+             "alpha": 255,
+             "blue": 255,
+             "green": 255,
+             "red": 255
+            },
+            "textBrightAccent": {
+             "alpha": 255,
+             "blue": 255,
+             "green": 255,
+             "red": 255
+            },
+            "textSubdued": {
+             "alpha": 255,
+             "blue": 254,
+             "green": 201,
+             "red": 200
+            }
+           },
+           "higherContrast": {
+            "backgroundBase": {
+             "alpha": 255,
+             "blue": 91,
+             "green": 48,
+             "red": 50
+            },
+            "backgroundTintedBase": {
+             "alpha": 255,
+             "blue": 127,
+             "green": 81,
+             "red": 82
+            },
+            "textBase": {
+             "alpha": 255,
+             "blue": 255,
+             "green": 255,
+             "red": 255
+            },
+            "textBrightAccent": {
+             "alpha": 255,
+             "blue": 96,
+             "green": 215,
+             "red": 30
+            },
+            "textSubdued": {
+             "alpha": 255,
+             "blue": 254,
+             "green": 201,
+             "red": 200
+            }
+           },
+           "minContrast": {
+            "backgroundBase": {
+             "alpha": 255,
+             "blue": 160,
+             "green": 112,
+             "red": 112
+            },
+            "backgroundTintedBase": {
+             "alpha": 255,
+             "blue": 130,
+             "green": 84,
+             "red": 85
+            },
+            "textBase": {
+             "alpha": 255,
+             "blue": 255,
+             "green": 255,
+             "red": 255
+            },
+            "textBrightAccent": {
+             "alpha": 255,
+             "blue": 255,
+             "green": 255,
+             "red": 255
+            },
+            "textSubdued": {
+             "alpha": 255,
+             "blue": 255,
+             "green": 255,
+             "red": 255
+            }
+           }
+          },
+          "image": {
+           "data": {
+            "__typename": "ImageV2",
+            "sources": [
+             {
+              "imageFormat": "WEBP",
+              "maxHeight": 640,
+              "maxWidth": 640,
+              "url": "https://image-cdn-fa.spotifycdn.com/image/ab67616d000075a00893a0c33fd4b8497b0ef2f6"
+             },
+             {
+              "imageFormat": "WEBP",
+              "maxHeight": 64,
+              "maxWidth": 64,
+              "url": "https://image-cdn-fa.spotifycdn.com/image/ab67616d000090d50893a0c33fd4b8497b0ef2f6"
+             },
+             {
+              "imageFormat": "WEBP",
+              "maxHeight": 300,
+              "maxWidth": 300,
+              "url": "https://image-cdn-fa.spotifycdn.com/image/ab67616d0000ab870893a0c33fd4b8497b0ef2f6"
+             }
+            ]
+           }
+          }
+         }
+        }
+       }
+      },
+      "uid": "654e44597543482f767755"
+     }
+    ],
+    "pagingInfo": {
+     "limit": 3,
+     "offset": 0
+    },
+    "totalCount": 50
+   },
+   "abuseReportingEnabled": false,
+   "attributes": [
+    {
+     "key": "uri",
+     "value": "spotify:user:spotify:playlist:37i9dQZF1DXcBWIGoYBM5M"
+    },
+    {
+     "key": "status",
+     "value": "PUBLISHED"
+    },
+    {
+     "key": "isAlgotorial",
+     "value": "false"
+    },
+    {
+     "key": "editorial_profile",
+     "value": "true"
+    },
+    {
+     "key": "moveFollowersJobId",
+     "value": "f4e857d1-a699-47fe-b5ea-d3d036ebc357"
+    },
+    {
+     "key": "primary_color",
+     "value": "#FFFFFF"
+    },
+    {
+     "key": "clips_header_entrypoint",
+     "value": "enabled"
+    },
+    {
+     "key": "recs.hasArtists",
+     "value": "spotify:artist:6P5NO5hzJbuOqSdyPB7SJM,spotify:artist:5INjqkS1o8h1imAzPqGZBb,spotify:artist:45dkTj5sMRSjrmBSBeiHym,spotify:artist:2qanRMyA5bNuTvz1dK45OP,spotify:artist:790FomKkXshlbRYZFtlgla"
+    },
+    {
+     "key": "autoplay",
+     "value": "spotify:playlist:37i9dQZF1DX0kbJZpiYdZl"
+    },
+    {
+     "key": "decorationUri",
+     "value": "spotify:track:3zOYmiNOuyDL0ClxJcEJ0T"
+    },
+    {
+     "key": "header_image_url_desktop",
+     "value": "https://i.scdn.co/image/ab6768640000fe899b906b75d609a0b11b6c5566"
+    },
+    {
+     "key": "image_url",
+     "value": "https://i.scdn.co/image/ab67686d00003ae08a56bc800f6e6e9a5e0ae472"
+    },
+    {
+     "key": "episode_description",
+     "value": "The hottest 50. Cover: Ashe"
+    },
+    {
+     "key": "is_video_first",
+     "value": "false"
+    },
+    {
+     "key": "correlation-id",
+     "value": "ssp~065fa2fa5b478ec743a9567f495674c92686"
+    }
+   ],
+   "basePermission": "VIEWER",
+   "currentUserCapabilities": {
+    "canAbuseReport": true,
+    "canAdministratePermissions": false,
+    "canCancelMembership": false,
+    "canEditItems": false,
+    "canMixPlaylist": false,
+    "canView": true
+   },
+   "description": "The hottest 50. Cover: Ashe",
+   "followers": 33622819,
+   "following": false,
+   "format": "format-shows-shuffle",
+   "images": {
+    "items": [
+     {
+      "sources": [
+       {
+        "height": null,
+        "url": "https://i.scdn.co/image/ab67706f00000002e06fabee7abffa117bed662f",
+        "width": null
+       }
+      ]
+     }
+    ]
+   },
+   "members": {
+    "items": [
+     {
+      "isOwner": true,
+      "permissionLevel": "CONTRIBUTOR",
+      "user": {
+       "data": {
+        "__typename": "User",
+        "avatar": {
+         "sources": [
+          {
+           "height": 64,
+           "url": "https://i.scdn.co/image/ab67757000003b8255c25988a6ac314394d3fbf5",
+           "width": 64
+          },
+          {
+           "height": 300,
+           "url": "https://i.scdn.co/image/ab6775700000ee8555c25988a6ac314394d3fbf5",
+           "width": 300
+          }
+         ]
+        },
+        "name": "Spotify",
+        "uri": "spotify:user:spotify",
+        "username": "spotify"
+       }
+      }
+     }
+    ],
+    "totalCount": 1
+   },
+   "name": "Today’s Top Hits",
+   "ownerV2": {
+    "data": {
+     "__typename": "User",
+     "avatar": {
+      "sources": [
+       {
+        "height": 64,
+        "url": "https://i.scdn.co/image/ab67757000003b8255c25988a6ac314394d3fbf5",
+        "width": 64
+       },
+       {
+        "height": 300,
+        "url": "https://i.scdn.co/image/ab6775700000ee8555c25988a6ac314394d3fbf5",
+        "width": 300
+       }
+      ]
+     },
+     "name": "Spotify",
+     "uri": "spotify:user:spotify",
+     "username": "spotify"
+    }
+   },
+   "revisionId": "AAAAAISyKQU5mm3aypCw+ymgd9ZPy2eP",
+   "sharingInfo": {
+    "shareId": "hkgpViO-Tvap6t3lU8iudQ",
+    "shareUrl": "https://open.spotify.com/playlist/37i9dQZF1DXcBWIGoYBM5M?si=hkgpViO-Tvap6t3lU8iudQ"
+   },
+   "uri": "spotify:playlist:37i9dQZF1DXcBWIGoYBM5M",
+   "visualIdentity": {
+    "squareCoverImage": {
+     "__typename": "VisualIdentityImage",
+     "extractedColorSet": {
+      "encoreBaseSetTextColor": {
+       "alpha": 255,
+       "blue": 142,
+       "green": 163,
+       "red": 255
+      },
+      "highContrast": {
+       "backgroundBase": {
+        "alpha": 255,
+        "blue": 37,
+        "green": 53,
+        "red": 141
+       },
+       "backgroundTintedBase": {
+        "alpha": 255,
+        "blue": 0,
+        "green": 7,
+        "red": 97
+       },
+       "textBase": {
+        "alpha": 255,
+        "blue": 255,
+        "green": 255,
+        "red": 255
+       },
+       "textBrightAccent": {
+        "alpha": 255,
+        "blue": 255,
+        "green": 255,
+        "red": 255
+       },
+       "textSubdued": {
+        "alpha": 255,
+        "blue": 174,
+        "green": 190,
+        "red": 255
+       }
+      },
+      "higherContrast": {
+       "backgroundBase": {
+        "alpha": 255,
+        "blue": 0,
+        "green": 12,
+        "red": 101
+       },
+       "backgroundTintedBase": {
+        "alpha": 255,
+        "blue": 40,
+        "green": 56,
+        "red": 144
+       },
+       "textBase": {
+        "alpha": 255,
+        "blue": 255,
+        "green": 255,
+        "red": 255
+       },
+       "textBrightAccent": {
+        "alpha": 255,
+        "blue": 96,
+        "green": 215,
+        "red": 30
+       },
+       "textSubdued": {
+        "alpha": 255,
+        "blue": 174,
+        "green": 190,
+        "red": 255
+       }
+      },
+      "minContrast": {
+       "backgroundBase": {
+        "alpha": 255,
+        "blue": 40,
+        "green": 56,
+        "red": 144
+       },
+       "backgroundTintedBase": {
+        "alpha": 255,
+        "blue": 1,
+        "green": 14,
+        "red": 102
+       },
+       "textBase": {
+        "alpha": 255,
+        "blue": 255,
+        "green": 255,
+        "red": 255
+       },
+       "textBrightAccent": {
+        "alpha": 255,
+        "blue": 255,
+        "green": 255,
+        "red": 255
+       },
+       "textSubdued": {
+        "alpha": 255,
+        "blue": 255,
+        "green": 255,
+        "red": 255
+       }
+      }
+     }
+    }
+   }
+  }
+ }
+}

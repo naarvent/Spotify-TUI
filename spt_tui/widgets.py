@@ -3,7 +3,24 @@
 from __future__ import annotations
 
 from textual.containers import VerticalScroll
-from textual.widgets import DataTable, Static
+from textual.widgets import DataTable, Input, Static
+
+
+class WrapTable(DataTable):
+    """DataTable whose Up on the first row jumps to the last, and Down on the
+    last row jumps to the first (wrap-around)."""
+
+    def action_cursor_up(self) -> None:
+        if self.cursor_type == "row" and self.row_count > 1 and self.cursor_row <= 0:
+            self.move_cursor(row=self.row_count - 1)
+            return
+        super().action_cursor_up()
+
+    def action_cursor_down(self) -> None:
+        if self.cursor_type == "row" and self.row_count > 1 and self.cursor_row >= self.row_count - 1:
+            self.move_cursor(row=0)
+            return
+        super().action_cursor_down()
 
 
 class ContentPanel(Static):
@@ -18,6 +35,12 @@ class ContentPanel(Static):
     def on_resize(self, event) -> None:
         try:
             self.app._recompute_all_table_widths()
+        except Exception:
+            pass
+        # The welcome art has to fit THIS panel: now that it has its real size, re-pick the level.
+        try:
+            if getattr(self.app, "_welcome_on", False):
+                self.app._paint_welcome(only_if_changed=True)
         except Exception:
             pass
 
@@ -113,3 +136,21 @@ class HelpScroll(VerticalScroll):
         ("home", "scroll_home", "Home"),
         ("end", "scroll_end", "End"),
     ]
+
+
+class ViewFilterInput(Input):
+    """The "/" filter box above a content table (tracks / search results).
+
+    Typing narrows the rows already loaded (no new search). Down or Enter go
+    back to the table and keep the filter; Escape bubbles to the app, which
+    clears it (``_close_view_filter``). The bindings live on the widget so they
+    win over the app's global cursor bindings while the box has focus."""
+
+    BINDINGS = [
+        ("down", "back_to_table", "To table"),
+    ]
+
+    def action_back_to_table(self) -> None:
+        fn = getattr(self.app, "_leave_view_filter", None)
+        if fn is not None:
+            fn()

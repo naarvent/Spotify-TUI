@@ -81,7 +81,9 @@ class SearchMixin:
                 # re-fill and blank the grid) but show a searching indicator on
                 # the frame, so a search started from within a results view still
                 # gives immediate visual feedback.
-                try: self.right_panel.border_title = f"Searching: {raw} …"
+                try:
+                    self._search_prev_title = self.right_panel.border_title
+                    self.right_panel.border_title = f"Searching: {raw} …"
                 except Exception: pass
             else:
                 self._clear_right().update(f"[b]Searching for:[/b] {rich_escape(raw)}")
@@ -126,6 +128,7 @@ class SearchMixin:
         self._last_search_worker = token
         self._search_rendered_token = None
         self._begin_search_feedback(raw, token)
+        self._start_search_spinner(token, raw)
         q = self._build_search_query(cleaned)
         threading.Thread(target=self._do_search, args=(q, raw, forced_type, token), daemon=True).start()
 
@@ -537,9 +540,14 @@ class SearchMixin:
     # show/episode — see _revalidate_saved_column). The glyph is unified, the
     # endpoints are not.
     _SEARCH_LAYOUTS = {
-        "full": (["♥", "Type", "Title", "Artist/Owner", "Album", "Duration"],
-                 ["saved", "type", "title", "artist", "album", "dur"]),
+        "full": (["↓", "♥", "Type", "Title", "Artist/Owner", "Album", "Duration"],
+                 ["dl", "saved", "type", "title", "artist", "album", "dur"]),
         "artists": (["♥", "Type", "Name"], ["saved", "type", "title"]),
+        # Artist page: top tracks / albums / singles / related in one list. The
+        # Album column holds the track's album, a release's year, or a related
+        # artist's info.
+        "artist_page": (["↓", "♥", "Type", "Title", "Album / Year", "Duration"],
+                        ["dl", "saved", "type", "title", "album", "dur"]),
         "podcasts": (["♥", "Type", "Name", "Owner"], ["saved", "type", "title", "artist"]),
         # Search albums / playlists have no meaningful Duration.
         "albums": (["♥", "Type", "Name", "Artist"], ["saved", "type", "title", "artist"]),
@@ -550,8 +558,9 @@ class SearchMixin:
         """Build search_table cells for the given field list (see _SEARCH_LAYOUTS)."""
         t = (r.get("type") or "")
         cell_map = {
+            "dl": self._dl_cell(r),
             "saved": Text("❤", style="bold red") if r.get('saved', False) else Text(""),
-            "type": self._TYPE_LABELS.get(t, t.upper()),
+            "type": r.get("type_label") or self._TYPE_LABELS.get(t, t.upper()),
             "title": r.get("title", ""),
             "artist": r.get("artist", ""),
             "album": r.get("album", ""),
@@ -594,9 +603,20 @@ class SearchMixin:
             )
             fields = getattr(table, "_search_fields", fields)
         table.row_to_uri = {}; table.row_to_title = {}; table.row_to_id = {}; table.row_to_type = {}; table.row_to_obj = {}
-        table._col_saved = 0
-        table._saved_check_done = False
         table._search_fields = list(fields)
+        table._col_saved = fields.index("saved") if "saved" in fields else 0
+        table._saved_check_done = False
+        # New results in a reused table: a "/" filter from the previous ones
+        # must not hide (or mis-map) these rows.
+        table._filter_query = ""; table._filter_rows = None; table._filter_applied = False
+        # Only the artist page sets a play-context list on this table.
+        table._context_uris = None
+        table._queue_name = None; table._artist_overview_notes = None
+        old_box = getattr(table, "_filter_input", None)
+        table._filter_input = None
+        if old_box is not None:
+            try: old_box.remove()
+            except Exception: pass
         for i, r in enumerate(rows):
             table.add_row(*self._search_cells(r, fields), key=i)
             table.row_to_uri[i] = r.get("uri")
@@ -609,10 +629,13 @@ class SearchMixin:
         # grey bleed); #right shows the title and drops its padding.
         self.right_panel.add_class("table-view")
         self.right_panel.border_title = self._content_title(title)
+        def _after_mount():
+            table.focus()
+            self._refit_after_mount(table)
         if not reused:
-            right.mount(table)
-        table.focus()
-        self._refit_after_mount(table)
+            self._mount_in_right(right, table, _after_mount)
+        else:
+            _after_mount()
         self.level = self.LVL_VIEW
         try:
             if check_saved and not getattr(table, '_saved_check_done', False):
