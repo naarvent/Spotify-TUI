@@ -125,7 +125,7 @@ jobs:
             for ($i = 1; $i -le 6; $i++) {
               $ghArgs = @("release", "download", $tag, "-R", $repo, "--dir", "helpers", "--clobber")
               foreach ($p in $patterns) { $ghArgs += @("-p", $p) }
-              & gh @args
+              & gh @ghArgs
               if ($LASTEXITCODE -eq 0) { return }
               Write-Host "Download attempt $i of $repo $tag failed; retrying..."
               Start-Sleep -Seconds (10 * $i)
