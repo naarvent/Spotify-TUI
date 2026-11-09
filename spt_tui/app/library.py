@@ -217,6 +217,7 @@ class LibraryMixin:
             parts += self._spicy_settings_widgets()
             parts += self._visualizer_settings_widgets()
             parts += self._offline_settings_widgets()
+            parts += self._ytdlp_settings_widgets()
             parts += self._appearance_settings_widgets()
             parts += self._provider_settings_widgets()
             parts.append(Static('Enter save · ↑↓/Tab move · Esc back', classes='settings-keys'))
@@ -295,6 +296,69 @@ class LibraryMixin:
                 Static('Default visualizer mode when you press v. Shift+M still switches it while it is open. '
                        'Pick one and press Enter.', classes='settings-help settings-help-wide'),
                 self.visualizer_mode_select]
+
+    def _ytdlp_settings_widgets(self) -> list:
+        """yt-dlp: installed vs latest version and an Update button. The versions are read off the
+        UI thread (the CLI is run and PyPI asked, at most once a day)."""
+        from textual.widgets.option_list import Option
+        from .. import ytdlp_update as yu
+        inst = yu.detect_install()
+        self.ytdlp_status = Static(f'Installed via: {rich_escape(inst.label)}. Versions: checking…',
+                                   classes='settings-help settings-help-wide')
+        self.ytdlp_select = FormOptionList(
+            Option('Update yt-dlp now', id='update'),
+            Option('Check for a new version', id='check'),
+            classes='settings-provider-select')
+        threading.Thread(target=self._ytdlp_refresh_status, args=(False,), daemon=True).start()
+        return [Static('yt-dlp (YouTube Music playback and downloads)', classes='settings-section'),
+                Static('YouTube changes often and yt-dlp is fixed upstream within days. Update it here; '
+                       'it applies to the next track, no restart. Pick one and press Enter.',
+                       classes='settings-help settings-help-wide'),
+                self.ytdlp_select, self.ytdlp_status]
+
+    def _ytdlp_refresh_status(self, force: bool) -> None:
+        from .. import ytdlp_update as yu
+        inst = yu.detect_install()
+        cur, latest = yu.installed_version(), yu.cached_latest(force=force)
+        if cur is None:
+            text = 'yt-dlp is not installed.'
+        elif latest and yu.is_newer(latest, cur):
+            text = f'Installed {cur}; {latest} is available (pick "Update yt-dlp now").'
+        elif latest:
+            text = f'Installed {cur}: up to date.'
+        else:
+            text = f'Installed {cur} (could not check the latest version, offline?).'
+        try:
+            self.call_from_thread(self._set_ytdlp_status, f'Installed via: {inst.label}. {text}')
+        except Exception:
+            pass
+
+    def _set_ytdlp_status(self, text: str) -> None:
+        w = getattr(self, 'ytdlp_status', None)
+        if w is not None and w.is_attached:
+            w.update(rich_escape(text))
+
+    def _ytdlp_update_worker(self) -> None:
+        from .. import ytdlp_update as yu
+        res = yu.update()
+        try:
+            self.call_from_thread(self._notify, ('[b]yt-dlp:[/b] ' if res.ok else '[b]yt-dlp update failed:[/b] ')
+                                  + rich_escape(res.message + (f' Now {res.version}.' if res.ok and res.version else '')),
+                                  warn=not res.ok)
+        except Exception:
+            pass
+        self._ytdlp_refresh_status(False)
+
+    def _ytdlp_startup_check(self) -> None:
+        """Tell the user once a day when a newer yt-dlp exists (only for providers that use it)."""
+        from .. import ytdlp_update as yu
+        cur, latest = yu.installed_version(), yu.cached_latest()
+        if cur and latest and yu.is_newer(latest, cur):
+            try:
+                self.call_from_thread(self._notify, f'[b]yt-dlp {rich_escape(latest)} is available[/b] '
+                                      f'(you have {rich_escape(cur)}). Settings > yt-dlp to update.', seconds=10)
+            except Exception:
+                pass
 
     def _offline_settings_widgets(self) -> list:
         """Offline downloads: the size cap (only for providers that download)."""

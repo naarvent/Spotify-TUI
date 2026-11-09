@@ -5,6 +5,16 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- Settings > **yt-dlp**: shows the installed and latest version, and updates yt-dlp in place (pip, pipx, virtual environment, or the Windows installer, which stores the new `yt-dlp.exe` in the app data folder). The next track uses the new version, no restart. With YouTube Music or Subsonic selected, a notice appears once a day when a newer yt-dlp exists.
+
+### Fixed
+
+- The Windows installer build no longer fails on GitHub's intermittent `504` when downloading mpv and yt-dlp: they are fetched through the authenticated GitHub API with retries and cached per pinned version.
+
 ## [v1.0.2] - 2026-11-09
 
 ### Added

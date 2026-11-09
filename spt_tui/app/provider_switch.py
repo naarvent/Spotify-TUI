@@ -196,6 +196,14 @@ class ProviderSwitchMixin:
             self._apply_transparency(on)
             self._notify(f"[b]Background: {'transparent' if on else 'opaque'}[/b]")
             return
+        if event.option_list is getattr(self, "ytdlp_select", None):
+            event.stop()
+            if event.option.id == "update":
+                self._notify("[b]yt-dlp:[/b] updating…")
+                threading.Thread(target=self._ytdlp_update_worker, daemon=True).start()
+            else:
+                threading.Thread(target=self._ytdlp_refresh_status, args=(True,), daemon=True).start()
+            return
         if event.option_list is getattr(self, "spicy_select", None):
             event.stop()
             on = event.option.id == "on"

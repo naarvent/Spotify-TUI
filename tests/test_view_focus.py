@@ -86,7 +86,7 @@ async def test_settings_focus_round_trip():
         check("Tab from the sidebar reaches the open Settings form", reached, where(app))
 
         fields = app._right_form_fields()
-        check("the form exposes all 18 fields (6 inputs (incl. visualizer FPS), Spicy Lyrics list + API key, visualizer mode list, appearance + colour lists, custom colour, key hints + title bar lists, provider list, 3 Subsonic)", len(fields) == 18,
+        check("the form exposes all 19 fields (6 inputs (incl. visualizer FPS), Spicy Lyrics list + API key, visualizer mode list, yt-dlp list, appearance + colour lists, custom colour, key hints + title bar lists, provider list, 3 Subsonic)", len(fields) == 19,
               repr([type(f).__name__ for f in fields]))
         fields[0].focus(); await settle(pilot)
         order = []
@@ -119,7 +119,13 @@ async def test_settings_focus_round_trip():
             if app.focused is not app.visualizer_mode_select:
                 break
             await pilot.press("down"); await settle(pilot)
-        check("Down from the visualizer mode list reaches the appearance list", app.focused is app.appearance_select,
+        check("Down from the visualizer mode list reaches the yt-dlp list", app.focused is app.ytdlp_select,
+              where(app))
+        for _ in range(4):
+            if app.focused is not app.ytdlp_select:
+                break
+            await pilot.press("down"); await settle(pilot)
+        check("Down from the yt-dlp list reaches the appearance list", app.focused is app.appearance_select,
               where(app))
         app.subsonic_url_input.focus(); await settle(pilot)
         await pilot.press("down"); await settle(pilot)
