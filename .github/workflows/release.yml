@@ -122,7 +122,8 @@ jobs:
           Invoke-WebRequest $asset.browser_download_url -OutFile mpv.7z
           7z x mpv.7z -ompv-extract -y | Out-Null
           Copy-Item mpv-extract\mpv.exe dist\spt\mpv.exe
-          Get-ChildItem mpv-extract -Filter *.dll | Copy-Item -Destination dist\spt\n          Write-Host "Bundled $($asset.name)"
+          Get-ChildItem mpv-extract -Filter *.dll | Copy-Item -Destination dist\spt\
+          Write-Host "Bundled $($asset.name)"
 
       - name: Smoke test the frozen app
         shell: pwsh
