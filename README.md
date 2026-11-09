@@ -6,7 +6,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/naarvent/Spotify-TUI/releases"><img alt="Version" src="https://img.shields.io/badge/version-1.0.2-blue.svg" /></a>
+  <a href="https://github.com/naarvent/Spotify-TUI/releases"><img alt="Version" src="https://img.shields.io/badge/version-1.0.1-blue.svg" /></a>
   <a href="https://www.python.org/"><img alt="Python" src="https://img.shields.io/badge/python-3.9%2B-blue.svg" /></a>
   <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/License-MIT-green.svg" /></a>
   <a href="https://github.com/Textualize/textual"><img alt="Textual" src="https://img.shields.io/badge/Textual-8.x-5a4fcf.svg" /></a>
@@ -39,7 +39,7 @@
 | 📊 **Audio visualizer** | Real system audio through `cava`, mirrored or plain bars, up to 60 fps. |
 | ⌨️ **Everything from the keyboard** | Filter, sort, queue, devices and help in full-screen views. Transparent background and accent colours, so it fits your terminal. |
 
-> **Status:** `v1.0.2`. The application includes responsive search and tables, reliable cached library and playlist loading, synchronized lyrics, visible action feedback, an experimental built-in local player and a one-click Windows installer, backed by an extensive offline regression suite.
+> **Status:** `v1.0.1`. The application includes responsive search and tables, reliable cached library and playlist loading, synchronized lyrics, visible action feedback, an experimental built-in local player and a one-click Windows installer, backed by an extensive offline regression suite.
 
 ## Providers at a glance
 
@@ -56,7 +56,7 @@
 | **Synced lyrics** | ✅ | ✅ | ✅ |
 
 > [!NOTE]
-> **Spotify Free:** there is no playback mode for Free accounts. A mode that controlled the player you already had open (through MPRIS) was removed in 1.0.2: it could only open a link and control a player you started yourself, because Spotify's web player blocks audio until you click in the page and the desktop app ignores "play" links. It could therefore never start the track you picked, and it only worked on Linux. With a Free account you still get search, library, likes and playlists; for playback use YouTube Music, Subsonic, or Spotify Premium.
+> **Spotify Free:** there is no playback mode for Free accounts. A mode that controlled the player you already had open (through MPRIS) was removed in 1.0.1: it could only open a link and control a player you started yourself, because Spotify's web player blocks audio until you click in the page and the desktop app ignores "play" links. It could therefore never start the track you picked, and it only worked on Linux. With a Free account you still get search, library, likes and playlists; for playback use YouTube Music, Subsonic, or Spotify Premium.
 
 > [!NOTE]
 > Offline downloads are not offered for Spotify: it has no download endpoint and its audio is DRM-protected. The `↓` column is shown dimmed there.

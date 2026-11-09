@@ -5,22 +5,14 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
-
-### Added
-
-- Settings > **yt-dlp**: shows the installed and latest version, and updates yt-dlp in place (pip, pipx, virtual environment, or the Windows installer, which stores the new `yt-dlp.exe` in the app data folder). The next track uses the new version, no restart. With YouTube Music or Subsonic selected, a notice appears once a day when a newer yt-dlp exists.
-
-### Fixed
-
-- The Windows installer build no longer fails on GitHub's intermittent `504` when downloading mpv and yt-dlp: they are fetched through the authenticated GitHub API with retries and cached per pinned version.
-
-## [v1.0.2] - 2026-11-09
+## [v1.0.1] - 2026-11-09
 
 ### Added
 
 - Windows: the mpv player backend (YouTube Music and Subsonic playback) now talks to mpv through a named pipe, so those providers can play audio on Windows instead of showing "Playback is disabled".
 - Windows installer bundles `mpv.exe` and `yt-dlp.exe` (pinned versions) and the Python parts of the YouTube Music / Subsonic providers (`ytmusicapi`, `yt-dlp`, `keyring`); nothing else needs installing.
+- Settings > **yt-dlp**: shows the installed and latest version, and updates yt-dlp in place (pip, pipx, virtual environment, or the Windows installer, which stores the new `yt-dlp.exe` in the app data folder). The next track uses the new version, no restart. With YouTube Music or Subsonic selected, a notice appears once a day when a newer yt-dlp exists.
+- Settings > Lyrics has an **API key** field for Spicy Lyrics (hidden input, stored in the system keyring, never in `spt_config.json`).
 
 ### Removed
 
@@ -28,27 +20,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Missing Spotify credentials now show a clear message instead of 401 errors, and the first-run form appears if the config file has none.
+- `AttributeError: '_bar_last_track'` in the Now Playing bar when nothing had been played yet.
 - A track no longer starts, stops and restarts from the beginning when you press Enter: one Enter reached the play action twice and the second call reloaded the queue.
 - `mpv.exe` is used on Windows instead of the `mpv.com` console wrapper, so closing the app no longer leaves mpv playing.
+- The Windows installer build no longer fails on GitHub's intermittent `504` when downloading mpv and yt-dlp: they are fetched through the authenticated GitHub API with retries and cached per pinned version.
 
 ### Changed
 
 - Upgrading with the installer replaces the previous install completely (stale files from older versions are removed) and closes a running `spt` instead of failing.
 
-## [v1.0.1] - 2026-11-08
-
-### Fixed
-
-- Missing Spotify credentials now show a clear message instead of 401 errors, and the first-run form appears if the config file has none.
-- `AttributeError: '_bar_last_track'` in the Now Playing bar when nothing had been played yet.
-
-### Added
-
-- Settings > Lyrics has an **API key** field for Spicy Lyrics (hidden input, stored in the system keyring, never in `spt_config.json`).
-
 ### Tests
 
-- New tests for the Spicy Lyrics key field, the missing-credentials message and the Now Playing default.
+- New tests for the yt-dlp updater, the Spicy Lyrics key field, the missing-credentials message and the Now Playing default.
 
 ## [v1.0.0] - 2026-11-07
 
