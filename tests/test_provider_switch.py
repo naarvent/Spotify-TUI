@@ -54,7 +54,7 @@ class FakeYT(FakeProv):
     playlists = []
     reason = "the optional 'ytmusicapi' package is not installed."
 
-FAKES = {"spotify": FakeProv, "subsonic": FakeSub, "ytmusic": FakeYT, "spotify_mpris": FakeProv}
+FAKES = {"spotify": FakeProv, "subsonic": FakeSub, "ytmusic": FakeYT}
 
 
 class FakeLP:
@@ -154,8 +154,6 @@ def test_status_probe():
         st = P.provider_status("subsonic", which=allbin, secret_store=SecretStore(use_keyring=False, which=none))
         check("subsonic configured, no password anywhere: unusable", not st["usable"]
               and any("password" in i for i in st["issues"]), repr(st))
-        st = P.provider_status("spotify_mpris", which=lambda n: None if n == "playerctl" else "/bin/" + n)
-        check("mpris without playerctl: issue listed", "missing playerctl" in st["issues"], repr(st))
         from spt_tui.app.provider_switch import status_label
         check("label 'available' when nothing is missing", status_label({"usable": True, "issues": []}) == "available")
         check("label marks unusable providers", status_label({"usable": False, "issues": ["missing x"]}).startswith("unavailable"))

@@ -8,7 +8,8 @@ gives a natural place for librespot.exe to sit beside spt.exe — which is where
 Build locally:   pyinstaller spt.spec
 Output:          dist/spt/spt.exe  (+ its dependencies)
 
-The release workflow copies librespot.exe into dist/spt/ before packaging.
+The release workflow copies librespot.exe, mpv.exe and yt-dlp.exe into dist/spt/
+before packaging (run_spt.py puts that folder on PATH for the frozen app).
 """
 
 from PyInstaller.utils.hooks import collect_all
@@ -20,18 +21,29 @@ hiddenimports = []
 # Textual ships CSS/theme resources and pyfiglet ships .flf fonts as package
 # data; a naive freeze drops them and the UI (or the welcome banner) breaks at
 # runtime. collect_all pulls their data files, binaries and submodules.
-for _pkg in ("textual", "pyfiglet"):
+#
+# The optional providers' Python parts are frozen in too, so the installer needs
+# no pip at install time and the app never meets "missing ytmusicapi":
+#   ytmusicapi - ships locale (.mo) data files;
+#   yt_dlp     - loads ~1000 extractor modules by name at runtime;
+#   keyring    - picks its backend (Windows Credential Locker) through package
+#                entry points, which need the package metadata bundled.
+# They must be installed in the build env (`pip install ".[ytmusic,subsonic]"`);
+# collect_all fails loudly if one is missing, which is what we want in CI.
+for _pkg in ("textual", "pyfiglet", "ytmusicapi", "yt_dlp", "keyring"):
     _d, _b, _h = collect_all(_pkg)
     datas += _d
     binaries += _b
     hiddenimports += _h
 
 # Our own package plus libraries imported indirectly.
+hiddenimports += ["keyring.backends.Windows", "win32ctypes.pywin32.win32cred",
+                  "win32ctypes.pywin32.pywintypes"]
 hiddenimports += ["spt_tui", "spt_tui.app", "spotipy", "rich", "requests"]
 # Providers are imported by name at runtime (spt_tui.providers.provider_class),
 # so the analyser cannot see them.
-hiddenimports += ["spt_tui.providers.spotify", "spt_tui.providers.mpris",
-                  "spt_tui.providers.subsonic", "spt_tui.providers.ytmusic"]
+hiddenimports += ["spt_tui.providers.spotify", "spt_tui.providers.subsonic",
+                  "spt_tui.providers.ytmusic"]
 
 a = Analysis(
     # A launcher, not spt_tui/__main__.py directly: PyInstaller runs the entry

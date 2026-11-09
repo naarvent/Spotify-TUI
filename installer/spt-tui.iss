@@ -41,6 +41,12 @@ ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 UninstallDisplayIcon={app}\{#AppExeName}
 UninstallDisplayName={#AppName}
+; Upgrading over a running copy: close it (and reopen after) instead of failing on
+; a locked spt.exe / mpv.exe / librespot.exe. Silent installs never prompt.
+CloseApplications=force
+RestartApplications=no
+; Never leave the machine needing a reboot because a bundled .exe was in use.
+RestartIfNeededByRun=no
 
 [Languages]
 Name: "english"; MessagesFile: "compiler:Default.isl"
@@ -49,9 +55,21 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 Name: "addtopath"; Description: "Add SPT-TUI to your PATH (lets you run ""spt"" in any terminal)"; GroupDescription: "Options:"
 Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription: "Options:"; Flags: unchecked
 
+[InstallDelete]
+; Inno overwrites files but never removes ones a newer build no longer ships. The
+; PyInstaller _internal folder is entirely owned by the installer and changes
+; between versions (renamed/removed modules), so wipe it before copying: an
+; upgrade then always ends up identical to a fresh install, with no stale DLLs or
+; .pyc from an older version. User data lives elsewhere (config/cache dirs).
+Type: filesandordirs; Name: "{app}\_internal"
+Type: files; Name: "{app}\mpv.exe"
+Type: files; Name: "{app}\yt-dlp.exe"
+Type: files; Name: "{app}\librespot.exe"
+
 [Files]
-; The whole onedir freeze (spt.exe, its dependencies, and librespot.exe which the
-; workflow has already copied in).
+; The whole onedir freeze (spt.exe, its Python dependencies incl. the YouTube
+; Music / Subsonic extras) plus the programs the workflow copied in beside it:
+; librespot.exe (local player), mpv.exe and yt-dlp.exe (YouTube Music / Subsonic).
 Source: "dist\spt\*"; DestDir: "{app}"; Flags: recursesubdirs createallsubdirs ignoreversion
 
 [Icons]

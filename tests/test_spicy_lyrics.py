@@ -395,10 +395,6 @@ def test_service():
     svc, http = mk_service(script)
     svc.fetch(provider="subsonic", track_id=SID, title="Song", artist="Band", duration_ms=200000)
     check("subsonic: a 22-char id is still searched, never trusted", "/v1/tracks/search" in http.calls[0][0])
-    # mpris with a Spotify id goes direct
-    svc, http = mk_service(script)
-    svc.fetch(provider="spotify_mpris", track_id=SID, title="Song", artist="Band")
-    check("spotify_mpris with a Spotify id goes direct", len(http.calls) == 1 and "/v1/lyrics/" in http.calls[0][0])
     # unusable search result -> notfound, remembered, no lyrics request
     bad = {"/v1/tracks/search": (200, {}, {"Body": {"results": [
         {"id": "y" * 22, "title": "Song (Remix)", "artists": ["Band"], "duration": 200, "tier": "version"}]}}),

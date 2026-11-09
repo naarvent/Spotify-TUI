@@ -4,7 +4,7 @@ Idea from Rigellute/spotify-tui's "Analysis" view (`v`), which drew 12 pitch
 bars from Spotify's Audio Analysis API. That API is closed to new apps since
 November 2024, and it was never the real audio anyway: here `cava` listens to
 what the system plays (its default is the monitor of the default output), so
-it works the same with Spotify, YouTube Music, Subsonic or MPRIS.
+it works the same with Spotify, YouTube Music, or Subsonic.
 
 * ``CavaProcess`` writes a private config (``method = raw``, ``data_format =
   ascii``, ``ascii_max_range = 1000``, ``;`` between bars, ``\\n`` between

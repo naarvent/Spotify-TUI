@@ -129,7 +129,7 @@ def import_playlists_text(provider_name: str, supports_spotify_import: bool) -> 
                 "• YouTube Music link or ID: it is added as it is, and stays on YouTube.\n"
                 "Paste it and press Enter.",
                 "Spotify or YouTube Music playlist link…")
-    if provider_name in ("spotify", "spotify_mpris"):
+    if provider_name == "spotify":
         return ("[b]Add a playlist to your library[/b]\n"
                 "Paste a Spotify playlist link, a spotify:playlist: URI or its ID. It is followed on your "
                 "Spotify account (nothing is copied). Press Enter.",

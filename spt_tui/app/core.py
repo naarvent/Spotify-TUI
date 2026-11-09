@@ -1668,7 +1668,7 @@ class CoreMixin:
         - - / + : Volume down / up
 
     [b]Help & Misc[/b]
-        - P (Shift+P): Choose the music provider (Spotify, Spotify via MPRIS, Subsonic, YouTube Music); switches live
+        - P (Shift+P): Choose the music provider (Spotify, Subsonic, YouTube Music); switches live
         - ?: Toggle this Help view
         - F1: Toggle this Help view
         - Ctrl+O: Select all items (multi-select review)

@@ -459,7 +459,7 @@ class LibraryMixin:
         # startup paint must not show (and let the user open) Spotify playlists.
         # Both Spotify modes share the historical file name.
         name = getattr(getattr(self, "spotify", None), "name", None)
-        if isinstance(name, str) and name not in ("spotify", "spotify_mpris") and name.isidentifier():
+        if isinstance(name, str) and name != "spotify" and name.isidentifier():
             return os.path.join(config.CACHE_DIR, f"playlists_cache_{name}.json")
         return os.path.join(config.CACHE_DIR, "playlists_cache.json")
 

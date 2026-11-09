@@ -5,6 +5,17 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- Windows: the mpv player backend (YouTube Music and Subsonic playback) now talks to mpv through a named pipe, so those providers can play audio on Windows instead of showing "Playback is disabled".
+- Windows installer bundles `mpv.exe` and `yt-dlp.exe` (pinned versions) and the Python parts of the YouTube Music / Subsonic providers (`ytmusicapi`, `yt-dlp`, `keyring`); nothing else needs installing.
+
+### Changed
+
+- Upgrading with the installer replaces the previous install completely (stale files from older versions are removed) and closes a running `spt` instead of failing.
+
 ## [v1.0.1] - 2026-11-08
 
 ### Fixed
@@ -22,7 +33,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [v1.0.0] - 2026-11-07
 
-First stable release: multi-provider (Spotify, YouTube Music, Subsonic/Navidrome, MPRIS), local library, offline downloads, radio, artist pages, karaoke lyrics with Spicy Lyrics word timings, audio visualizer.
+First stable release: multi-provider (Spotify, YouTube Music, Subsonic/Navidrome), local library, offline downloads, radio, artist pages, karaoke lyrics with Spicy Lyrics word timings, audio visualizer.
 
 ### Changed
 
@@ -173,11 +184,6 @@ First stable release: multi-provider (Spotify, YouTube Music, Subsonic/Navidrome
 - Spotify Free degraded mode: `product != premium` (or a `PREMIUM_REQUIRED`
   answer) disables play/pause/seek/volume/queue/devices/librespot with a clear
   notice; search, library, likes and playlists keep working.
-- `spotify_mpris` provider: control the Spotify web player the user opened,
-  through MPRIS / `playerctl` (play/pause/next/prev/seek/volume, now playing and
-  position for lyrics), and open `https://open.spotify.com/track/<id>` with
-  `abrir <url>` (configurable `open_command`). No browser automation, `sp_dc`,
-  internal endpoints, stream decryption or ad skipping.
 - `subsonic` provider (Subsonic / OpenSubsonic, Navidrome): token+salt auth,
   `search3`, playlists, `star`/`unstar`, `scrobble`, `stream` playback. The
   password is stored in the system keyring (`keyring` or `secret-tool`) or read
@@ -186,7 +192,7 @@ First stable release: multi-provider (Spotify, YouTube Music, Subsonic/Navidrome
   (imported through Import Playlists), audio through `mpv` + `yt-dlp`.
 - Provider picker: `P` (Shift+P) from any view, and a selectable list in
   Settings, show every provider with its readiness (available / missing mpv,
-  ytmusicapi, playerctl, configuration...).
+  ytmusicapi, configuration...).
 - Live provider switch (no restart): the new provider is created first (on
   failure the current one stays, with a notice), then the old one's mpv /
   sockets / librespot are released, caches, queue, views and playback state
@@ -221,7 +227,7 @@ First stable release: multi-provider (Spotify, YouTube Music, Subsonic/Navidrome
   (ytmusicapi, yt-dlp).
 - Offline suites: `test_providers_base.py`, `test_spotify_free_mode.py`,
   `test_mpv_player.py`, `test_subsonic_provider.py`, `test_ytmusic_provider.py`,
-  `test_mpris_provider.py`, `test_secret_store.py`, `test_provider_ui.py`,
+  `test_secret_store.py`, `test_provider_ui.py`,
   `test_provider_switch.py`, `test_local_library.py`,
   `test_ytmusic_library.py` (recorded ytmusicapi responses in
   `tests/fixtures/ytmusic_recorded.json`), `test_local_library_ui.py`,

@@ -55,7 +55,7 @@ class SpotifyImportMixin:
                              "Premium developer app).", warn=True, seconds=9.0)
                 return True
             return False
-        if name in ("spotify", "spotify_mpris") and kind == "youtube":
+        if name == "spotify" and kind == "youtube":
             self._notify("[b]That is a YouTube link.[/b] This provider adds Spotify playlists. Press P and "
                          "choose ytmusic to import YouTube Music playlists.", warn=True, seconds=9.0)
             return True

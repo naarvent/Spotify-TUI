@@ -31,7 +31,7 @@
 
 | | |
 | --- | --- |
-| 🎛️ **Several providers, one interface** | Switch live between Spotify, YouTube Music, Subsonic / Navidrome and Spotify via MPRIS with `P`. The UI shows only what the active provider can do. |
+| 🎛️ **Several providers, one interface** | Switch live between Spotify, YouTube Music and Subsonic / Navidrome with `P`. The UI shows only what the active provider can do. |
 | ⬇️ **Download your music** | Press `o` on a song or `O` on a whole list to keep it offline (YouTube Music and Subsonic). Old copies are pruned automatically once your size cap is reached. |
 | 🗂️ **A library without an account** | Likes, saved albums, followed artists and playlists live in a local library. Import your playlists from Spotify. |
 | 🎤 **Synced and karaoke lyrics** | Line-by-line lyrics, plus a karaoke mode with word-by-word timing when a word-synced source is available. |
@@ -43,17 +43,17 @@
 
 ## Providers at a glance
 
-| | Spotify | YouTube Music | Subsonic / Navidrome | Spotify Free (MPRIS) |
-| --- | :---: | :---: | :---: | :---: |
-| **Account or server** | Spotify account + your own Developer app | none | your own server | Spotify account + Developer app |
-| **Search and browse** | ✅ | ✅ | ✅ | ✅ |
-| **Playback** | ✅ Premium (local player or Connect) | ✅ `mpv` + `yt-dlp` | ✅ `mpv` | ✅ through your browser / desktop player |
-| **Likes, saved albums and artists** | ✅ your account | ✅ local library | ✅ server stars | ✅ your account |
-| **Playlists** | ✅ | ✅ local + imported public ones | ✅ | ✅ |
-| **Offline downloads** (`o` / `O`) | ❌ no legitimate route | ✅ | ✅ | ❌ |
-| **Radio** (`R`) | ❌ endpoint closed to new apps | ✅ | ✅ | ❌ |
-| **Artist page** | ✅ albums and singles | ✅ top tracks, albums, related | ✅ albums (top tracks and similar with Last.fm on the server) | ✅ albums and singles |
-| **Synced lyrics** | ✅ | ✅ | ✅ | ✅ |
+| | Spotify | YouTube Music | Subsonic / Navidrome |
+| --- | :---: | :---: | :---: |
+| **Account or server** | Spotify account + your own Developer app | none | your own server |
+| **Search and browse** | ✅ | ✅ | ✅ |
+| **Playback** | ✅ Premium (local player or Connect) | ✅ `mpv` + `yt-dlp` | ✅ `mpv` |
+| **Likes, saved albums and artists** | ✅ your account | ✅ local library | ✅ server stars |
+| **Playlists** | ✅ | ✅ local + imported public ones | ✅ |
+| **Offline downloads** (`o` / `O`) | ❌ no legitimate route | ✅ | ✅ |
+| **Radio** (`R`) | ❌ endpoint closed to new apps | ✅ | ✅ |
+| **Artist page** | ✅ albums and singles | ✅ top tracks, albums, related | ✅ albums (top tracks and similar with Last.fm on the server) |
+| **Synced lyrics** | ✅ | ✅ | ✅ |
 
 > [!NOTE]
 > Offline downloads are not offered for Spotify: it has no download endpoint and its audio is DRM-protected. The `↓` column is shown dimmed there.
@@ -118,10 +118,9 @@ pipx inject spotify-tui ytmusicapi keyring
 | Spotify | included | `librespot` for the local player (optional, Premium) |
 | YouTube Music | `ytmusic` (`ytmusicapi`, `yt-dlp`) | `mpv`, and `yt-dlp` on your `PATH` (`pipx install yt-dlp`) |
 | Subsonic / Navidrome | `subsonic` (`keyring`) | `mpv` |
-| Spotify through MPRIS | included | `playerctl` |
 | Visualizer | included | `cava` |
 
-On Arch: `sudo pacman -S mpv yt-dlp cava playerctl`. Upgrade later with `pipx upgrade spotify-tui`.
+On Arch: `sudo pacman -S mpv yt-dlp cava`. Upgrade later with `pipx upgrade spotify-tui`.
 Full steps, including running from source: [Installation](https://github.com/naarvent/Spotify-TUI/wiki/Installation).
 
 ## First steps
@@ -151,7 +150,7 @@ Every key is in the wiki: [Keyboard Shortcuts](https://github.com/naarvent/Spoti
 
 ## What's new in 1.0
 
-- 🎛️ **Providers**: Spotify, YouTube Music, Subsonic / Navidrome and Spotify Free through MPRIS, switchable live.
+- 🎛️ **Providers**: Spotify, YouTube Music and Subsonic / Navidrome, switchable live.
 - ⬇️ **Offline downloads** and a **local library** that needs no account, with **Import from Spotify**.
 - 🔎 **Radio**, **artist pages**, a `/` **filter** and Up / Down that wrap around.
 - 🎤 **Karaoke lyrics**, with word-by-word timing from the Spicy Lyrics API (your own free key).
