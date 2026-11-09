@@ -12,6 +12,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Windows: the mpv player backend (YouTube Music and Subsonic playback) now talks to mpv through a named pipe, so those providers can play audio on Windows instead of showing "Playback is disabled".
 - Windows installer bundles `mpv.exe` and `yt-dlp.exe` (pinned versions) and the Python parts of the YouTube Music / Subsonic providers (`ytmusicapi`, `yt-dlp`, `keyring`); nothing else needs installing.
 
+### Removed
+
+- The "Spotify Free via MPRIS" provider. It could only open a link and control a player you had started yourself: Spotify's web player blocks audio until you click in the page and the desktop app ignores "play" links, so it could never start the track you picked, and it only worked on Linux. If you had it selected, the app falls back to the default provider. Free accounts keep search, library, likes and playlists; use YouTube Music, Subsonic or Spotify Premium for playback.
+
 ### Fixed
 
 - A track no longer starts, stops and restarts from the beginning when you press Enter: one Enter reached the play action twice and the second call reloaded the queue.
