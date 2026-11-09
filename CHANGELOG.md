@@ -5,12 +5,17 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [v1.0.2] - 2026-11-09
 
 ### Added
 
 - Windows: the mpv player backend (YouTube Music and Subsonic playback) now talks to mpv through a named pipe, so those providers can play audio on Windows instead of showing "Playback is disabled".
 - Windows installer bundles `mpv.exe` and `yt-dlp.exe` (pinned versions) and the Python parts of the YouTube Music / Subsonic providers (`ytmusicapi`, `yt-dlp`, `keyring`); nothing else needs installing.
+
+### Fixed
+
+- A track no longer starts, stops and restarts from the beginning when you press Enter: one Enter reached the play action twice and the second call reloaded the queue.
+- `mpv.exe` is used on Windows instead of the `mpv.com` console wrapper, so closing the app no longer leaves mpv playing.
 
 ### Changed
 
