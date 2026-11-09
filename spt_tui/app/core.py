@@ -283,6 +283,11 @@ class CoreMixin:
             self.call_after_refresh(lambda: self._paint_welcome(only_if_changed=False))
         except Exception:
             logger.exception("initial welcome paint failed")
+        try:
+            if self._current_provider_name() in ("ytmusic", "subsonic"):
+                threading.Thread(target=self._ytdlp_startup_check, daemon=True).start()
+        except Exception:
+            logger.exception("yt-dlp startup check failed to start")
         self.section_search = self.query_one("#search_wrap")
         self.section_lib = self.query_one("#section_lib")
         self.section_pl = self.query_one("#section_pl")
@@ -1471,7 +1476,7 @@ class CoreMixin:
                   'seek_episode_input', 'lyrics_cache_input', 'provider_select',
                   'subsonic_url_input', 'subsonic_user_input', 'subsonic_password_input',
                   'appearance_select', 'accent_select', 'accent_input', 'hints_select', 'header_select',
-                  'offline_cap_input', 'visualizer_fps_input', 'visualizer_mode_select', 'spicy_select', 'spicy_key_status', 'spicy_key_input'):
+                  'offline_cap_input', 'visualizer_fps_input', 'visualizer_mode_select', 'spicy_select', 'spicy_key_status', 'spicy_key_input', 'ytdlp_select', 'ytdlp_status'):
             try: delattr(self, a)
             except Exception: pass
         msg = '[b]Settings saved![/b]'

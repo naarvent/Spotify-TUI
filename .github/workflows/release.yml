@@ -104,26 +104,54 @@ jobs:
         shell: pwsh
         run: Copy-Item librespot-bin\librespot.exe dist\spt\librespot.exe
 
-      - name: Fetch mpv and yt-dlp (pinned) and bundle them beside the app
+      - name: Cache mpv and yt-dlp downloads
+        id: cache-helpers
+        uses: actions/cache@v4
+        with:
+          path: helpers
+          key: helpers-mpv-${{ env.MPV_TAG }}-ytdlp-${{ env.YTDLP_VERSION }}
+
+      - name: Download mpv and yt-dlp (pinned)
+        if: steps.cache-helpers.outputs.cache-hit != 'true'
+        shell: pwsh
+        env:
+          # Authenticated downloads through the GitHub API: anonymous requests to
+          # github.com release assets intermittently return "504 Gateway Time-out".
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          New-Item -ItemType Directory -Force -Path helpers | Out-Null
+          function Get-Release($repo, $tag, $patterns) {
+            for ($i = 1; $i -le 6; $i++) {
+              $ghArgs = @("release", "download", $tag, "-R", $repo, "--dir", "helpers", "--clobber")
+              foreach ($p in $patterns) { $ghArgs += @("-p", $p) }
+              & gh @ghArgs
+              if ($LASTEXITCODE -eq 0) { return }
+              Write-Host "Download attempt $i of $repo $tag failed; retrying..."
+              Start-Sleep -Seconds (10 * $i)
+            }
+            Write-Error "Could not download $repo $tag"; exit 1
+          }
+          Get-Release "yt-dlp/yt-dlp" $env:YTDLP_VERSION @("yt-dlp.exe", "SHA2-256SUMS")
+          # yt-dlp is verified against the release's published checksums.
+          $want = ((Select-String -Path helpers\SHA2-256SUMS -Pattern "\s\*?yt-dlp\.exe$").Line -split "\s+")[0].ToLower()
+          $got = (Get-FileHash helpers\yt-dlp.exe -Algorithm SHA256).Hash.ToLower()
+          if ($want -ne $got) { Write-Error "yt-dlp.exe checksum mismatch ($got != $want)"; exit 1 }
+          # mpv: pinned shinchiro build (plain x86_64, no -v3, so it runs on any x64 CPU).
+          Get-Release "shinchiro/mpv-winbuild-cmake" $env:MPV_TAG @("mpv-x86_64-2*.7z")
+          Remove-Item helpers\SHA2-256SUMS
+
+      - name: Bundle mpv and yt-dlp beside the app
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
-          # yt-dlp: standalone exe, verified against the release's published checksums.
-          $base = "https://github.com/yt-dlp/yt-dlp/releases/download/$env:YTDLP_VERSION"
-          Invoke-WebRequest "$base/yt-dlp.exe" -OutFile dist\spt\yt-dlp.exe
-          Invoke-WebRequest "$base/SHA2-256SUMS" -OutFile ytdlp-sums.txt
-          $want = ((Select-String -Path ytdlp-sums.txt -Pattern "\s\*?yt-dlp\.exe$").Line -split "\s+")[0].ToLower()
-          $got = (Get-FileHash dist\spt\yt-dlp.exe -Algorithm SHA256).Hash.ToLower()
-          if ($want -ne $got) { Write-Error "yt-dlp.exe checksum mismatch ($got != $want)"; exit 1 }
-          # mpv: pinned shinchiro build (plain x86_64, no -v3, so it runs on any x64 CPU).
-          $rel = Invoke-RestMethod "https://api.github.com/repos/shinchiro/mpv-winbuild-cmake/releases/tags/$env:MPV_TAG"
-          $asset = $rel.assets | Where-Object { $_.name -match '^mpv-x86_64-\d{8}-git-[0-9a-f]+\.7z$' } | Select-Object -First 1
-          if (-not $asset) { Write-Error "No mpv x86_64 asset in release $env:MPV_TAG"; exit 1 }
-          Invoke-WebRequest $asset.browser_download_url -OutFile mpv.7z
-          7z x mpv.7z -ompv-extract -y | Out-Null
+          Copy-Item helpers\yt-dlp.exe dist\spt\yt-dlp.exe
+          $archive = Get-ChildItem helpers -Filter "mpv-x86_64-2*.7z" | Select-Object -First 1
+          if (-not $archive) { Write-Error "mpv archive missing from helpers"; exit 1 }
+          7z x $archive.FullName -ompv-extract -y | Out-Null
           Copy-Item mpv-extract\mpv.exe dist\spt\mpv.exe
           Get-ChildItem mpv-extract -Filter *.dll | Copy-Item -Destination dist\spt\
-          Write-Host "Bundled $($asset.name)"
+          Write-Host "Bundled $($archive.Name)"
 
       - name: Smoke test the frozen app
         shell: pwsh

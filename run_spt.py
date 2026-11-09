@@ -31,6 +31,10 @@ def _expose_bundled_tools() -> None:
 _expose_bundled_tools()
 
 from spt_tui.__main__ import main  # noqa: E402  (after PATH setup on purpose)
+from spt_tui import ytdlp_update  # noqa: E402
+
+# A yt-dlp updated from Settings lives in the data folder and must win over the bundled one.
+ytdlp_update.apply_user_tools()
 
 if __name__ == "__main__":
     main()
