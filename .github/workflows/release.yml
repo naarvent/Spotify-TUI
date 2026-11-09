@@ -110,16 +110,16 @@ jobs:
           $ErrorActionPreference = "Stop"
           # yt-dlp: standalone exe, verified against the release's published checksums.
           $base = "https://github.com/yt-dlp/yt-dlp/releases/download/$env:YTDLP_VERSION"
-          Invoke-WebRequest "$base/yt-dlp.exe" -OutFile dist\spt\yt-dlp.exe
-          Invoke-WebRequest "$base/SHA2-256SUMS" -OutFile ytdlp-sums.txt
+          Invoke-WebRequest "$base/yt-dlp.exe" -OutFile dist\spt\yt-dlp.exe -MaximumRetryCount 5 -RetryIntervalSec 10
+          Invoke-WebRequest "$base/SHA2-256SUMS" -OutFile ytdlp-sums.txt -MaximumRetryCount 5 -RetryIntervalSec 10
           $want = ((Select-String -Path ytdlp-sums.txt -Pattern "\s\*?yt-dlp\.exe$").Line -split "\s+")[0].ToLower()
           $got = (Get-FileHash dist\spt\yt-dlp.exe -Algorithm SHA256).Hash.ToLower()
           if ($want -ne $got) { Write-Error "yt-dlp.exe checksum mismatch ($got != $want)"; exit 1 }
           # mpv: pinned shinchiro build (plain x86_64, no -v3, so it runs on any x64 CPU).
-          $rel = Invoke-RestMethod "https://api.github.com/repos/shinchiro/mpv-winbuild-cmake/releases/tags/$env:MPV_TAG"
+          $rel = Invoke-RestMethod "https://api.github.com/repos/shinchiro/mpv-winbuild-cmake/releases/tags/$env:MPV_TAG" -MaximumRetryCount 5 -RetryIntervalSec 10
           $asset = $rel.assets | Where-Object { $_.name -match '^mpv-x86_64-\d{8}-git-[0-9a-f]+\.7z$' } | Select-Object -First 1
           if (-not $asset) { Write-Error "No mpv x86_64 asset in release $env:MPV_TAG"; exit 1 }
-          Invoke-WebRequest $asset.browser_download_url -OutFile mpv.7z
+          Invoke-WebRequest $asset.browser_download_url -OutFile mpv.7z -MaximumRetryCount 5 -RetryIntervalSec 10
           7z x mpv.7z -ompv-extract -y | Out-Null
           Copy-Item mpv-extract\mpv.exe dist\spt\mpv.exe
           Get-ChildItem mpv-extract -Filter *.dll | Copy-Item -Destination dist\spt\
