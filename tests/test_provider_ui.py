@@ -143,7 +143,7 @@ async def test_settings_provider_fields():
             sel = app.provider_select
             check("provider is a selectable list (OptionList), not a text field", isinstance(sel, OptionList))
             ids = [sel.get_option_at_index(i).id for i in range(sel.option_count)]
-            check("list offers the four providers", ids == ["spotify", "spotify_mpris", "subsonic", "ytmusic"], repr(ids))
+            check("list offers the three providers", ids == ["spotify", "subsonic", "ytmusic"], repr(ids))
             app.on_input_submitted(FakeEvent(app.subsonic_url_input, "https://nd.local/"))
             app.on_input_submitted(FakeEvent(app.subsonic_user_input, "alice"))
             check("URL and user saved", config.LOCAL_CFG.get("subsonic_url") == "https://nd.local"

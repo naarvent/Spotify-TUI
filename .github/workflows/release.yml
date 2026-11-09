@@ -21,6 +21,13 @@ env:
   # edit; the cache key below is derived from it, so it only recompiles then.
   LIBRESPOT_VERSION: "0.8.0"
   PYTHON_VERSION: "3.12"
+  # Pinned helper programs shipped inside the installer (nothing is downloaded on
+  # the user's machine at install time). Bump deliberately, like LIBRESPOT_VERSION.
+  # MPV_TAG is a shinchiro/mpv-winbuild-cmake release (date tag); YTDLP_VERSION a
+  # yt-dlp release. yt-dlp is the one most likely to need frequent bumps (YouTube
+  # changes break it); the standalone yt-dlp.exe can also update itself: `yt-dlp -U`.
+  MPV_TAG: "20261108"
+  YTDLP_VERSION: "2026.10.26"
 
 jobs:
   build:
@@ -84,8 +91,11 @@ jobs:
         with:
           python-version: ${{ env.PYTHON_VERSION }}
 
-      - name: Install app and PyInstaller
-        run: pip install . pyinstaller
+      - name: Install app (with provider extras) and PyInstaller
+        # The extras are what put ytmusicapi, yt-dlp and keyring into the frozen
+        # app. Without them the YouTube Music / Subsonic providers show up as
+        # "unavailable" in the installed build.
+        run: pip install ".[ytmusic,subsonic]" pyinstaller
 
       - name: Freeze the app
         run: pyinstaller spt.spec --noconfirm
@@ -93,6 +103,27 @@ jobs:
       - name: Bundle librespot beside the app
         shell: pwsh
         run: Copy-Item librespot-bin\librespot.exe dist\spt\librespot.exe
+
+      - name: Fetch mpv and yt-dlp (pinned) and bundle them beside the app
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          # yt-dlp: standalone exe, verified against the release's published checksums.
+          $base = "https://github.com/yt-dlp/yt-dlp/releases/download/$env:YTDLP_VERSION"
+          Invoke-WebRequest "$base/yt-dlp.exe" -OutFile dist\spt\yt-dlp.exe
+          Invoke-WebRequest "$base/SHA2-256SUMS" -OutFile ytdlp-sums.txt
+          $want = ((Select-String -Path ytdlp-sums.txt -Pattern "\s\*?yt-dlp\.exe$").Line -split "\s+")[0].ToLower()
+          $got = (Get-FileHash dist\spt\yt-dlp.exe -Algorithm SHA256).Hash.ToLower()
+          if ($want -ne $got) { Write-Error "yt-dlp.exe checksum mismatch ($got != $want)"; exit 1 }
+          # mpv: pinned shinchiro build (plain x86_64, no -v3, so it runs on any x64 CPU).
+          $rel = Invoke-RestMethod "https://api.github.com/repos/shinchiro/mpv-winbuild-cmake/releases/tags/$env:MPV_TAG"
+          $asset = $rel.assets | Where-Object { $_.name -match '^mpv-x86_64-\d{8}-git-[0-9a-f]+\.7z$' } | Select-Object -First 1
+          if (-not $asset) { Write-Error "No mpv x86_64 asset in release $env:MPV_TAG"; exit 1 }
+          Invoke-WebRequest $asset.browser_download_url -OutFile mpv.7z
+          7z x mpv.7z -ompv-extract -y | Out-Null
+          Copy-Item mpv-extract\mpv.exe dist\spt\mpv.exe
+          Get-ChildItem mpv-extract -Filter *.dll | Copy-Item -Destination dist\spt\
+          Write-Host "Bundled $($asset.name)"
 
       - name: Smoke test the frozen app
         shell: pwsh
@@ -103,6 +134,18 @@ jobs:
             Write-Error "Frozen app did not report version ${{ steps.ver.outputs.version }}: $out"
             exit 1
           }
+          # The provider extras must really be inside the freeze (these ship as folders via
+          # collect_all; pure-Python deps like spotipy live inside the PYZ archive instead).
+          foreach ($pkg in "ytmusicapi", "yt_dlp", "keyring") {
+            if (-not (Test-Path "dist\spt\_internal\$pkg")) {
+              Write-Error "Frozen app is missing the '$pkg' package"; exit 1
+            }
+          }
+          # And the bundled programs must start.
+          dist\spt\mpv.exe --version | Select-Object -First 1
+          if ($LASTEXITCODE -ne 0) { Write-Error "bundled mpv.exe does not start"; exit 1 }
+          dist\spt\yt-dlp.exe --version
+          if ($LASTEXITCODE -ne 0) { Write-Error "bundled yt-dlp.exe does not start"; exit 1 }
 
       - name: Install Inno Setup
         shell: pwsh
@@ -121,6 +164,9 @@ jobs:
           $out = "dist\installer\checksums.txt"
           "$((Get-FileHash $inst -Algorithm SHA256).Hash)  SPT-TUI-Setup-$ver.exe" | Out-File -Encoding ascii $out
           "$((Get-FileHash dist\spt\librespot.exe -Algorithm SHA256).Hash)  librespot.exe" | Add-Content -Encoding ascii $out
+          foreach ($f in "mpv.exe", "yt-dlp.exe") {
+            "$((Get-FileHash dist\spt\$f -Algorithm SHA256).Hash)  $f" | Add-Content -Encoding ascii $out
+          }
           Get-Content $out
 
       - name: Upload build artifact

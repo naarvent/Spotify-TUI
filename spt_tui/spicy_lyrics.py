@@ -627,7 +627,7 @@ class Outcome:
 
 
 class SpicyService:
-    DIRECT_ID_PROVIDERS = ("spotify", "spotify_mpris")
+    DIRECT_ID_PROVIDERS = ("spotify",)
 
     def __init__(self, cache: SpicyCache, *, key_fn: Optional[Callable[[], Optional[str]]] = None,
                  client: Optional[SpicyClient] = None, sleep=time.sleep, debounce: float = DEBOUNCE_S):

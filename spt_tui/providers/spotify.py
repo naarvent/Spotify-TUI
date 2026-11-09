@@ -40,8 +40,7 @@ _FREE_CAPS = _PREMIUM_CAPS.replace(
 
 FREE_NOTICE = ("Spotify Free account: playback control needs Premium, so play/pause/"
                "seek/volume are disabled. Search, library, likes and playlists still "
-               "work. Tip: set the provider to 'spotify_mpris' to control the Spotify "
-               "web player in your browser.")
+               "work.")
 
 
 def is_premium_required_error(exc: BaseException) -> bool:

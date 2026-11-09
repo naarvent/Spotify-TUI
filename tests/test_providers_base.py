@@ -57,10 +57,10 @@ def test_resolution_order():
 
 def test_save_choice():
     with isolated_config():
-        ok = P.save_provider_choice("MPRIS")
-        check("save_provider_choice normalises and persists", ok and config.LOCAL_CFG.get("provider") == "spotify_mpris",
+        ok = P.save_provider_choice("Navidrome")
+        check("save_provider_choice normalises and persists", ok and config.LOCAL_CFG.get("provider") == "subsonic",
               repr(config.LOCAL_CFG))
-        check("saved file holds the choice", '"spotify_mpris"' in open(config.CONFIG_PATH).read())
+        check("saved file holds the choice", '"subsonic"' in open(config.CONFIG_PATH).read())
         check("unknown choice rejected", P.save_provider_choice("nope") is False)
 
 

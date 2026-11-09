@@ -6,9 +6,8 @@ The active provider is chosen, in priority order, by:
 2. ``"provider"`` in ``spt_config.json`` (also written by the Settings screen);
 3. the default, ``"spotify"``.
 
-Known names: ``spotify``, ``spotify_mpris`` (Spotify Free: control the web
-player already open in your browser through MPRIS), ``subsonic`` (Subsonic /
-OpenSubsonic servers such as Navidrome) and ``ytmusic`` (YouTube Music).
+Known names: ``spotify``, ``subsonic`` (Subsonic / OpenSubsonic servers such as
+Navidrome) and ``ytmusic`` (YouTube Music).
 
 A provider whose optional dependency, binary or configuration is missing is
 never fatal: :func:`create_provider` falls back to Spotify and returns a notice
@@ -39,7 +38,6 @@ DEFAULT_PROVIDER = "spotify"
 # dependencies are only touched when that provider is chosen.
 _REGISTRY = {
     "spotify": ("spotify", "SpotifyProvider"),
-    "spotify_mpris": ("mpris", "SpotifyMprisProvider"),
     "subsonic": ("subsonic", "SubsonicProvider"),
     "ytmusic": ("ytmusic", "YTMusicProvider"),
 }
@@ -47,8 +45,6 @@ _REGISTRY = {
 # Accepted spellings for the user-facing setting.
 _ALIASES = {
     "spotify": "spotify",
-    "spotify_mpris": "spotify_mpris", "mpris": "spotify_mpris",
-    "spotify-mpris": "spotify_mpris", "spotify_free": "spotify_mpris",
     "subsonic": "subsonic", "navidrome": "subsonic", "opensubsonic": "subsonic",
     "ytmusic": "ytmusic", "youtube": "ytmusic", "youtube_music": "ytmusic",
     "yt": "ytmusic",
@@ -150,7 +146,6 @@ def env_override() -> Optional[str]:
 
 PROVIDER_DESCRIPTIONS = {
     "spotify": "Spotify (Web API, Premium for playback)",
-    "spotify_mpris": "Spotify Free: control your browser player (MPRIS)",
     "subsonic": "Subsonic / Navidrome server",
     "ytmusic": "YouTube Music (no account, local library)",
 }
@@ -162,7 +157,7 @@ def provider_status(name: str, *, which=None, find_spec=None, secret_store=None)
     Returns ``{"name", "usable", "issues"}``: ``usable`` is False when the
     provider cannot start at all (missing package / configuration); ``issues``
     lists what is missing, including things that only disable playback (mpv,
-    playerctl...). No network, no subprocess other than a keyring lookup."""
+    yt-dlp). No network, no subprocess other than a keyring lookup."""
     import shutil
     import importlib.util
     which = which or shutil.which
@@ -178,15 +173,9 @@ def provider_status(name: str, *, which=None, find_spec=None, secret_store=None)
 
     spotify_ok = bool(config.CLIENT_ID and config.CLIENT_SECRET) or (
         os.path.exists(config.CACHE_PATH) and os.path.getsize(config.CACHE_PATH) > 0)
-    if name in ("spotify", "spotify_mpris") and not spotify_ok:
+    if name == "spotify" and not spotify_ok:
         issues.append("Spotify credentials not set (sign-in needed)")
-    if name == "spotify_mpris":
-        if not which("playerctl"):
-            issues.append("missing playerctl")
-        opener = (os.getenv("SPT_OPEN_COMMAND") or cfg.get("open_command") or "abrir").split()
-        if not opener or not which(opener[0]):
-            issues.append(f"missing opener '{opener[0] if opener else ''}'")
-    elif name == "subsonic":
+    if name == "subsonic":
         url = os.getenv("SPT_SUBSONIC_URL") or cfg.get("subsonic_url")
         user = os.getenv("SPT_SUBSONIC_USER") or cfg.get("subsonic_user")
         if not url or not user:

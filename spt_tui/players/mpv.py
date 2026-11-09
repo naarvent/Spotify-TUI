@@ -13,8 +13,10 @@ registered with ``atexit`` so a crash does not leave an orphan mpv playing).
 Every outside touch point — process factory, socket connector, ``which``,
 clock and sleep — is injectable, so the tests need neither mpv nor audio.
 
-Limitation: IPC uses a Unix domain socket, so this player is not available on
-Windows (mpv uses named pipes there).
+Transport: a Unix domain socket on Linux/macOS, a Windows named pipe
+(the ``pipe`` namespace, see ``PIPE_PREFIX``) on Windows. Both expose the same tiny interface
+(``sendall`` / ``recv`` with timeout / ``close``), so everything above the
+connector is platform-independent.
 """
 
 from __future__ import annotations
@@ -37,11 +39,130 @@ class MpvError(RuntimeError):
     pass
 
 
+PIPE_PREFIX = r"\\.\pipe" + "\\"
+
+
+def _is_pipe_path(path: str) -> bool:
+    return str(path).startswith(PIPE_PREFIX)
+
+
 def _unix_connect(path: str, timeout: float = 2.0):
     s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     s.settimeout(timeout)
     s.connect(path)
     return s
+
+
+class _WinPipe:
+    """Client end of a Windows named pipe with the socket-like surface MpvPlayer uses.
+
+    ``recv`` honours a timeout by polling ``PeekNamedPipe`` (a plain ``ReadFile``
+    on a pipe blocks forever if mpv stops answering), and raises ``socket.timeout``
+    exactly like a socket would, so ``_read_line`` needs no Windows special case.
+    A broken pipe (mpv exited) reads as EOF (``b""``), which becomes "mpv closed
+    the IPC socket" and triggers the usual reconnect/restart.
+    """
+
+    POLL = 0.01
+    ERROR_BROKEN_PIPE = 109
+    ERROR_NO_DATA = 232
+    ERROR_PIPE_NOT_CONNECTED = 233
+
+    def __init__(self, path: str, timeout: float = 2.0):
+        import ctypes
+        from ctypes import wintypes
+        self._ct = ctypes
+        self._wt = wintypes
+        k = ctypes.WinDLL("kernel32", use_last_error=True)
+        k.CreateFileW.argtypes = [wintypes.LPCWSTR, wintypes.DWORD, wintypes.DWORD,
+                                  wintypes.LPVOID, wintypes.DWORD, wintypes.DWORD,
+                                  wintypes.HANDLE]
+        k.CreateFileW.restype = wintypes.HANDLE
+        k.ReadFile.argtypes = [wintypes.HANDLE, wintypes.LPVOID, wintypes.DWORD,
+                               ctypes.POINTER(wintypes.DWORD), wintypes.LPVOID]
+        k.ReadFile.restype = wintypes.BOOL
+        k.WriteFile.argtypes = [wintypes.HANDLE, wintypes.LPCVOID, wintypes.DWORD,
+                                ctypes.POINTER(wintypes.DWORD), wintypes.LPVOID]
+        k.WriteFile.restype = wintypes.BOOL
+        k.PeekNamedPipe.argtypes = [wintypes.HANDLE, wintypes.LPVOID, wintypes.DWORD,
+                                    ctypes.POINTER(wintypes.DWORD),
+                                    ctypes.POINTER(wintypes.DWORD),
+                                    ctypes.POINTER(wintypes.DWORD)]
+        k.PeekNamedPipe.restype = wintypes.BOOL
+        k.CloseHandle.argtypes = [wintypes.HANDLE]
+        k.CloseHandle.restype = wintypes.BOOL
+        self._k = k
+        GENERIC_READ, GENERIC_WRITE, OPEN_EXISTING = 0x80000000, 0x40000000, 3
+        h = k.CreateFileW(path, GENERIC_READ | GENERIC_WRITE, 0, None, OPEN_EXISTING, 0, None)
+        if h is None or h == wintypes.HANDLE(-1).value:
+            raise ctypes.WinError(ctypes.get_last_error())  # an OSError: caller retries
+        self._h = h
+        self._timeout = timeout
+
+    def settimeout(self, timeout):
+        self._timeout = timeout
+
+    def sendall(self, data: bytes) -> None:
+        ct, wt = self._ct, self._wt
+        view = memoryview(data)
+        while len(view):
+            n = wt.DWORD(0)
+            buf = (ct.c_char * len(view)).from_buffer_copy(view)
+            if not self._k.WriteFile(self._h, buf, len(view), ct.byref(n), None):
+                raise ct.WinError(ct.get_last_error())
+            view = view[n.value:]
+
+    def recv(self, size: int) -> bytes:
+        ct, wt = self._ct, self._wt
+        deadline = time.monotonic() + (self._timeout if self._timeout is not None else 1e9)
+        spins = 0
+        while True:
+            avail = wt.DWORD(0)
+            if not self._k.PeekNamedPipe(self._h, None, 0, None, ct.byref(avail), None):
+                err = ct.get_last_error()
+                if err in (self.ERROR_BROKEN_PIPE, self.ERROR_NO_DATA,
+                           self.ERROR_PIPE_NOT_CONNECTED):
+                    return b""
+                raise ct.WinError(err)
+            if avail.value:
+                n = min(int(size), avail.value)
+                buf = ct.create_string_buffer(n)
+                got = wt.DWORD(0)
+                if not self._k.ReadFile(self._h, buf, n, ct.byref(got), None):
+                    err = ct.get_last_error()
+                    if err in (self.ERROR_BROKEN_PIPE, self.ERROR_NO_DATA,
+                               self.ERROR_PIPE_NOT_CONNECTED):
+                        return b""
+                    raise ct.WinError(err)
+                return buf.raw[:got.value]
+            if time.monotonic() >= deadline:
+                raise socket.timeout("timed out")
+            # mpv normally answers in well under a millisecond, so spin (yielding the
+            # CPU) for the first moments instead of sleeping: a fixed 10 ms sleep
+            # cost ~10 ms per command, and loading a queue is hundreds of commands.
+            # Back off when the wait is long (idle event stream) to stay cheap.
+            spins += 1
+            time.sleep(0 if spins < 50 else 0.0005 if spins < 400 else self.POLL)
+
+    def close(self) -> None:
+        h, self._h = getattr(self, "_h", None), None
+        if h:
+            self._k.CloseHandle(h)
+
+
+def _pipe_connect(path: str, timeout: float = 2.0):
+    return _WinPipe(path, timeout)
+
+
+def _default_connect(path: str):
+    return _pipe_connect(path) if _is_pipe_path(path) else _unix_connect(path)
+
+
+def _default_ipc_path(unique: str) -> str:
+    name = f"spt-tui-mpv-{os.getpid()}-{unique}"
+    if os.name == "nt":
+        return PIPE_PREFIX + name
+    return os.path.join(tempfile.gettempdir(), name + ".sock")
 
 
 class MpvPlayer:
@@ -61,10 +182,10 @@ class MpvPlayer:
                  register_atexit: bool = True):
         self._binary = binary
         self._extra_args = list(extra_args or ())
-        self._socket_path = socket_path or os.path.join(
-            tempfile.gettempdir(), f"spt-tui-mpv-{os.getpid()}-{id(self):x}.sock")
+        # Per-instance name (id) so two players in one process never collide.
+        self._socket_path = socket_path or _default_ipc_path(f"{id(self):x}")
         self._popen = popen
-        self._connect = connect or _unix_connect
+        self._connect = connect or _default_connect
         self._which = which
         self._now = now
         self._sleep = sleep
@@ -87,11 +208,17 @@ class MpvPlayer:
     def binary_path(self) -> Optional[str]:
         if self._binary and os.path.isfile(self._binary):
             return self._binary
+        if os.name == "nt":
+            # Ask for mpv.exe explicitly: a bare "mpv" resolves to mpv.com (the console
+            # wrapper) first because .COM precedes .EXE in PATHEXT. The wrapper is a
+            # separate process, so terminate() on it can leave the real mpv.exe
+            # playing after the app exits.
+            exe = self._which("mpv.exe")
+            if exe:
+                return exe
         return self._which("mpv")
 
     def unavailable_reason(self) -> Optional[str]:
-        if os.name == "nt":
-            return "the mpv player backend needs a Unix IPC socket (not supported on Windows)."
         if self.binary_path() is None:
             return "mpv was not found on PATH (install mpv)."
         return None
@@ -107,11 +234,17 @@ class MpvPlayer:
         # --ytdl-raw-options=no-playlist=: a watch URL is one track; mpv must
         # never expand it into a list and play on by itself. --keep-open=no:
         # at the end of our queue mpv goes idle (the TUI decides what is next).
-        return [binary, "--idle=yes", "--no-video", "--no-terminal",
+        argv = [binary, "--idle=yes", "--no-video", "--no-terminal",
                 "--force-window=no", "--audio-display=no", "--keep-open=no",
                 "--ytdl-raw-options=no-playlist=",
                 f"--volume={self._volume}",
                 f"--input-ipc-server={self._socket_path}", *self._extra_args]
+        # Diagnostics: SPT_MPV_LOG=<file> makes mpv write a verbose log (stutters,
+        # restarts, yt-dlp failures) without touching the normal quiet behaviour.
+        log = os.environ.get("SPT_MPV_LOG")
+        if log:
+            argv += [f"--log-file={log}", "--msg-level=all=v"]
+        return argv
 
     def start(self) -> None:
         """Spawn mpv (if not already running) and connect to its socket."""
@@ -125,11 +258,7 @@ class MpvPlayer:
                 raise MpvError(reason)
             if not self.is_running():
                 self._disconnect()
-                try:
-                    if os.path.exists(self._socket_path):
-                        os.unlink(self._socket_path)
-                except OSError:
-                    pass
+                self._remove_socket_file()
                 argv = self._argv(self.binary_path())
                 logger.info("mpv: starting %s", " ".join(argv[:1] + argv[1:6]))
                 self._proc = self._popen(argv, stdin=subprocess.DEVNULL,
@@ -182,6 +311,11 @@ class MpvPlayer:
                             logger.exception("mpv did not exit after kill")
             except Exception:
                 logger.exception("error stopping mpv")
+        self._remove_socket_file()
+
+    def _remove_socket_file(self) -> None:
+        if _is_pipe_path(self._socket_path):
+            return  # a named pipe vanishes with its last handle; nothing on disk
         try:
             if os.path.exists(self._socket_path):
                 os.unlink(self._socket_path)

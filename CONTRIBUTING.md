@@ -5,7 +5,7 @@ Thanks for your interest! Issues and pull requests are welcome. This guide keeps
 ## Ways to help
 
 - **Report a bug** or **suggest a feature** with the [issue templates](https://github.com/naarvent/Spotify-TUI/issues/new/choose).
-- **Try a provider** you use (Spotify, YouTube Music, Subsonic / Navidrome, Spotify via MPRIS) and tell us what breaks.
+- **Try a provider** you use (Spotify, YouTube Music, Subsonic / Navidrome) and tell us what breaks.
 - **Send a pull request** (see below). For anything bigger than a small fix, open an issue first so we can agree on the approach.
 
 > Security problems: please do **not** open a public issue. See [SECURITY.md](SECURITY.md).
@@ -23,7 +23,7 @@ python -m pip install -e ".[ytmusic,subsonic]"
 python -m spt_tui                  # or: spt
 ```
 
-Optional tools, depending on what you work on: `mpv` (playback for YouTube Music and Subsonic), `yt-dlp`, `cava` (visualizer), `playerctl` (MPRIS provider).
+Optional tools, depending on what you work on: `mpv` (playback for YouTube Music and Subsonic), `yt-dlp`, `cava` (visualizer).
 
 ## Running the tests
 
@@ -59,7 +59,7 @@ git diff --check
 
 | Path | What lives there |
 | --- | --- |
-| `spt_tui/providers/` | One class per provider (`spotify`, `ytmusic`, `subsonic`, `mpris`) behind the common interface in `base.py`, including its declared capabilities |
+| `spt_tui/providers/` | One class per provider (`spotify`, `ytmusic`, `subsonic`) behind the common interface in `base.py`, including its declared capabilities |
 | `spt_tui/app/` | The Textual UI: navigation, tables, search, playback, queue, lyrics, visualizer, settings |
 | `spt_tui/players/` | The shared `mpv` player |
 | `tests/` | Offline test suites and `run_all.py` |

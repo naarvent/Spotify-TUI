@@ -1,5 +1,5 @@
 """Open a URL in the user's browser — one helper for everything that needs it
-(spotify_mpris opening tracks, librespot's first-time authorisation, Spotify's
+(librespot's first-time authorisation, Spotify's
 OAuth link).
 
 Order: the configured ``open_command`` / ``SPT_OPEN_COMMAND`` (default

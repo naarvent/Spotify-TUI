@@ -1434,10 +1434,22 @@ class TablesMixin:
             self._last_open_error = str(exc)
             return False
 
+    _PLAY_ROW_DEBOUNCE_S = 0.8
+
     def _play_row(self, row_key, table: DataTable):
         req = getattr(self, "_require_cap", None)
         if callable(req) and not req("can_play"):
             return
+        # One Enter reaches here twice (the app's own "open" binding and the table's
+        # RowSelected message). The second call used to reload the whole queue ~0.2 s
+        # after the first: with mpv the track started, was aborted and restarted from
+        # the beginning. Same row on the same table within the window = same Enter.
+        now = time.monotonic()
+        rk = str(getattr(row_key, "value", row_key))
+        last = getattr(self, "_last_play_row", None)
+        if last and last[0] == (id(table), rk) and now - last[1] < self._PLAY_ROW_DEBOUNCE_S:
+            return
+        self._last_play_row = ((id(table), rk), now)
         try:
             ctx_uri = getattr(table, "_context_uri", None)
             ctx_list = getattr(table, "_context_uris", None)

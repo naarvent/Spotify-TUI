@@ -30,7 +30,6 @@ body:
       label: Provider
       options:
         - Spotify
-        - Spotify Free via MPRIS (spotify_mpris)
         - YouTube Music (ytmusic)
         - Subsonic / Navidrome (subsonic)
         - Not provider-specific
